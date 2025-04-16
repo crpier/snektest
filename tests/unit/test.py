@@ -1,4 +1,4 @@
-from snek.snektest.runner import fixture, load_fixture, test
+from snektest.runner import fixture, load_fixture, test
 
 root_fixture_started_up = False
 root_fixture_torn_down = False

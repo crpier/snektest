@@ -4,7 +4,7 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from snek.snektest.runner import test_session
+from snektest.runner import test_session
 
 
 async def cli(args):

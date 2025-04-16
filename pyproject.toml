@@ -1,0 +1,41 @@
+[project]
+name = "snektest"
+version = "0.1.0"
+bescription = "A testing library for the snake lang"
+authors = [
+    {name = "crpier42", email = "crpier42@gmail.com"},
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.13"
+dependencies = [
+    "colorama>=0.4.6",
+    "rich>=14.0.0",
+]
+keywords = ["testing", "cli", "library"]
+
+[tool.uv]
+dev-dependencies = [
+    "coverage>=7.8.0",
+    "pyright>=1.1.399",
+    "ruff>=0.11.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+snektest = "snektest.cli:main"
+
+[tool.ruff]
+extend-select = ["F", "E", "W", "C90", "I", "N", "UP", "YTT", "ANN", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "RUF"]
+ignore = [
+"ANN101", # No need for type annotation on `self`
+"A002", # Allow me to use the "id" field
+"A003", # Allow me to use the "id" field
+"COM812",
+"ISC001",
+"PGH003",
+"PTH110", # Allow me to use os.path.exists
+]

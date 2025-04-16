@@ -1,6 +1,6 @@
 import asyncio
 
-from snek.snektest.runner import (
+from snektest.runner import (
     fixture_async,
     load_fixture_async,
     test_async,

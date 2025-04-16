@@ -1,4 +1,4 @@
-from snek.snektest.runner import fixture, test
+from snektest.runner import fixture, test
 
 
 @fixture

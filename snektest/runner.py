@@ -20,8 +20,8 @@ from typing import (
     Unpack,
 )
 
-from snek.snektest.presentation import Output
-from snek.snektest.results import TestResult, TestStatus, show_results
+from snektest.presentation import Output
+from snektest.results import TestResult, TestStatus, show_results
 
 T = TypeVar("T")
 T2 = TypeVarTuple("T2")
