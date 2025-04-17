@@ -2,17 +2,17 @@ from snektest.runner import fixture, test
 
 
 @fixture
-def fixture_func():
-    print("I'm a fixture")
+def fixture_func() -> None:
+    pass
 
 
 @test()
-def test_basic_works():
+def test_basic_works() -> None:
     assert True
 
 
 @test()
-def test_basic_fails():
+def test_basic_fails() -> None:
     assert True
 
 

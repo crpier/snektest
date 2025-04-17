@@ -14,7 +14,7 @@ child_fixture_torn_down = False
 # TODO: also test that fixture setup and teardowns are called only once
 
 
-async def async_work():
+async def async_work() -> None:
     await asyncio.sleep(0)
 
 
@@ -31,12 +31,12 @@ async def load_root_fixture():
 
 
 @test_async()
-async def root_fixture_passes_correct_value():
+async def root_fixture_passes_correct_value() -> None:
     root_fixture = await load_fixture_async(load_root_fixture)
     assert root_fixture == 1
 
 
 @test_async()
-async def root_fixture_is_started_up():
+async def root_fixture_is_started_up() -> None:
     await load_fixture_async(load_root_fixture)
     assert root_fixture_started_up is True

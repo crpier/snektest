@@ -3,39 +3,163 @@ name = "snektest"
 version = "0.1.0"
 bescription = "A testing library for the snake lang"
 authors = [
-    {name = "crpier42", email = "crpier42@gmail.com"},
+  {name = "crpier42", email = "crpier42@gmail.com"},
 ]
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.13"
 dependencies = [
-    "colorama>=0.4.6",
-    "rich>=14.0.0",
+  "rich>=14.0.0",
 ]
 keywords = ["testing", "cli", "library"]
 
 [tool.uv]
 dev-dependencies = [
-    "coverage>=7.8.0",
-    "pyright>=1.1.399",
-    "ruff>=0.11.5",
+  "coverage>=7.8.0",
+  "pydeps>=3.0.1",
+  "pyright>=1.1.399",
+  "ruff>=0.11.5",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [project.scripts]
 snektest = "snektest.cli:main"
 
+### Formatting and static checking tools ###
 [tool.ruff]
-extend-select = ["F", "E", "W", "C90", "I", "N", "UP", "YTT", "ANN", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "RUF"]
-ignore = [
-"ANN101", # No need for type annotation on `self`
-"A002", # Allow me to use the "id" field
-"A003", # Allow me to use the "id" field
-"COM812",
-"ISC001",
-"PGH003",
-"PTH110", # Allow me to use os.path.exists
+line-length = 88
+
+[tool.ruff.lint]
+preview = true
+select = [ "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "DTZ", "E", "EM", "ERA", "EXE", "F", "FAST", "FBT", "FIX", "FURB", "G", "I", "INP", "ISC", "LOG", "N", "PERF", "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TD", "TID", "TRY", "UP", "W" ]
+extend-select = [
+  "FA",  # For future annotations. Unneeded if Python>=3.11.
+  "YTT", # For Python version checking. Unneeded if Python>=3.11.
+  "DOC", # For docstrings. Requires "preview" to be enabled.
 ]
+ignore = [
+  "ANN401",  # Allow the use of `typing.Any`.
+  "BLE001",  # Allow using blind except (e.g. `except Exception`).
+  "COM812",  # Don't require trailing commas. Ignored because it may interfere with formatting.
+  "E501",    # Allow long lines. Useful mostly for writing log and error messages: having them in a single line makes it easier to search for the message. Note that the formatter will still try to shorten line length whenever possible.
+  "PTH110",  # Allow using `os.path.exists`. Removed because Path.exists is 4 times slower.
+  "S311",    # Allow pseudo-random generators.
+  "T201",    # Allow `print` statements. Useful mostly for debugging.
+  "TC001",   # Don't suggest putting imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
+  "TC003",   # Don't suggest putting stdlib imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+  "N802",    # Don't force function names to be snake_case. Useful e.g. when writing tests for classes.
+  "N999",    # Don't force module names to be snake_case. Useful e.g. when writing tests for classes.
+  "PLR2004", # Allow magic numbers.
+  "S101",    # Allow use of assert.
+  "S105",    # Allow hardcoded password strings.
+  "S106",    # Allow hardcoded password strings.
+  "S107",    # Allow hardcoded password strings.
+  "S608",    # Allow string building with SQL.
+  "SLF001",  # Allow private member access.
+]
+
+[tool.pyright]
+# We manually manage all settings, because we want most of them enabled/"error", which
+# would usually be done by setting `typeCheckingMode = "strict"`, but if we do that,
+# then we can't disable some of the errors.
+# https://github.com/microsoft/pyright/blob/main/docs/configuration.md#diagnostic-settings-defaults
+
+## This paragraph contains settings that are enabled/set to "error".
+analyzeUnannotatedFunctions = true
+disableBytesTypePromotions = true
+strictParameterNoneValue = true
+enableTypeIgnoreComments = true
+enableReachabilityAnalysis = true
+strictListInference = true
+strictDictionaryInference = true
+strictSetInference = true
+deprecateTypingAliases = true
+enableExperimentalFeatures = true
+reportMissingTypeStubs = "error"
+reportMissingModuleSource = "error"
+reportInvalidTypeForm = "error"
+reportMissingImports = "error"
+reportUndefinedVariable = "error"
+reportAssertAlwaysTrue = "error"
+reportInvalidStringEscapeSequence = "error"
+reportInvalidTypeVarUse = "error"
+reportSelfClsParameterName = "error"
+reportUnsupportedDunderAll = "error"
+reportUnusedExpression = "error"
+reportWildcardImportFromLibrary = "error"
+reportAbstractUsage = "error"
+reportArgumentType = "error"
+reportAssertTypeFailure = "error"
+reportAssignmentType = "error"
+reportAttributeAccessIssue = "error"
+reportCallIssue = "error"
+reportGeneralTypeIssues = "error"
+reportInconsistentOverload = "error"
+reportIndexIssue = "error"
+reportInvalidTypeArguments = "error"
+reportNoOverloadImplementation = "error"
+reportOperatorIssue = "error"
+reportOptionalSubscript = "error"
+reportOptionalMemberAccess = "error"
+reportOptionalCall = "error"
+reportOptionalIterable = "error"
+reportOptionalContextManager = "error"
+reportOptionalOperand = "error"
+reportRedeclaration = "error"
+reportReturnType = "error"
+reportTypedDictNotRequiredAccess = "error"
+reportPrivateImportUsage = "error"
+reportUnboundVariable = "error"
+reportUnhashable = "error"
+reportUnusedCoroutine = "error"
+reportUnusedExcept = "error"
+reportFunctionMemberAccess = "error"
+reportIncompatibleMethodOverride = "error"
+reportOverlappingOverload = "error"
+reportPossiblyUnboundVariable = "error"
+reportConstantRedefinition = "error"
+reportDeprecated = "error"
+reportDuplicateImport = "error"
+reportIncompleteStub = "error"
+reportInconsistentConstructor = "error"
+reportInvalidStubStatement = "error"
+reportMatchNotExhaustive = "error"
+reportMissingParameterType = "error"
+reportMissingTypeArgument = "error"
+reportPrivateUsage = "error"
+reportTypeCommentUsage = "error"
+reportUnknownArgumentType = "error"
+reportUnknownLambdaType = "error"
+reportUnknownMemberType = "error"
+reportUnknownParameterType = "error"
+reportUnknownVariableType = "error"
+reportUnnecessaryCast = "error"
+reportUnnecessaryComparison = "error"
+reportUnnecessaryContains = "error"
+reportUnnecessaryIsInstance = "error"
+reportUnusedClass = "error"
+reportUnusedImport = "error"
+reportUnusedFunction = "error"
+reportUnusedVariable = "error"
+reportUntypedBaseClass = "error"
+reportUntypedClassDecorator = "error"
+reportUntypedFunctionDecorator = "error"
+reportUntypedNamedTuple = "error"
+reportCallInDefaultInitializer = "error"
+reportImplicitOverride = "error"
+reportImplicitStringConcatenation = "error"
+reportImportCycles = "error"
+reportMissingSuperCall = "error"
+reportPropertyTypeMismatch = "error"
+reportShadowedImports = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedCallResult = "error"
+
+## This paragraph contains settings that are disabled/set to "off".
+# We almost always want subclasses to override parents with "incompatible" methods.
+# E.g. when subclassing stlib classes like `Thread`.
+reportIncompatibleVariableOverride = "off"

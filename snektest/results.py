@@ -21,7 +21,7 @@ class TestResult:
     message: str
 
 
-def show_results(test_results: dict[str, TestResult]):
+def show_results(test_results: dict[str, TestResult]) -> None:
     no_passed = sum(
         1 for test in test_results.values() if test.status == TestStatus.passed
     )
@@ -44,7 +44,6 @@ def show_results(test_results: dict[str, TestResult]):
             )
         if test_result.status == TestStatus.xfailed:
             message += f"{Colors.YELLOW}{test_name}: {test_result.message}\n"
-    print(message)
 
     colored_message = {
         f"{no_passed} passed, ": Colors.GREEN,
@@ -56,4 +55,3 @@ def show_results(test_results: dict[str, TestResult]):
     summary = Colors.apply_multiple_colors(colored_message)
 
     summary = pad_string_to_screen_width(summary)
-    print(summary)

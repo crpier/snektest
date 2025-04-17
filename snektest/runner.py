@@ -3,18 +3,14 @@ import string
 import traceback
 from asyncio import iscoroutinefunction
 from collections.abc import AsyncGenerator as _AsyncGenerator
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from collections.abc import Generator as _Generator
 from dataclasses import dataclass
 from inspect import isasyncgen
 from typing import (
     Any,
-    Awaitable,
-    Callable,
-    Iterator,
     Literal,
     ParamSpec,
-    Tuple,
     TypeVar,
     TypeVarTuple,
     Unpack,
@@ -26,8 +22,8 @@ from snektest.results import TestResult, TestStatus, show_results
 T = TypeVar("T")
 T2 = TypeVarTuple("T2")
 P = ParamSpec("P")
-Generator = _Generator[T, None, None]
-AsyncGenerator = _AsyncGenerator[T, None]
+Generator = _Generator[T]
+AsyncGenerator = _AsyncGenerator[T]
 
 
 FixtureScope = Literal["test", "session"]
@@ -45,7 +41,7 @@ class RegisteredFixture:
         function: Callable[..., Generator],
         scope: FixtureScope,
         fixture_params: list[tuple] | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.function = function
         self.scope = scope
@@ -57,7 +53,8 @@ class RegisteredFixture:
 
     def register_params(self, fixture_param: tuple[Any]) -> None:
         if self._stop_registering:
-            raise ValueError("Cannot register more params loading the fixture")
+            msg = "Cannot register more params loading the fixture"
+            raise ValueError(msg)
         # This happens when a fixture is parametrized
         # TODO: will this ever be None?
         if self.fixture_params is None:
@@ -68,7 +65,7 @@ class RegisteredFixture:
 
 # TODO: somehow make this read only after we're done registering
 class RegisteredFixturesContainer:
-    def __init__(self):
+    def __init__(self) -> None:
         self._registered_fixtures: dict[Callable, RegisteredFixture] = {}
 
     def register_fixture(
@@ -76,7 +73,7 @@ class RegisteredFixturesContainer:
         func: Callable[..., Generator],
         fixture_param: tuple[Any],
         scope: FixtureScope = "test",
-    ):
+    ) -> None:
         name = func.__name__
         if func not in self._registered_fixtures:
             self._registered_fixtures[func] = RegisteredFixture(
@@ -101,26 +98,23 @@ class RegisteredTest:
     test_name: str
     test_params: list[tuple[Any]]
 
-    def register_params(self, test_params: list[tuple[Any]]):
+    def register_params(self, test_params: list[tuple[Any]]) -> None:
         self.test_params.extend(test_params)
 
 
 class RegisteredTestsContainer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.registered_tests: dict[Callable, RegisteredTest] = {}
 
     def register_test(
         self,
         func: Callable[..., None],
         test_params: tuple,
-    ):
+    ) -> None:
         """Allow registering a test multipe times with different params"""
         test_params_to_add: list[tuple[Any]]
         # params is be empty if the test is not parametrized
-        if len(test_params) == 0:
-            test_params_to_add = []
-        else:
-            test_params_to_add = [test_params]
+        test_params_to_add = [] if len(test_params) == 0 else [test_params]
 
         if func not in self.registered_tests:
             self.registered_tests[func] = RegisteredTest(
@@ -140,7 +134,7 @@ class RegisteredTestsContainer:
 
 
 class TestSession:
-    def __init__(self):
+    def __init__(self) -> None:
         self.tests = RegisteredTestsContainer()
         self.fixtures = RegisteredFixturesContainer()
 
@@ -154,11 +148,11 @@ class TestSession:
         func: Callable[..., Generator],
         fixture_params: tuple,
         scope: FixtureScope = "test",
-    ):
+    ) -> None:
         self.fixtures.register_fixture(func, fixture_params, scope)
 
     async def run_tests(
-        self, tests: list[Callable] | None = None, verbose: bool = False
+        self, tests: list[Callable] | None = None, *, verbose: bool = False
     ) -> None:
         test_results: dict[str, TestResult] = {}
         if tests is None:
@@ -166,11 +160,11 @@ class TestSession:
         else:
             # TODO: decide on a more general level: look before you leap or try/except
             tests_to_run = [self.tests.get_by_function_strict(func) for func in tests]
-        global output
+        global output  # noqa: PLW0603
         output = Output(verbose)
 
         for test in tests_to_run:
-            global test_runner
+            global test_runner  # noqa: PLW0603
             test_runner = TestRunner(
                 fixtures=self.fixtures,
                 test_func=test.func,
@@ -199,7 +193,7 @@ class LoadedFixture:
     last_result: Any
     params: list[tuple[Any]]
 
-    def __init__(self, fixture_func: Callable, params: list[tuple[Any]]):
+    def __init__(self, fixture_func: Callable, params: list[tuple[Any]]) -> None:
         self.fixture_func = fixture_func
         self.generator = None
         self.last_result = None
@@ -207,23 +201,20 @@ class LoadedFixture:
         self._params_idx = -1
         self._can_reset_params = False
 
-    def next_params(self) -> tuple[Any]:
+    def next_params(self) -> tuple[Any, ...]:
         if len(self.params) == 0:
-            return tuple()
-        else:
-            self._params_idx += 1
-            if self._params_idx > len(self.params):
-                # We should peek before trying to load more params
-                raise ValueError("Tried to load more params than there are")
-            return self.params[self._params_idx]
+            return ()
+        self._params_idx += 1
+        if self._params_idx > len(self.params):
+            # We should peek before trying to load more params
+            msg = "Tried to load more params than there are"
+            raise ValueError(msg)
+        return self.params[self._params_idx]
 
     def has_next_param(self) -> bool:
         if len(self.params) == 0:
             return False
-        else:
-            if self._params_idx + 1 >= len(self.params):
-                return False
-            return True
+        return not (self._params_idx + 1 >= len(self.params))
 
     def reset_params(self) -> None:
         self._params_idx = -1
@@ -231,7 +222,7 @@ class LoadedFixture:
         self.generator = None
         self.last_result = None
 
-    def set_can_reset_params(self, can_reset_params: bool) -> None:
+    def set_can_reset_params(self, *, can_reset_params: bool) -> None:
         self._can_reset_params = can_reset_params
 
     def can_reset_params(self) -> bool:
@@ -239,7 +230,7 @@ class LoadedFixture:
 
 
 class LoadedFixturesContainer:
-    def __init__(self, registered_fixtures: RegisteredFixturesContainer):
+    def __init__(self, registered_fixtures: RegisteredFixturesContainer) -> None:
         self.registered_fixtures = registered_fixtures
         self.preloaded_fixtures: dict[Callable, LoadedFixture] = {}
         self._can_generate_new_value = True
@@ -256,10 +247,10 @@ class LoadedFixturesContainer:
                     if isasyncgen(fixture.generator):
                         await anext(fixture.generator)
                     else:
-                        next(fixture.generator)
-                raise ValueError(
-                    f"Fixture {fixture.fixture_func} for test {test_name} has more than one 'yield'"
-                )
+                        next(fixture.generator)  # pyright: ignore[reportArgumentType]
+                msg = f"Fixture {fixture.fixture_func} for test {test_name} has more than one 'yield'"
+                raise ValueError(msg)  # noqa: TRY301
+
             except (StopIteration, StopAsyncIteration):
                 pass
             except Exception:
@@ -269,7 +260,8 @@ class LoadedFixturesContainer:
     # TODO: preload fixtures lazily
     def _preload_fixture(self, fixture_data: RegisteredFixture) -> None:
         if fixture_data.function in self.preloaded_fixtures:
-            raise ValueError(f"Fixture {fixture_data.name} has already been preloaded")
+            msg = f"Fixture {fixture_data.name} has already been preloaded"
+            raise ValueError(msg)
 
         self.preloaded_fixtures[fixture_data.function] = LoadedFixture(
             fixture_func=fixture_data.function,
@@ -322,12 +314,11 @@ class LoadedFixturesContainer:
             if fixture.has_next_param():
                 fixture.generator = fixture_func(*fixture.next_params())
                 self._can_generate_new_value = False
+            elif fixture.can_reset_params():
+                fixture.reset_params()
+                fixture.generator = fixture_func(*fixture.next_params())
             else:
-                if fixture.can_reset_params():
-                    fixture.reset_params()
-                    fixture.generator = fixture_func(*fixture.next_params())
-                else:
-                    return fixture.last_result
+                return fixture.last_result
         else:
             # generator is not None (this isn't the first load for this fixture)
             # and we can't generate a new value
@@ -337,11 +328,10 @@ class LoadedFixturesContainer:
 
         if fixture.has_next_param():
             self._has_next_param = True
-        else:
-            if (
-                next_fixture := self.next_loaded_fixture(fixture_func)
-            ) is not None and next_fixture.has_next_param():
-                fixture.set_can_reset_params(True)
+        elif (
+            next_fixture := self.next_loaded_fixture(fixture_func)
+        ) is not None and next_fixture.has_next_param():
+            fixture.set_can_reset_params(can_reset_params=True)
         fixture.last_result = next(fixture.generator)
         return fixture.last_result
 
@@ -362,12 +352,11 @@ class LoadedFixturesContainer:
             if fixture.has_next_param():
                 fixture.generator = fixture_func(*fixture.next_params())
                 self._can_generate_new_value = False
+            elif fixture.can_reset_params():
+                fixture.reset_params()
+                fixture.generator = fixture_func(*fixture.next_params())
             else:
-                if fixture.can_reset_params():
-                    fixture.reset_params()
-                    fixture.generator = fixture_func(*fixture.next_params())
-                else:
-                    return fixture.last_result
+                return fixture.last_result
         else:
             # generator is not None (this isn't the first load for this fixture)
             # and we can't generate a new value
@@ -377,15 +366,14 @@ class LoadedFixturesContainer:
 
         if fixture.has_next_param():
             self._has_next_param = True
-        else:
-            if (
-                next_fixture := self.next_loaded_fixture(fixture_func)
-            ) is not None and next_fixture.has_next_param():
-                fixture.set_can_reset_params(True)
+        elif (
+            next_fixture := self.next_loaded_fixture(fixture_func)
+        ) is not None and next_fixture.has_next_param():
+            fixture.set_can_reset_params(can_reset_params=True)
         if isasyncgen(fixture.generator):
             fixture.last_result = await anext(fixture.generator)
         else:
-            fixture.last_result = next(fixture.generator)
+            fixture.last_result = next(fixture.generator)  # pyright: ignore[reportArgumentType]
         return fixture.last_result
 
 
@@ -396,26 +384,26 @@ class TestRunner:
         test_func: Callable,
         test_params: list[tuple[Any]],
         test_name: str,
-    ):
+    ) -> None:
         self.fixtures = fixtures
         self.test_func = test_func
         self.test_params = test_params
         self.fixture_params = []
         self.test_name = test_name
         """Fixtures that have been loaded for this test.
-        This test includes all variations of the test generated by 
+        This test includes all variations of the test generated by
         having multiple test params and multiple fixture params.
         This means that a fixture can be loaded multiple times
         during the lifetime of this class."""
         self.fixture_param_repeats = 1
 
-    async def run_test(self) -> list[Tuple[TestStatus, str]]:
-        results: list[Tuple[TestStatus, str]] = []
-        for test_params in self.test_params or [tuple()]:
+    async def run_test(self) -> list[tuple[TestStatus, str]]:
+        results: list[tuple[TestStatus, str]] = []
+        for test_params in self.test_params or [()]:
             # TODO: instead of passing RegisteredFixturesContainer all around the file,
             # maybe use a global variable?
             loaded_fixtures = LoadedFixturesContainer(self.fixtures)
-            global test_instance_runner
+            global test_instance_runner  # noqa: PLW0603
             test_instance_runner = TestInstanceRunner(
                 loaded_fixtures=loaded_fixtures,
                 test_func=self.test_func,
@@ -433,9 +421,9 @@ class TestInstanceRunner:
         self,
         loaded_fixtures: LoadedFixturesContainer,
         test_func: Callable,
-        test_params: tuple[Any],
+        test_params: tuple[Any, ...],
         test_name: str,
-    ):
+    ) -> None:
         # TODO: maybe create the LoadedFixturesContainer here
         self.loaded_fixtures = loaded_fixtures
         self.test_func = test_func
@@ -443,8 +431,8 @@ class TestInstanceRunner:
         self.test_name = test_name
         self.can_run_again = True
 
-    async def run_test_instance(self) -> list[Tuple[TestStatus, str]]:
-        results: list[Tuple[TestStatus, str]] = []
+    async def run_test_instance(self) -> list[tuple[TestStatus, str]]:
+        results: list[tuple[TestStatus, str]] = []
         while self.can_run_again:
             try:
                 if iscoroutinefunction(self.test_func):
@@ -462,7 +450,8 @@ class TestInstanceRunner:
                     f"Unexpected error: {traceback.format_exc()}",
                 )
             if output is None:
-                raise ValueError("Output is not set")
+                msg = "Output is not set"
+                raise ValueError(msg)
             output.print_test_output(
                 test_name=self.test_name,
                 test_params=self.test_params,
@@ -487,9 +476,9 @@ class TestInstanceRunner:
     async def after_test_instance(self, test_name: str) -> str:
         self.can_run_again = False
         message = await self.loaded_fixtures.teardown_fixtures(test_name)
-        if self.loaded_fixtures._has_next_param:
-            self.loaded_fixtures._has_next_param = False
-            self.loaded_fixtures._can_generate_new_value = True
+        if self.loaded_fixtures._has_next_param:  # noqa: SLF001
+            self.loaded_fixtures._has_next_param = False  # noqa: SLF001
+            self.loaded_fixtures._can_generate_new_value = True  # noqa: SLF001
             self.can_run_again = True
         return message
 
@@ -499,26 +488,28 @@ test_runner: TestRunner | None = None
 test_instance_runner: TestInstanceRunner | None = None
 output: Output | None = None
 
-### PUBLIC API ###
+# PUBLIC API ###
 
 
 # TODO: if a certain env var set by the runner is not present,
 # these functions should be noops
-def load_fixture(fixture: Callable[..., _Generator[T, None, None]]) -> T:
+def load_fixture[T](fixture: Callable[..., _Generator[T]]) -> T:
     if test_instance_runner is None:
-        raise ValueError("load_fixture can only be used inside a test")
+        msg = "load_fixture can only be used inside a test"
+        raise ValueError(msg)
     return test_instance_runner.load_fixture(fixture)
 
 
 # TODO: rename this to something shorter, maybe aload?
-async def load_fixture_async(fixture: Callable[..., AsyncGenerator[T]]) -> T:
+async def load_fixture_async[T](fixture: Callable[..., AsyncGenerator[T]]) -> T:
     if test_instance_runner is None:
-        raise ValueError("load_fixture can only be used inside a test")
+        msg = "load_fixture can only be used inside a test"
+        raise ValueError(msg)
     return await test_instance_runner.load_fixture_async(fixture)
 
 
-def test(
-    *params: Unpack[T2],
+def test[*T2](
+    *params: *T2,
 ) -> Callable[[Callable[[Unpack[T2]], None]], Callable[[Unpack[T2]], None]]:
     def decorator(test_func: Callable[..., None]) -> Callable[..., None]:
         test_session.register_test_instance(test_func, params)
@@ -527,8 +518,8 @@ def test(
     return decorator
 
 
-def test_async(
-    *params: Unpack[T2],
+def test_async[*T2](
+    *params: *T2,
 ) -> Callable[[Callable[[Unpack[T2]], Awaitable[None]]], Callable[[Unpack[T2]], None]]:
     def decorator(test_func: Callable[..., Coroutine]) -> Callable[..., None]:
         test_session.register_test_instance(test_func, params)
@@ -537,8 +528,8 @@ def test_async(
     return decorator
 
 
-def fixture(
-    *params: Unpack[T2], scope: FixtureScope = "test"
+def fixture[*T2](
+    *params: *T2, scope: FixtureScope = "test"
 ) -> Callable[
     [Callable[[Unpack[T2]], Generator[T]]], Callable[[Unpack[T2]], Generator[T]]
 ]:
@@ -549,8 +540,8 @@ def fixture(
     return decorator
 
 
-def fixture_async(
-    *params: Unpack[T2], scope: FixtureScope = "test"
+def fixture_async[*T2](
+    *params: *T2, scope: FixtureScope = "test"
 ) -> Callable[
     [Callable[[Unpack[T2]], AsyncGenerator[T]]],
     Callable[[Unpack[T2]], AsyncGenerator[T]],

@@ -1,15 +1,17 @@
 import sys
+from collections import UserString
+from collections.abc import Mapping
 from shutil import get_terminal_size
-from typing import Any, Mapping
+from typing import Any
 
 from colorama import Fore
 
 
-class ColoredString(str):
+class ColoredString(UserString):
     def __new__(cls, string: str, __original_length__: int):
         return super().__new__(cls, string)
 
-    def __init__(self, __string__: str, original_length: int):
+    def __init__(self, __string__: str, original_length: int) -> None:
         self.original_length = original_length
         super().__init__()
 
@@ -17,13 +19,11 @@ class ColoredString(str):
 IS_TTY = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
-# Color definitions using colorama
 class Colors:
     RESET = Fore.RESET if IS_TTY else ""
     RED = Fore.RED if IS_TTY else ""
     GREEN = Fore.GREEN if IS_TTY else ""
     YELLOW = Fore.YELLOW if IS_TTY else ""
-    BLUE = Fore.BLUE if IS_TTY else ""
     BLUE = Fore.BLUE if IS_TTY else ""
 
     @classmethod
@@ -36,7 +36,7 @@ class Colors:
 
     @classmethod
     def remove_color_codes(cls, text: str) -> str:
-        color_codes = [color for color in cls.get_colors()]
+        color_codes = list(cls.get_colors())
         for code in color_codes:
             text = text.replace(code, "")
         return text
@@ -57,12 +57,11 @@ class Colors:
             )
             result_list.append(colored_substring)
             original_length += len(substring)
-        result = ColoredString("".join(result_list), original_length)
-        return result
+        return ColoredString("".join(result_list), original_length)
 
 
 class Output:
-    def __init__(self, verbose: bool):
+    def __init__(self, verbose: bool) -> None:
         self.verbose = verbose
 
     def print_test_output(
@@ -73,18 +72,13 @@ class Output:
         fixtures: dict[str, str],
     ) -> None:
         if self.verbose:
-            test_status_str = Colors.apply_color(test_status, Colors.GREEN)
+            Colors.apply_color(test_status, Colors.GREEN)
             if len(fixtures) == 0:
-                fixtures_str = ""
+                pass
             else:
-                fixtures_str = " with: " + ", ".join(
+                " with: " + ", ".join(
                     [f"{name}={value}" for name, value in fixtures.items()]
                 )
-            if test_params == ():
-                test_params_str = ""
-            else:
-                test_params_str = f" on {test_params}"
-            print(f"{test_name}{test_params_str}{fixtures_str} {test_status_str}")
 
 
 def pad_string_to_screen_width(summary: ColoredString, pad_char: str = "-") -> str:
