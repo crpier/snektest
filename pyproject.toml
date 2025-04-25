@@ -1,12 +1,12 @@
 [project]
 name = "snektest"
 version = "0.1.0"
-bescription = "A testing library for the snake lang"
+description = "A testing library for the snake lang"
 authors = [
   {name = "crpier42", email = "crpier42@gmail.com"},
 ]
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
   "rich>=14.0.0",
@@ -16,6 +16,7 @@ keywords = ["testing", "cli", "library"]
 [tool.uv]
 dev-dependencies = [
   "coverage>=7.8.0",
+  "debugpy>=1.8.14",
   "pydeps>=3.0.1",
   "pyright>=1.1.399",
   "ruff>=0.11.5",
@@ -24,23 +25,34 @@ dev-dependencies = [
 [project.scripts]
 snektest = "snektest.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["snektest*"]
+exclude = ["old*"]
+
 ### Formatting and static checking tools ###
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint]
 preview = true
-select = [ "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "DTZ", "E", "EM", "ERA", "EXE", "F", "FAST", "FBT", "FIX", "FURB", "G", "I", "INP", "ISC", "LOG", "N", "PERF", "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TD", "TID", "TRY", "UP", "W" ]
+select = [ "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "DTZ", "E", "EM", "ERA", "EXE", "F", "FAST", "FBT", "FURB", "G", "I", "INP", "ISC", "LOG", "N", "PERF", "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TID", "TRY", "UP", "W" ]
 extend-select = [
   "FA",  # For future annotations. Unneeded if Python>=3.11.
   "YTT", # For Python version checking. Unneeded if Python>=3.11.
   "DOC", # For docstrings. Requires "preview" to be enabled.
+  # Select only some of the `TD` rules.
+  "TD004",   # Check for colon after "TODO" keyword.
+  "TD005",   # Check for description.
+  "TD006",   # Check for proper capitalization.
+  "TD007",   # Check for missing space after colon.
 ]
 ignore = [
   "ANN401",  # Allow the use of `typing.Any`.
   "BLE001",  # Allow using blind except (e.g. `except Exception`).
   "COM812",  # Don't require trailing commas. Ignored because it may interfere with formatting.
+  "DOC201",  # Don't make me document return values.
   "E501",    # Allow long lines. Useful mostly for writing log and error messages: having them in a single line makes it easier to search for the message. Note that the formatter will still try to shorten line length whenever possible.
+  "PLC1901", # Allow comparing with empty strings. This is needed when the variable could be another falsy value, like `None`.
   "PTH110",  # Allow using `os.path.exists`. Removed because Path.exists is 4 times slower.
   "S311",    # Allow pseudo-random generators.
   "T201",    # Allow `print` statements. Useful mostly for debugging.
@@ -149,10 +161,8 @@ reportUntypedClassDecorator = "error"
 reportUntypedFunctionDecorator = "error"
 reportUntypedNamedTuple = "error"
 reportCallInDefaultInitializer = "error"
-reportImplicitOverride = "error"
 reportImplicitStringConcatenation = "error"
 reportImportCycles = "error"
-reportMissingSuperCall = "error"
 reportPropertyTypeMismatch = "error"
 reportShadowedImports = "error"
 reportUninitializedInstanceVariable = "error"
@@ -163,3 +173,7 @@ reportUnusedCallResult = "error"
 # We almost always want subclasses to override parents with "incompatible" methods.
 # E.g. when subclassing stlib classes like `Thread`.
 reportIncompatibleVariableOverride = "off"
+# Most of the time, we don't want to call the parent's method, we want to 
+# change its behavior instead.
+reportMissingSuperCall = "off"
+reportImplicitOverride = "warning"
