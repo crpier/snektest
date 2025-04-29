@@ -1,12 +1,13 @@
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
+from inspect import isgeneratorfunction
 from pathlib import Path
-from typing import Any, Self, override
+from typing import Any, Self, cast, override
 
 
 class TestPath:
     """Canonical representation of a test path.
-    Note that here we don't do any validation with IO, we only ensure the
+    Note this doesn't do any validation using IO, only ensures the
     "shape" of the data is valid."""
 
     def __init__(self, raw_path: str) -> None:
@@ -90,11 +91,74 @@ class FQTN(TestPath):
 
 
 @dataclass
-class Test:
-    func: Callable[..., None]
-    fqtn: FQTN
-    params: tuple[tuple[Any]] | None
+class FixtureState:
+    generator: Generator[Any] | None
+    return_value: Any
 
-    @override
-    def __hash__(self) -> int:
-        return hash(self.func) + hash(self.fqtn) + hash(self.params)
+
+class NoNextValue:
+    pass
+
+
+class ParamState[T]:
+    def __init__(self, func: Callable[..., list[T]]) -> None:
+        self.list = func()
+        self.iterator = iter(self.list)
+
+
+class Test:
+    def __init__(self, fqtn: FQTN, test_func: Callable[[], None]) -> None:
+        # TODO: maybe I should have a type alias for fixture functions (and also for test functions?)
+        self.fqtn = fqtn
+        self.test_func = test_func
+
+        self._loaded_fixtures: dict[
+            Callable[..., Generator[Any] | Any], FixtureState
+        ] = {}
+        self._loaded_params: dict[Callable[..., list[Any]], ParamState[Any]] = {}
+
+    def run(self) -> None:
+        e = None
+        try:
+            self.test_func()
+        except Exception as err:
+            # TODO: log the exception
+            e = err
+        finally:
+            for func, state in self._loaded_fixtures.items():
+                if state.generator is not None:
+                    try:
+                        next(state.generator)
+                    except StopIteration:
+                        pass
+                    else:
+                        # TODO: would be nice if we had fqtn for fixtures, too;
+                        # We could use is it in error messages like this one
+                        # TODO: test that proves this works
+                        msg = f"Fixture {func.__name__} has multiple yields"
+                        raise ValueError(msg)
+            if e is not None:
+                raise e
+
+    def load_fixture[T](self, fixture_func: Callable[[], Generator[T] | T]) -> T:
+        if fixture_func in self._loaded_fixtures:
+            return self._loaded_fixtures[fixture_func].return_value
+
+        if isgeneratorfunction(fixture_func):
+            generator = fixture_func()
+            return_value = next(generator)
+        else:
+            generator = None
+            # We checked using isgeneratorfunction that the fixture is not a generator
+            # So we know the return value is `T`. However, the type checker doesn't
+            # seem to figure that out, so we cast to make it happy
+            return_value = cast("T", fixture_func())
+        self._loaded_fixtures[fixture_func] = FixtureState(
+            generator=generator, return_value=return_value
+        )
+        return return_value
+
+    def load_params[T](self, params_func: Callable[[], list[T]]) -> T:
+        if params_func not in self._loaded_params:
+            self._loaded_params[params_func] = ParamState(params_func)
+        return next(self._loaded_params[params_func].iterator)

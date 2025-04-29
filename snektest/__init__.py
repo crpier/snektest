@@ -1,36 +1,20 @@
 from collections.abc import Callable, Generator
-from typing import (
-    Literal,
-    TypeVar,
-    TypeVarTuple,
-    Unpack,
-)
 
 from snektest.runner import global_session
 
-T = TypeVar("T")
-TT = TypeVarTuple("TT")
 
-FixtureScope = Literal["test", "session"]
-
-
-def test[*TT](
-    *__params__: *TT,  # noqa: ARG001
-) -> Callable[[Callable[[Unpack[TT]], None]], Callable[[Unpack[TT]], None]]:
-    def decorator(test_func: Callable[..., None]) -> Callable[..., None]:
+def test() -> Callable[[Callable[[], None]], Callable[[], None]]:
+    def decorator(test_func: Callable[[], None]) -> Callable[[], None]:
         global_session.register_test(test_func)
         return test_func
 
     return decorator
 
 
-def fixture[*TT, T](
-    *__params__: *TT,
-    scope: FixtureScope = "test",
-) -> Callable[
-    [Callable[[Unpack[TT]], Generator[T] | T]],
-    Callable[[Unpack[TT]], T],
-]: ...
+# TODO: make sure that if 2 fixtures with the same name in different test files are called appropriately
+def load_fixture[T](fixture: Callable[[], Generator[T] | T]) -> T:
+    return global_session.load_fixture(fixture)
 
 
-def load_fixture[T](fixture: Callable[..., Generator[T] | T]) -> T: ...
+def load_params[T](params: Callable[[], list[T] | Generator[T]]) -> T:
+    return global_session.load_params(params)

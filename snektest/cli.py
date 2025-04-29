@@ -34,8 +34,10 @@ def main() -> None:
     parser = ArgumentParser()
     _ = parser.add_argument("import_paths", help="Import path to the test", nargs="+")
     args = parser.parse_args()
+    # TODO: if these are folders, we need to find all the fies in them recursively
+    import_paths = args.import_paths
     # TODO: this can raise an error, but how to display it in a nice way?
-    test_paths = [TestPath(uri) for uri in args.import_paths]
+    test_paths = [TestPath(uri) for uri in import_paths]
     for test_path in test_paths:
         load_path(test_path)
     global_session.run_tests()
