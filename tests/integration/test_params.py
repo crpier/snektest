@@ -11,8 +11,9 @@ def params() -> list[tuple[str, str]]:
         tuple[str, str]: A tuple of two strings: input and expected output.
     """
     return [
-        ("Hello world;", "Hello world"),
+        (";hello world", "hello world"),
         ("hello;world", "hello world"),
+        ("Hello world;", "Hello world"),
         ("hello world", "hello world"),
     ]
 

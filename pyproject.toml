@@ -177,4 +177,6 @@ reportIncompatibleVariableOverride = false
 # Most of the time, we don't want to call the parent's method, we want to 
 # change its behavior instead.
 reportMissingSuperCall = false
-reportImplicitOverride = "warning"
+# This is a bit too noisy, since it complains when overriding something like
+# ___str__ on a base class, which is not a problem in practice.
+reportImplicitOverride = false
