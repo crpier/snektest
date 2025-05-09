@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from inspect import currentframe, getouterframes, isgeneratorfunction
 from typing import Any, cast
 
-from snektest.models import FQTN, TestPath, TestReport
+from snektest.models import FQTN, Param, TestPath, TestReport
 from snektest.presenter import DisplayAdapter
 
 
@@ -18,7 +18,9 @@ class NoNextValue:
 
 
 class ParamState[T]:
-    def __init__(self, func: Callable[..., list[T]]) -> None:
+    def __init__(
+        self, func: Callable[[], list[Param[T]] | list[T] | Generator[T]]
+    ) -> None:
         self.list = func()
         self.iterator = iter(self.list)
 
@@ -32,7 +34,7 @@ class Test:
         self._loaded_fixtures: dict[
             Callable[..., Generator[Any] | Any], FixtureState
         ] = {}
-        self._loaded_params: dict[Callable[..., list[Any]], ParamState[Any]] = {}
+        self._loaded_params: dict[Callable[..., Any], ParamState[Any]] = {}
         self.runs = 1
 
     def run(self) -> None:
@@ -97,13 +99,21 @@ class Test:
         return return_value
 
     # TODO: what should happen if we call load_params twice on the same function in a single test?
-    def load_params[T](self, params_func: Callable[[], list[T]]) -> T:
+    def load_params[T](
+        self, params_func: Callable[[], list[Param[T]] | list[T] | Generator[T]]
+    ) -> T:
         if params_func not in self._loaded_params:
             self._loaded_params[params_func] = ParamState(params_func)
             self.runs += len(self._loaded_params[params_func].list) - 1
         result = next(self._loaded_params[params_func].iterator)
-        # Some nice viewing optimizations
-        if isinstance(result, Sequence):
+        name = None
+        if isinstance(result, Param):
+            name = result.name
+            result = result.value
+        if name is not None:
+            global_session.results[self][-1].param_names.append(name)
+        # Some nice viewing optimization
+        elif isinstance(result, Sequence):
             global_session.results[self][-1].param_names.append(
                 # Doesn't matter what type T is: it only matters that it's a Sequence,
                 # and we can call __str__ o its elements
@@ -155,7 +165,9 @@ class TestSession:
         test = self._tests[test_func]
         return test.load_fixture(fixture_func)
 
-    def load_params[T](self, params_func: Callable[[], list[T]]) -> T:
+    def load_params[T](
+        self, params_func: Callable[[], list[Param[T]] | list[T] | Generator[T]]
+    ) -> T:
         frame = currentframe()
         outer_frames = getouterframes(frame)
         function_frame = outer_frames[2]

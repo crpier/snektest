@@ -101,3 +101,10 @@ class TestReport:
     def full_name(self) -> str:
         param_names = "-".join(self.param_names)
         return f"{self.fqtn}[{param_names}]"
+
+
+# TODO: should actually be in models.spy
+@dataclass
+class Param[T]:
+    value: T
+    name: str | None = None

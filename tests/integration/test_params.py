@@ -1,20 +1,20 @@
-from snektest import load_params, test
+from snektest import Param, load_params, test
 
 
 def function_under_test(value: str) -> str:
     return value.replace(";", " ").strip()
 
 
-def params() -> list[tuple[str, str]]:
+def params() -> list[Param[tuple[str, str]]]:
     """Gather params.
     Returns:
         tuple[str, str]: A tuple of two strings: input and expected output.
     """
     return [
-        (";hello world", "hello world"),
-        ("hello;world", "hello world"),
-        ("Hello world;", "Hello world"),
-        ("hello world", "hello world"),
+        Param((";hello world", "hello world"), name="semicolon_at_start"),
+        Param(("hello;world", "hello world"), name="semicolon_at_middle"),
+        Param(("Hello world;", "Hello world"), name="semicolon_at_end"),
+        Param(("hello world", "hello world"), name="no_semicolon"),
     ]
 
 

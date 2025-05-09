@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 
+from snektest.models import Param
 from snektest.runner import global_session
 
 
@@ -16,5 +17,7 @@ def load_fixture[T](fixture: Callable[[], Generator[T] | T]) -> T:
     return global_session.load_fixture(fixture)
 
 
-def load_params[T](params: Callable[[], list[T] | Generator[T]]) -> T:
-    return global_session.load_params(params)
+def load_params[T](
+    params_func: Callable[[], list[Param[T]] | list[T] | Generator[T]],
+) -> T:
+    return global_session.load_params(params_func)
