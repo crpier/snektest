@@ -1,16 +1,18 @@
-import inspect
-from collections.abc import Awaitable
-from typing import Any, TypeIs, assert_type
+from rich.console import Console
 
+console = Console()
+left = "LeftWord"
+right = "RightWord"
 
-def isawaitable(x: object) -> TypeIs[Awaitable[Any]]:
-    return inspect.isawaitable(x)
+# Get the width of the console
+width = console.size.width
 
+# Calculate the space between the words
+space = width - len(left) - len(right)
+if space < 1:
+    space = 1  # Prevent negative or zero spacing
 
-def f(x: Awaitable[int] | int) -> None:
-    if isawaitable(x):
-        # Type checkers may also infer the more precise type
-        # "Awaitable[int] | (int & Awaitable[Any])"
-        _ = assert_type(x, Awaitable[int])
-    else:
-        _ = assert_type(x, int)
+# Build the line
+line = f"{left}{' ' * space}{right}"
+
+console.print(line)

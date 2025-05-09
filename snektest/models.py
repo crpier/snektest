@@ -1,5 +1,6 @@
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Self, override
+from typing import Literal, Self, override
 
 
 class TestPath:
@@ -85,3 +86,18 @@ class FQTN(TestPath):
         # PERF: this looks really weird, I imagine all these new allocations
         # can be expensive when there's lots of tests
         return cls(str(new))
+
+
+TestResult = Literal["passed", "failed"]
+
+
+@dataclass
+class TestReport:
+    fqtn: FQTN
+    param_names: list[str]
+    result: TestResult | None = None
+    message: str | None = None
+
+    def full_name(self) -> str:
+        param_names = "-".join(self.param_names)
+        return f"{self.fqtn}[{param_names}]"

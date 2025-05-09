@@ -16,3 +16,4 @@ Need to take a stance on naming:
 
 ## Misc TODOs
 - Create a test that proves that if a test fails, the next tests are run
+- Would it make sense to have no more functions that return `None`?

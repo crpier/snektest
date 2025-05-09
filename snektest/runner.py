@@ -1,9 +1,10 @@
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
 from inspect import currentframe, getouterframes, isgeneratorfunction
-from typing import Any, Literal, cast
+from typing import Any, cast
 
-from snektest.models import FQTN, TestPath
+from snektest.models import FQTN, TestPath, TestReport
+from snektest.presenter import DisplayAdapter
 
 
 @dataclass
@@ -20,18 +21,6 @@ class ParamState[T]:
     def __init__(self, func: Callable[..., list[T]]) -> None:
         self.list = func()
         self.iterator = iter(self.list)
-
-
-@dataclass
-class TestResult:
-    fqtn: FQTN
-    param_names: list[str]
-    status: Literal["passed", "failed"] | None = None
-    message: str | None = None
-
-    def __str__(self) -> str:
-        param_names = "-".join(self.param_names)
-        return f"{self.fqtn}[{param_names}] {self.status}"
 
 
 class Test:
@@ -51,19 +40,19 @@ class Test:
         global_session.results[self] = []
 
         while self.runs > 0:
-            test_result = TestResult(
+            test_result = TestReport(
                 fqtn=self.fqtn,
                 param_names=[],
-                status=None,
+                result=None,
             )
             try:
                 global_session.results[self].append(test_result)
                 self.test_func()
-                test_result.status = "passed"
+                test_result.result = "passed"
             except Exception as err:
                 # TODO: log the exception
                 e = err
-                test_result.status = "failed"
+                test_result.result = "failed"
                 test_result.message = str(err)
             finally:
                 for func, state in self._loaded_fixtures.items():
@@ -78,7 +67,13 @@ class Test:
                             # TODO: test that proves this works
                             msg = f"Fixture {func.__name__} has multiple yields"
                             raise ValueError(msg)
-                print(str(test_result))
+                if test_result.result is None:
+                    msg = "TestResult.status is None after test"
+                    raise ValueError(msg)
+                global_session.display_adapter.print_test_result(
+                    test_name=test_result.full_name(),
+                    test_result=test_result.result,
+                )
                 if e is not None:
                     raise e
             self.runs -= 1
@@ -126,7 +121,8 @@ class Test:
 class TestSession:
     def __init__(self) -> None:
         self._tests: dict[Callable[[], None], Test] = {}
-        self.results: dict[Test, list[TestResult]] = {}
+        self.results: dict[Test, list[TestReport]] = {}
+        self.display_adapter = DisplayAdapter()
 
     def run_tests(self) -> None:
         for test in self._tests.values():
