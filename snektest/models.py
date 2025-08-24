@@ -8,27 +8,31 @@ class TestPath:
     Note this doesn't do any validation using IO, only ensures the
     "shape" of the data is valid."""
 
+    path: Path
+    class_name: str | None
+    func_name: str | None
+
     def __init__(self, raw_path: str) -> None:
         if "::" not in raw_path:
-            file = Path(raw_path)
+            path = Path(raw_path)
             class_name = None
             func_name = None
-
         else:
             file_part, rest = raw_path.split("::", 1)
-            file = Path(file_part)
-            if file.suffix != ".py":
-                msg = f"Invalid TestPath: the file is not a python file: {raw_path}"
-                raise ValueError(msg)
+            path = Path(file_part)
             if "::" in rest:
                 class_name, func_name = rest.split("::", 1)
             else:
                 class_name = None
                 func_name = rest
 
-        if file.suffix != ".py":
-            msg = f"Invalid TestPath: {raw_path}"
+        if not path.is_file() or path.suffix != ".py":
+            msg = f"Invalid TestPath. File provided is not a python file: {raw_path}"
             raise ValueError(msg)
+
+        if class_name is not None:
+            msg = "Invaid TestPath. A path to a directory followed by a class specifier was provided"
+
         if class_name is not None and class_name == "":
             msg = f"Invalid TestPath: empty class name in path: {raw_path}"
             raise ValueError(msg)
@@ -41,7 +45,7 @@ class TestPath:
         if func_name is not None and not func_name.isidentifier():
             msg = f"Invalid TestPath: invalid function name in path: {raw_path}"
             raise ValueError(msg)
-        self.file = file
+        self.path = path
         self.class_name = class_name
         self.func_name = func_name
 
@@ -50,11 +54,11 @@ class TestPath:
         """This should provide the same result as the raw path given to the init"""
         if self.class_name is None:
             if self.func_name is None:
-                return f"{self.file}"
-            return f"{self.file}::{self.func_name}"
+                return f"{self.path}"
+            return f"{self.path}::{self.func_name}"
         if self.func_name is None:
-            return f"{self.file}::{self.class_name}"
-        return f"{self.file}::{self.func_name}::{self.class_name}"
+            return f"{self.path}::{self.class_name}"
+        return f"{self.path}::{self.func_name}::{self.class_name}"
 
 
 class FQTN(TestPath):
@@ -100,6 +104,8 @@ class TestReport:
 
     def full_name(self) -> str:
         param_names = "-".join(self.param_names)
+        if len(param_names) == 0:
+            return str(self.fqtn)
         return f"{self.fqtn}[{param_names}]"
 
 

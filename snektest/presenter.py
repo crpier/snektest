@@ -14,3 +14,6 @@ class DisplayAdapter:
             style="red" if test_result == "failed" else "green",
         )
         self.console.print(Text(test_name), "...", result_string)
+
+    def print_exception(self, e: Exception) -> None:
+        self.console.print_exception()

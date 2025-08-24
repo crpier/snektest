@@ -144,7 +144,7 @@ class TestSession:
         test_path: TestPath = outer_frames[2].frame.f_globals["test_path"]
         test_path.func_name = test_func.__name__
         fqtn = FQTN.from_attributes(
-            file=test_path.file,
+            file=test_path.path,
             class_name=test_path.class_name,
             func_name=test_func.__name__,
         )
