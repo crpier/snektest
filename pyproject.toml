@@ -13,14 +13,15 @@ dependencies = [
 ]
 keywords = ["testing", "cli", "library"]
 
-[tool.uv]
-dev-dependencies = [
-  "coverage>=7.8.0",
-  "debugpy>=1.8.14",
-  "mypy>=1.15.0",
-  "pydeps>=3.0.1",
-  "pyright>=1.1.399",
-  "ruff>=0.11.5",
+[dependency-groups]
+dev = [
+    "coverage>=7.8.0",
+    "debugpy>=1.8.14",
+    "mypy>=1.15.0",
+    "pydeps>=3.0.1",
+    "pyright>=1.1.399",
+    "ruff>=0.11.5",
+    "ty>=0.0.1a21",
 ]
 
 [project.scripts]
@@ -28,12 +29,10 @@ snektest = "snektest.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["snektest*"]
-exclude = ["old*"]
 
 ### Formatting and static checking tools ###
 [tool.ruff]
 line-length = 88
-extend-exclude = ["old", "old_tests"]
 
 [tool.ruff.lint]
 preview = true
@@ -73,6 +72,7 @@ ignore = [
   "S107",    # Allow hardcoded password strings.
   "S608",    # Allow string building with SQL.
   "SLF001",  # Allow private member access.
+  "RUF029",  # Allow async functions without async features.
 ]
 
 [tool.pyright]
@@ -181,7 +181,3 @@ reportMissingSuperCall = false
 # This is a bit too noisy, since it complains when overriding something like
 # ___str__ on a base class, which is not a problem in practice.
 reportImplicitOverride = false
-
-
-
-ignore = ["old", "old_tests"]

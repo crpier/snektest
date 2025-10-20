@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from asyncio import run
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from sys import modules
@@ -59,7 +60,7 @@ def load_path(import_path: Path) -> None:
         spec.loader.exec_module(module)
 
 
-def main() -> None:
+async def main_call() -> None:
     # TODO: use snekargs instead
     parser = ArgumentParser()
     _ = parser.add_argument("import_paths", help="Import path to the test", nargs="+")
@@ -68,7 +69,11 @@ def main() -> None:
     # TODO: this can raise an error, but how to display it in a nice way?
     for import_path in import_paths:
         load_path(Path(import_path))
-    global_session.run_tests()
+    await global_session.run_tests()
+
+
+def main() -> None:
+    run(main_call())
 
 
 if __name__ == "__main__":

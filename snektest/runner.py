@@ -1,6 +1,15 @@
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import AsyncGenerator, Callable, Coroutine, Generator, Sequence
+import traceback
 from dataclasses import dataclass
-from inspect import currentframe, getouterframes, isgeneratorfunction
+from inspect import (
+    currentframe,
+    getouterframes,
+    isasyncgen,
+    isasyncgenfunction,
+    iscoroutinefunction,
+    isgeneratorfunction,
+)
+from types import TracebackType
 from typing import Any, cast
 
 from snektest.models import FQTN, Param, TestPath, TestReport
@@ -9,7 +18,7 @@ from snektest.presenter import DisplayAdapter
 
 @dataclass
 class FixtureState:
-    generator: Generator[Any] | None
+    generator: AsyncGenerator[Any] | Generator[Any] | None
     return_value: Any
 
 
@@ -26,7 +35,9 @@ class ParamState[T]:
 
 
 class Test:
-    def __init__(self, fqtn: FQTN, test_func: Callable[[], None]) -> None:
+    def __init__(
+        self, fqtn: FQTN, test_func: Callable[[], Coroutine[Any, Any, None] | None]
+    ) -> None:
         # TODO: maybe I should have a type alias for fixture functions (and also for test functions?)
         self.fqtn = fqtn
         self.test_func = test_func
@@ -37,31 +48,38 @@ class Test:
         self._loaded_params: dict[Callable[..., Any], ParamState[Any]] = {}
         self.runs = 1
 
-    def run(self) -> None:
-        e = None
+    async def run(self) -> None:
         global_session.results[self] = []
 
         while self.runs > 0:
-            test_result = TestReport(
+            test_report = TestReport(
                 fqtn=self.fqtn,
                 param_names=[],
                 result=None,
             )
             try:
-                global_session.results[self].append(test_result)
-                self.test_func()
-                test_result.result = "passed"
+                global_session.results[self].append(test_report)
+                if iscoroutinefunction(self.test_func):
+                    await self.test_func()
+                else:
+                    # pyright thinks there that the function might be a coroutine
+                    # so it wants us to store the result, but we know it can't be
+                    self.test_func()  # pyright: ignore[reportUnusedCallResult]
+                test_report.result = "passed"
             except Exception as err:
                 # TODO: log the exception
-                e = err
-                test_result.result = "failed"
-                test_result.message = str(err)
+                test_report.result = "failed"
+                test_report.message = str(err)
+                test_report.traceback = traceba
             finally:
                 for func, state in self._loaded_fixtures.items():
                     if state.generator is not None:
                         try:
-                            next(state.generator)
-                        except StopIteration:
+                            if isasyncgen(state.generator):
+                                await anext(state.generator)
+                            else:
+                                next(state.generator)
+                        except (StopIteration, StopAsyncIteration):
                             pass
                         else:
                             # TODO: would be nice if we had fqtn for fixtures, too;
@@ -69,29 +87,60 @@ class Test:
                             # TODO: test that proves this works
                             msg = f"Fixture {func.__name__} has multiple yields"
                             raise ValueError(msg)
-                if test_result.result is None:
+                if test_report.result is None:
                     msg = "TestResult.status is None after test"
                     raise ValueError(msg)
                 global_session.display_adapter.print_test_result(
-                    test_name=test_result.full_name(),
-                    test_result=test_result.result,
+                    test_name=test_report.full_name(),
+                    test_result=test_report.result,
                 )
-                if e is not None:
-                    raise e
             self.runs -= 1
 
-    def load_fixture[T](self, fixture_func: Callable[[], Generator[T] | T]) -> T:
+    def load_fixture[T](
+        self,
+        fixture_func: Callable[
+            [], Coroutine[Any, Any, T] | AsyncGenerator[T] | Generator[T] | T
+        ],
+    ) -> T:
         if fixture_func in self._loaded_fixtures:
             return self._loaded_fixtures[fixture_func].return_value
 
+        # sync with teardown
         if isgeneratorfunction(fixture_func):
             generator = fixture_func()
             return_value = next(generator)
         else:
             generator = None
-            # We checked using isgeneratorfunction that the fixture is not a generator
-            # So we know the return value is `T`. However, the type checker doesn't
-            # seem to figure that out, so we cast to make it happy
+            return_value = cast("T", fixture_func())
+        self._loaded_fixtures[fixture_func] = FixtureState(
+            generator=generator, return_value=return_value
+        )
+        return return_value
+
+    async def aload_fixture[T](
+        self,
+        fixture_func: Callable[
+            [], Coroutine[Any, Any, T] | AsyncGenerator[T] | Generator[T] | T
+        ],
+    ) -> T:
+        if fixture_func in self._loaded_fixtures:
+            return self._loaded_fixtures[fixture_func].return_value
+
+        # sync with teardown
+        if isgeneratorfunction(fixture_func):
+            generator = fixture_func()
+            return_value = next(generator)
+        # async with teardown
+        elif isasyncgenfunction(fixture_func):
+            generator = fixture_func()
+            # TODO: try casting the function instead
+            return_value = cast("T", await anext(generator))
+        # async without teardown
+        elif iscoroutinefunction(fixture_func):
+            generator = None
+            return_value = cast("T", await fixture_func())
+        else:
+            generator = None
             return_value = cast("T", fixture_func())
         self._loaded_fixtures[fixture_func] = FixtureState(
             generator=generator, return_value=return_value
@@ -130,15 +179,24 @@ class Test:
 
 class TestSession:
     def __init__(self) -> None:
-        self._tests: dict[Callable[[], None], Test] = {}
+        self._tests: dict[Callable[[], Coroutine[Any, Any, None] | None], Test] = {}
         self.results: dict[Test, list[TestReport]] = {}
         self.display_adapter = DisplayAdapter()
 
-    def run_tests(self) -> None:
+    async def run_tests(self) -> None:
         for test in self._tests.values():
-            test.run()
+            await test.run()
+        for reports in self.results.values():
+            for report in reports:
+                if report.result == "failed":
+                    print("====")
+                    print(report.fqtn)
+                    breakpoint()
+                    print(report.error.)
 
-    def register_test(self, test_func: Callable[[], None]) -> None:
+    def register_test(
+        self, test_func: Callable[[], Coroutine[Any, Any, None] | None]
+    ) -> None:
         frame = currentframe()
         outer_frames = getouterframes(frame)
         test_path: TestPath = outer_frames[2].frame.f_globals["test_path"]
@@ -154,7 +212,9 @@ class TestSession:
             raise ValueError(msg)
         self._tests[test_func] = Test(fqtn=fqtn, test_func=test_func)
 
-    def load_fixture[T](self, fixture_func: Callable[[], Generator[T] | T]) -> T:
+    def load_fixture[T](
+        self, fixture_func: Callable[[], AsyncGenerator[T] | Generator[T] | T]
+    ) -> T:
         frame = currentframe()
         outer_frames = getouterframes(frame)
         function_frame = outer_frames[2]
@@ -164,6 +224,19 @@ class TestSession:
             raise ValueError(msg)
         test = self._tests[test_func]
         return test.load_fixture(fixture_func)
+
+    async def aload_fixture[T](
+        self, fixture_func: Callable[[], AsyncGenerator[T] | Coroutine[Any, Any, T]]
+    ) -> T:
+        frame = currentframe()
+        outer_frames = getouterframes(frame)
+        function_frame = outer_frames[2]
+        test_func = outer_frames[2].frame.f_globals[function_frame.frame.f_code.co_name]
+        if test_func not in self._tests:
+            msg = f"Test {test_func} has not been registered"
+            raise ValueError(msg)
+        test = self._tests[test_func]
+        return await test.aload_fixture(fixture_func)
 
     def load_params[T](
         self, params_func: Callable[[], list[Param[T]] | list[T] | Generator[T]]

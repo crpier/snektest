@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from inspect import Traceback
 from pathlib import Path
 from typing import Literal, Self, override
 
@@ -101,6 +102,7 @@ class TestReport:
     param_names: list[str]
     result: TestResult | None = None
     message: str | None = None
+    traceback: Traceback | None = None
 
     def full_name(self) -> str:
         param_names = "-".join(self.param_names)
@@ -109,7 +111,6 @@ class TestReport:
         return f"{self.fqtn}[{param_names}]"
 
 
-# TODO: should actually be in models.spy
 @dataclass
 class Param[T]:
     value: T
