@@ -1,117 +1,136 @@
 from dataclasses import dataclass
-from inspect import Traceback
+from enum import Enum, auto
+from itertools import product
 from pathlib import Path
-from typing import Literal, Self, override
+from types import TracebackType
+from typing import Any, cast
 
 
-class TestPath:
-    """Canonical representation of a test path.
-    Note this doesn't do any validation using IO, only ensures the
-    "shape" of the data is valid."""
+class CollectionError(BaseException): ...
 
-    path: Path
-    class_name: str | None
-    func_name: str | None
 
-    def __init__(self, raw_path: str) -> None:
-        if "::" not in raw_path:
-            path = Path(raw_path)
-            class_name = None
-            func_name = None
+class ArgsError(BaseException): ...
+
+
+# TODO: make sure we raise custom errors everywhere possible
+SnektestError = CollectionError | ArgsError
+
+
+class FilterItem:
+    def __init__(self, raw_input: str) -> None:
+        """
+        Raises:
+            ValueError: if given bad input
+        """
+        if "::" not in raw_input:
+            path = Path(raw_input)
+            function_name = None
+            params = cast("tuple[str, ...]", ())
         else:
-            file_part, rest = raw_path.split("::", 1)
+            file_part, rest = raw_input.split("::", 1)
+            if rest == "":
+                msg = f"Invalid test filter - nothing given after semicolon in '{raw_input}'"
+                raise ValueError(msg)
+
             path = Path(file_part)
-            if "::" in rest:
-                class_name, func_name = rest.split("::", 1)
+
+            if "[" in rest:
+                if not rest.endswith("]"):
+                    msg = f"Invalid test filter - unterminated `[` in '{raw_input}'"
+                    raise ValueError(msg)
+                rest = rest.removesuffix("]")
+                function_name, raw_params = rest.split("[", 1)
+                params = tuple(param.strip() for param in raw_params.split(","))
             else:
-                class_name = None
-                func_name = rest
+                function_name = rest
+                params = cast("tuple[str, ...]", ())
 
-        if not path.is_file() or path.suffix != ".py":
-            msg = f"Invalid TestPath. File provided is not a python file: {raw_path}"
+        if not path.exists():
+            msg = f"Invalid test filter - provided path does not exist in '{raw_input}'"
             raise ValueError(msg)
 
-        if class_name is not None:
-            msg = "Invaid TestPath. A path to a directory followed by a class specifier was provided"
-
-        if class_name is not None and class_name == "":
-            msg = f"Invalid TestPath: empty class name in path: {raw_path}"
+        if path.is_file() and path.suffix != ".py":
+            msg = f"Invalid test filter - file is not a Python script in '{raw_input}'"
             raise ValueError(msg)
-        if class_name is not None and not class_name.isidentifier():
-            msg = f"Invalid TestPath: invalid class name in path: {raw_path}"
 
-        if func_name is not None and func_name == "":
-            msg = f"Invalid TestPath: empty function name in path: {raw_path}"
+        if path.is_file() and not path.name.startswith("test_"):
+            msg = (
+                f"Invalid test filter - file does not start with _test in '{raw_input}'"
+            )
             raise ValueError(msg)
-        if func_name is not None and not func_name.isidentifier():
-            msg = f"Invalid TestPath: invalid function name in path: {raw_path}"
-            raise ValueError(msg)
-        self.path = path
-        self.class_name = class_name
-        self.func_name = func_name
 
-    @override
+        if function_name is not None and not function_name.isidentifier():
+            msg = f"Invalid test filter - invalid identifier {function_name} in '{raw_input}'"
+            raise ValueError(msg)
+
+        self.file_path = path
+        self.function_name = function_name
+        self.params = params
+
     def __str__(self) -> str:
-        """This should provide the same result as the raw path given to the init"""
-        if self.class_name is None:
-            if self.func_name is None:
-                return f"{self.path}"
-            return f"{self.path}::{self.func_name}"
-        if self.func_name is None:
-            return f"{self.path}::{self.class_name}"
-        return f"{self.path}::{self.func_name}::{self.class_name}"
+        result = str(self.file_path)
+        if self.function_name is not None:
+            result += f"::{self.function_name}"
+        if self.params:
+            result += f"[{', '.join(self.params)}]"
+        return result
+
+    def __repr__(self) -> str:
+        return f"FilterItem(file_path={self.file_path!r}, function_name={self.function_name!r}, params={self.params!r})"
 
 
-class FQTN(TestPath):
-    """Fully qualified test name.
-    Like TestPath, but function name is mandatory."""
-
+# Set kw_only so we can write attributes in the order they appear
+@dataclass(kw_only=True)
+class TestName:
+    file_path: Path
     func_name: str
+    param_names: tuple[str, ...]
 
-    @override
-    def __init__(self, fqtn: str) -> None:
-        super().__init__(fqtn)
-        # The comparison is necessary, we set `self.func_name` to str so that
-        # users of this class know it's always populated, but before the actual
-        # validation it might be `None`
-        if self.func_name is None:  # pyright: ignore[reportUnnecessaryComparison]
-            msg = f"Invalid FQTN: no function name in path: {fqtn}"
-            raise ValueError(msg)
-
-    @classmethod
-    def from_attributes(
-        cls,
-        file: Path,
-        class_name: str | None,
-        func_name: str,
-    ) -> Self:
-        new = TestPath(str(file))
-        new.class_name = class_name
-        new.func_name = func_name
-        # PERF: this looks really weird, I imagine all these new allocations
-        # can be expensive when there's lots of tests
-        return cls(str(new))
+    def __str__(self) -> str:
+        result = str(self.file_path)
+        result += f"::{self.func_name}"
+        if self.param_names:
+            result += f"[{', '.join(self.param_names)}]"
+        return result
 
 
-TestResult = Literal["passed", "failed"]
+class PassedResult: ...
 
 
-@dataclass
-class TestReport:
-    fqtn: FQTN
-    param_names: list[str]
-    result: TestResult | None = None
-    message: str | None = None
-    traceback: Traceback | None = None
-
-    def full_name(self) -> str:
-        param_names = "-".join(self.param_names)
-        if len(param_names) == 0:
-            return str(self.fqtn)
-        return f"{self.fqtn}[{param_names}]"
-
-
+# TODO: param names need to be known at import time -> allow users to load
+# their value lazily
 @dataclass
 class Param[T]:
     value: T
-    name: str | None = None
+    name: str
+
+    @staticmethod
+    def to_dict(
+        params: tuple[list[Param[Any]], ...],
+    ) -> dict[tuple[str, ...], tuple[Param[Any], ...]]:
+        """Create a dictionary that contains all possible params combinations"""
+        combinations = product(*params)
+        result: dict[tuple[str, ...], tuple[Param[Any], ...]] = {}
+        for combination in combinations:
+            result[tuple(param.name for param in combination)] = combination
+        return result
+
+
+@dataclass(frozen=True)
+class FailedResult:
+    message: str
+    traceback: TracebackType
+    exc_type: type[BaseException] | None
+    exc_value: BaseException | None
+    exc_traceback: TracebackType | None
+
+
+@dataclass
+class TestResult:
+    name: TestName
+    result: PassedResult | FailedResult
+
+
+class Scope(Enum):
+    FUNCTION = auto()
+    SESSION = auto()

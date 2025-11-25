@@ -1,32 +1,84 @@
-from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
-from typing import Any
+from collections.abc import AsyncGenerator, Callable
+from collections.abc import Coroutine as _Coroutine
+from inspect import currentframe, getouterframes
+from typing import Annotated, Any, cast, get_args, get_origin, overload
 
-from snektest.models import Param
-from snektest.runner import global_session
+from snektest.models import Param, Scope
+from snektest.utils import (
+    mark_test_function,
+    register_fixture,
+)
+
+type Coroutine[T] = _Coroutine[None, None, T]
 
 
-def test[T]() -> Callable[[Callable[[], T]], Callable[[], T]]:
-    def decorator(test_func: Callable[[], T]) -> Callable[[], T]:
-        global_session.register_test(test_func)  # pyright: ignore[reportArgumentType]
+@overload
+def test() -> Callable[
+    [Callable[[], Coroutine[None]]], Callable[[], Coroutine[None]]
+]: ...
+
+
+@overload
+def test[T](
+    param: list[Param[T]],
+) -> Callable[[Callable[[T], Coroutine[None]]], Callable[[T], Coroutine[None]]]: ...
+
+
+@overload
+def test[T1, T2](
+    param1: list[Param[T1]],
+    param2: list[Param[T2]],
+) -> Callable[
+    [Callable[[T1, T2], Coroutine[None]]],
+    Callable[[T1, T2], Coroutine[None]],
+]: ...
+
+
+def test(  # pyright: ignore[reportInconsistentOverload]
+    *params: list[Param[Any]],
+) -> Callable[
+    [Callable[[*tuple[Any, ...]], Coroutine[None]]],
+    Callable[[*tuple[Any, ...]], Coroutine[None]],
+]:
+    def decorator(
+        test_func: Callable[[*tuple[Any, ...]], Coroutine[None]],
+    ) -> Callable[[*tuple[Any, ...]], Coroutine[None]]:
+        mark_test_function(test_func, params)
         return test_func
 
     return decorator
 
 
-# TODO: make sure that if 2 fixtures with the same name in different test files are called appropriately
-def load_fixture[T](
-    fixture: Callable[[], Generator[T] | T],
-) -> T:
-    return global_session.load_fixture(fixture)
+def _determine_scope(func: Callable[..., Any]) -> Scope:
+    if (return_annotation := func.__annotations__.get("return")) is None:
+        return Scope.FUNCTION
+    if get_origin(return_annotation) is not Annotated:
+        return Scope.FUNCTION
+    annotation_args = get_args(return_annotation)
+    if len(annotation_args) != 2:  # noqa: PLR2004
+        return Scope.FUNCTION
+    annotation_param = annotation_args[1]
+    if isinstance(annotation_param, Scope):
+        return annotation_param
+    return Scope.FUNCTION
 
 
-async def aload_fixture[T](
-    fixture: Callable[[], AsyncGenerator[T] | Coroutine[Any, Any, T]],
-) -> T:
-    return await global_session.aload_fixture(fixture)
+async def load_fixture[R](
+    gen: AsyncGenerator[R],
+) -> R:
+    original_function = cast(
+        "Callable[..., Any]",
+        gen.ag_frame.f_globals[gen.ag_code.co_name],  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    )
+    frame = currentframe()
+    outer_frames = getouterframes(frame)
+    function_frame = outer_frames[1]
+    test_func = cast(
+        "Callable[..., Any]",
+        function_frame.frame.f_globals[function_frame.frame.f_code.co_name],
+    )
+    register_fixture(
+        test_func, (original_function, _determine_scope(original_function), gen)
+    )
 
-
-def load_params[T](
-    params_func: Callable[[], list[Param[T]] | list[T] | Generator[T]],
-) -> T:
-    return global_session.load_params(params_func)
+    return await anext(gen)

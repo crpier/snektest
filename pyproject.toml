@@ -1,34 +1,18 @@
 [project]
 name = "snektest"
 version = "0.1.0"
-description = "A testing library for the snake lang"
-authors = [
-  {name = "crpier42", email = "crpier42@gmail.com"},
-]
+description = "Do testing and stuff"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
-  "rich>=14.0.0",
+    "pydantic>=2.12.4",
 ]
-keywords = ["testing", "cli", "library"]
 
 [dependency-groups]
 dev = [
-    "coverage>=7.8.0",
-    "debugpy>=1.8.14",
-    "mypy>=1.15.0",
-    "pydeps>=3.0.1",
-    "pyright>=1.1.399",
-    "ruff>=0.11.5",
-    "ty>=0.0.1a21",
+    "pyright>=1.1.407",
+    "ruff>=0.14.5",
 ]
-
-[project.scripts]
-snektest = "snektest.cli:main"
-
-[tool.setuptools.packages.find]
-include = ["snektest*"]
 
 ### Formatting and static checking tools ###
 [tool.ruff]
@@ -38,8 +22,6 @@ line-length = 88
 preview = true
 select = [ "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "DTZ", "E", "EM", "ERA", "EXE", "F", "FAST", "FBT", "FURB", "G", "I", "INP", "ISC", "LOG", "N", "PERF", "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TID", "TRY", "UP", "W" ]
 extend-select = [
-  "FA",  # For future annotations. Unneeded if Python>=3.11.
-  "YTT", # For Python version checking. Unneeded if Python>=3.11.
   "DOC", # For docstrings. Requires "preview" to be enabled.
   # Select only some of the `TD` rules.
   "TD004",   # Check for colon after "TODO" keyword.
@@ -54,10 +36,12 @@ ignore = [
   "DOC201",  # Don't make me document return values.
   "E501",    # Allow long lines. Useful mostly for writing log and error messages: having them in a single line makes it easier to search for the message. Note that the formatter will still try to shorten line length whenever possible.
   "PLC1901", # Allow comparing with empty strings. This is needed when the variable could be another falsy value, like `None`.
+  "PLW3201", # Let me create dunder methods
   "PTH110",  # Allow using `os.path.exists`. Removed because Path.exists is 4 times slower.
   "S311",    # Allow pseudo-random generators.
   "T201",    # Allow `print` statements. Useful mostly for debugging.
   "TC001",   # Don't suggest putting imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
+  "TC002",   # Don't suggest putting third party imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
   "TC003",   # Don't suggest putting stdlib imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
 ]
 
@@ -73,6 +57,9 @@ ignore = [
   "S608",    # Allow string building with SQL.
   "SLF001",  # Allow private member access.
   "RUF029",  # Allow async functions without async features.
+]
+"snektest/annotations.py" = [
+  "N816"     # Let me use mixed case for names like `validate_SomeType`.
 ]
 
 [tool.pyright]
