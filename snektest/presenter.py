@@ -11,12 +11,22 @@ console = Console()
 _RESULTS: list[TestResult] = []
 
 
+def print_error(exc: str) -> None:
+    console.print(exc, markup=False, style="red")
+
+
 def print_test_result(result: TestResult) -> None:
-    console.print(f"{result.name!s} ... ", end="", markup=False, highlight=False)
+    console.print(
+        f"{result.name!s} ... ", end="", markup=False, highlight=False, no_wrap=True
+    )
     if isinstance(result.result, PassedResult):
-        console.print(f"[green]OK[/green] ({result.duration:.2f}s)", highlight=False)
+        console.print(
+            f"[green]OK[/green] ({result.duration:.2f}s)", highlight=False, no_wrap=True
+        )
     else:
-        console.print(f"[red]FAIL[/red] ({result.duration:.2f}s)", highlight=False)
+        console.print(
+            f"[red]FAIL[/red] ({result.duration:.2f}s)", highlight=False, no_wrap=True
+        )
     _RESULTS.append(result)
 
 
@@ -47,7 +57,6 @@ def print_summary(total_duration: float) -> None:
     passed_count = sum(1 for _ in _RESULTS if isinstance(_.result, PassedResult))
     failed_count = sum(1 for _ in _RESULTS if isinstance(_.result, FailedResult))
 
-    # 1. Short Summary of Failures
     if failed_count > 0:
         console.rule("[wheat1]SUMMARY", style="wheat1")
         for result in _RESULTS:
@@ -64,13 +73,12 @@ def print_summary(total_duration: float) -> None:
                 )
         console.print()
 
-    # 2. Final Status Bar
     status_color = "red" if failed_count > 0 else "green"
-    status_text = (
-        f"[bold {status_color}]"
-        f"{failed_count} failed, {passed_count} passed "
-        f"in {total_duration:.2f}s"
-        f"[/bold {status_color}]"
+    status_text = f"[bold {status_color}]"
+    if failed_count > 0:
+        status_text += f"{failed_count} failed, "
+    status_text += (
+        f"{passed_count} passed in {total_duration:.2f}s[/bold {status_color}]"
     )
 
     console.rule(status_text, style=status_color)

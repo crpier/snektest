@@ -5,12 +5,14 @@ import threading
 import time
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
+from pathlib import Path
 from sys import modules
 from types import FunctionType
-from typing import Any
+from typing import Any, TypeGuard
 
 from pydantic import ValidationError
 
+from snektest import _FUNCTION_FIXTURES  # pyright: ignore[reportPrivateUsage]
 from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.models import (
     FailedResult,
@@ -19,9 +21,13 @@ from snektest.models import (
     TestName,
     TestResult,
 )
-from snektest.presenter import print_failures, print_summary, print_test_result
+from snektest.presenter import (
+    print_error,
+    print_failures,
+    print_summary,
+    print_test_result,
+)
 from snektest.utils import (
-    get_loaded_function_fixtures,
     get_registered_session_fixtures,
     get_test_function_params,
     is_test_function,
@@ -34,12 +40,9 @@ ClassTestEntry = tuple[TestName, type[Any]]
 
 TestsQueue = asyncio.Queue[FuncTestEntry | ClassTestEntry]
 
-# TODO: I'm pretty sure I don't need to do this, I just need to make the
-# execute_stuff function return its duration
-TOTAL_DURATION = 0.0
 
-
-def load_from_file(
+# TODO: this should just return test names, not do the queue call
+def load_tests_from_file(
     file_path: PyFilePath,
     filter_item: FilterItem,
     queue: TestsQueue,
@@ -61,24 +64,59 @@ def load_from_file(
         modules[module_name] = module
         spec.loader.exec_module(module)
 
-    for name, func in getmembers(module, isfunction):
-        if not is_test_function(func):
-            continue
-        if filter_item.function_name is not None and filter_item.function_name != name:
-            continue
+    runnable_functions = [func for _, func in getmembers(module, isfunction)]
+    runnable_functions = filter(is_test_function, runnable_functions)
+    if filter_item.function_name:
+        runnable_functions = filter(
+            lambda func: func.__name__ == filter_item.function_name, runnable_functions
+        )
+
+    for func in runnable_functions:
         for param_names in get_test_function_params(func):
+            # TODO: this could be made cleaner
             if filter_item.params and ", ".join(filter_item.params) != ", ".join(
                 param_names
             ):
                 continue
             test_name = TestName(
-                file_path=file_path, func_name=name, param_names=param_names
+                file_path=file_path, func_name=func.__name__, param_names=param_names
             )
             logger.info("Producing test named %s", test_name)
             _ = loop.call_soon_threadsafe(queue.put_nowait, (test_name, func))
 
 
-def load_from_filters(
+def generate_file_list(
+    filter_item: FilterItem, *, logger: logging.Logger
+) -> list[PyFilePath]:
+    """Generate a list of valid file paths for given filter item.
+    Create a common data shape for both dir and file paths in filters"""
+
+    def path_is_runnable(
+        file_path: Path, *, logger: logging.Logger
+    ) -> TypeGuard[PyFilePath]:
+        if not file_path.name.startswith(TEST_FILE_PREFIX):
+            logger.debug("Skipping non-test python file %s", file_path)
+            return False
+        try:
+            file_path = validate_PyFilePath(file_path)
+        except ValidationError:
+            logger.debug("Skipping non-python file %s", file_path)
+            return False
+        return True
+
+    if filter_item.file_path.is_dir():
+        paths = [
+            dirpath / name
+            for dirpath, _, filenames in filter_item.file_path.walk()
+            for name in filenames
+        ]
+    else:
+        paths = [filter_item.file_path]
+
+    return [path for path in paths if path_is_runnable(path, logger=logger)]
+
+
+def load_tests_from_filters(
     filter_items: list[FilterItem],
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
@@ -87,48 +125,25 @@ def load_from_filters(
 ) -> None:
     logger.info("Test collector started")
     for filter_item in filter_items:
-        if filter_item.file_path.is_dir():
-            for dirpath, _, filenames in filter_item.file_path.walk():
-                for name in filenames:
-                    if not name.startswith(TEST_FILE_PREFIX):
-                        logger.debug("Skipping non-test python file %s", dirpath / name)
-                        continue
-                    try:
-                        file_path = validate_PyFilePath(dirpath / name)
-                    except ValidationError:
-                        logger.debug("Skipping non-python file %s", dirpath / name)
-                        continue
-                    load_from_file(
-                        file_path=file_path,
-                        filter_item=filter_item,
-                        queue=queue,
-                        loop=loop,
-                        logger=logger,
-                    )
-        else:
-            if not filter_item.file_path.name.startswith(TEST_FILE_PREFIX):
-                logger.debug("Skipping non-test python file %s", filter_item.file_path)
-                continue
-            try:
-                file_path = validate_PyFilePath(filter_item.file_path)
-            except ValidationError:
-                logger.debug("Skipping non-python file %s", filter_item.file_path)
-                continue
-            load_from_file(
+        file_paths = generate_file_list(filter_item, logger=logger)
+        if len(file_paths) == 0:
+            logger.debug("Filter item %s had no runnable files", filter_item)
+        for file_path in file_paths:
+            load_tests_from_file(
                 file_path=file_path,
                 filter_item=filter_item,
                 queue=queue,
                 loop=loop,
                 logger=logger,
             )
+
     _ = loop.call_soon_threadsafe(queue.shutdown)
 
 
 async def execute_stuff(queue: TestsQueue, *, logger: logging.Logger) -> None:  # noqa: C901, PLR0912
+    total_duration = time.monotonic()
     try:
         while True:
-            global TOTAL_DURATION  # noqa: PLW0603
-            TOTAL_DURATION = time.monotonic()  # pyright: ignore[reportConstantRedefinition]
             name, func = await queue.get()
             logger.info("Processing item %s", name)
             params = ()
@@ -150,27 +165,28 @@ async def execute_stuff(queue: TestsQueue, *, logger: logging.Logger) -> None:  
                     msg = "Is this even possible?"
                     raise RuntimeError(msg) from None
                 result = FailedResult(
-                    # TODO: what to put in the message?
-                    message="fuck you",
                     exc_type=exc_type,
                     exc_value=exc_value,
                     traceback=traceback,
                 )
             print_test_result(TestResult(name=name, duration=duration, result=result))
             # TODO: report teardown failure separately
-            # TODO: we should iterate through fixtures in the reverse order of their loading
-            for fixture, generators in get_loaded_function_fixtures(func).items():
-                for generator in generators:
-                    try:
-                        await anext(generator)
-                    except StopAsyncIteration:
-                        pass
-                    else:
-                        # TODO: if there's multiple generators for a fixture, we should mention which one had the problem
-                        msg = f"Incorrect fixture function {fixture}"
-                        raise ValueError(msg)
+            for generator in reversed(_FUNCTION_FIXTURES):
+                try:
+                    await anext(generator)
+                except StopAsyncIteration:
+                    pass
+                else:
+                    # TODO: if there's multiple generators for a fixture, we should mention which one had the problem
+                    msg = f"Incorrect fixture function {generator.ag_code.co_name}"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+                    raise ValueError(msg)
+            _FUNCTION_FIXTURES.clear()
     except asyncio.QueueShutDown:
-        for fixture_func, (gen, _) in get_registered_session_fixtures().items():
+        pass
+    finally:
+        for fixture_func, (gen, _) in reversed(
+            get_registered_session_fixtures().items()
+        ):
             if gen is not None:
                 try:
                     await anext(gen)
@@ -179,6 +195,10 @@ async def execute_stuff(queue: TestsQueue, *, logger: logging.Logger) -> None:  
                 else:
                     msg = f"Incorrect fixture function {fixture_func}"
                     raise ValueError(msg)
+        # TODO: I don't really like this way of working with the presenter.
+        # It feels like spooky action at a distance
+        print_failures()
+        print_summary(time.monotonic() - total_duration)
 
 
 async def main() -> None:
@@ -193,23 +213,25 @@ async def main() -> None:
                     logging_level = logging.DEBUG
                 case _:
                     # TODO: should raise a proper error. Also, use rich to print this in red I guess.
-                    print(f"Invalid command: {command}")
+                    print_error(f"Invalid option: `{command}`")
+                    return
         else:
-            try:
-                potential_filter.append(command)
-            except ValueError as e:
-                # TODO: use `rich` to color the error in red
-                print(e)
-                # TODO: is there a better option than simple return? We should at least set the exit code
-                return
+            potential_filter.append(command)
+    if not potential_filter:
+        potential_filter.append(".")
     logging.basicConfig(level=logging_level)
     logger = logging.getLogger("snektest")
 
-    filter_items = [FilterItem(item) for item in potential_filter]
+    try:
+        filter_items = [FilterItem(item) for item in potential_filter]
+    except ValueError as e:
+        print_error(str(e))
+        # TODO: don't simply return
+        return
     logger.info("Filters=%s", filter_items)
     queue = TestsQueue()
     producer_thread = threading.Thread(
-        target=load_from_filters,
+        target=load_tests_from_filters,
         kwargs={
             "filter_items": filter_items,
             "queue": queue,
@@ -221,10 +243,6 @@ async def main() -> None:
     try:
         await execute_stuff(queue=queue, logger=logger)
     except asyncio.CancelledError:
-        # TODO: I don't really like this way of working with the presenter.
-        # It feels like spooky action at a distance
-        print_failures()
-        print_summary(time.monotonic() - TOTAL_DURATION)
         logger.info("Execution stopped")
     finally:
         # TODO: should make the function be able to exit early

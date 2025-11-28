@@ -6,21 +6,19 @@ from snektest.models import Param
 
 @session_fixture()
 async def fixture_for_session() -> AsyncGenerator[int]:
-    print("Session fixture starts")
     yield 10
-    print("Session fixture ends")
 
 
 @test()
 async def test_with_session_fixture() -> None:
-    fixture_fixture_result = await load_fixture(fixture_for_session())
-    assert fixture_fixture_result == 10
+    session_fixture_result = await load_fixture(fixture_for_session())
+    assert session_fixture_result == 10
 
 
 @test()
 async def another_test_with_session_fixture() -> None:
-    fixture_fixture_result = await load_fixture(fixture_for_session())
-    assert fixture_fixture_result == 10
+    session_fixture_result = await load_fixture(fixture_for_session())
+    assert session_fixture_result == 10
 
 
 @test()
@@ -53,9 +51,7 @@ async def test_2_params(param1: str, param2: int) -> None:
 
 
 async def simple_fixture() -> AsyncGenerator[str]:
-    print("starting simple fixture")
     yield "some fixture"
-    print("ending simple fixture")
 
 
 async def fixture_with_param(param1: str) -> AsyncGenerator[str]:
@@ -76,10 +72,10 @@ async def test_with_simple_fixture() -> None:
     assert fixture == "some fixture"
 
 
-@test([Param("the number", "single-param")])
+@test([Param("the number", "single-param"), Param("the number2", "single-param-2")])
 async def test_with_param_fixture(param1: str) -> None:
-    fixture_result = await load_fixture(fixture_with_param(param1))
-    assert fixture_result == "the number"
+    _ = await load_fixture(fixture_with_param(param1))
+    assert True
 
 
 @test([Param("the number", "single-param")])

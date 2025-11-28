@@ -1,21 +1,21 @@
 from collections.abc import AsyncGenerator, Callable
 from collections.abc import Coroutine as _Coroutine
-from inspect import currentframe, getouterframes
+from types import CodeType
 from typing import Any, cast, overload
 
 from snektest.models import Param
 from snektest.models import Scope as Scope
 from snektest.utils import (
+    _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
+    load_session_fixture,
+    mark_test_function,
+    register_session_fixture,
+)
+from snektest.utils import (
     _SESSION_FIXTURES as _SESSION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
 )
 from snektest.utils import (
     get_registered_session_fixtures as get_registered_session_fixtures,
-)
-from snektest.utils import (
-    load_function_fixture,
-    load_session_fixture,
-    mark_test_function,
-    register_session_fixture,
 )
 
 type Coroutine[T] = _Coroutine[None, None, T]
@@ -64,7 +64,7 @@ def session_fixture[R]() -> Callable[
     def decorator(
         fixture_func: Callable[[], AsyncGenerator[R]],
     ) -> Callable[[], AsyncGenerator[R]]:
-        register_session_fixture(fixture_func)
+        register_session_fixture(fixture_func.__code__)
         return fixture_func
 
     return decorator
@@ -73,22 +73,9 @@ def session_fixture[R]() -> Callable[
 async def load_fixture[R](
     fixture_gen: AsyncGenerator[R],
 ) -> R:
-    fixture_func = cast(
-        "Callable[..., Any]",
-        fixture_gen.ag_frame.f_globals[fixture_gen.ag_code.co_name],  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-    )
-    if fixture_func in get_registered_session_fixtures():
-        return await load_session_fixture(fixture_func)
-    frame = currentframe()
-    outer_frames = getouterframes(frame)
-    function_frame = outer_frames[1]
-    test_func = cast(
-        "Callable[..., Any]",
-        # TODO: might be able to remove this horrible thing by storing code objects directly
-        function_frame.frame.f_globals[function_frame.frame.f_code.co_name],
-    )
-    load_function_fixture(
-        test_func=test_func, fixture_func=fixture_func, fixture_gen=fixture_gen
-    )
+    fixture_gen_code = cast("CodeType", fixture_gen.ag_code)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    if fixture_gen_code in get_registered_session_fixtures():
+        return await load_session_fixture(fixture_gen)
 
+    _FUNCTION_FIXTURES.append(fixture_gen)
     return await anext(fixture_gen)

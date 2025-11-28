@@ -80,6 +80,7 @@ class FilterItem:
 
 
 # Set kw_only so we can write attributes in the order they appear
+# TODO: would this actually be better as a regular class?
 @dataclass(kw_only=True)
 class TestName:
     file_path: Path
@@ -123,7 +124,6 @@ class Scope(Enum):
 
 @dataclass(frozen=True)
 class FailedResult:
-    message: str
     exc_type: type[BaseException]
     exc_value: BaseException
     traceback: TracebackType
