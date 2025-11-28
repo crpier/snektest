@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.12.4",
+    "rich>=14.2.0",
 ]
 
 [dependency-groups]
@@ -153,7 +154,6 @@ reportCallInDefaultInitializer = "error"
 reportImplicitStringConcatenation = "error"
 reportImportCycles = "error"
 reportPropertyTypeMismatch = "error"
-reportShadowedImports = "error"
 reportUninitializedInstanceVariable = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
 reportUnusedCallResult = "error"

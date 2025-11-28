@@ -1,12 +1,21 @@
 from collections.abc import AsyncGenerator, Callable
 from collections.abc import Coroutine as _Coroutine
 from inspect import currentframe, getouterframes
-from typing import Annotated, Any, cast, get_args, get_origin, overload
+from typing import Any, cast, overload
 
-from snektest.models import Param, Scope
+from snektest.models import Param
+from snektest.models import Scope as Scope
 from snektest.utils import (
+    _SESSION_FIXTURES as _SESSION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
+)
+from snektest.utils import (
+    get_registered_session_fixtures as get_registered_session_fixtures,
+)
+from snektest.utils import (
+    load_function_fixture,
+    load_session_fixture,
     mark_test_function,
-    register_fixture,
+    register_session_fixture,
 )
 
 type Coroutine[T] = _Coroutine[None, None, T]
@@ -49,36 +58,37 @@ def test(  # pyright: ignore[reportInconsistentOverload]
     return decorator
 
 
-def _determine_scope(func: Callable[..., Any]) -> Scope:
-    if (return_annotation := func.__annotations__.get("return")) is None:
-        return Scope.FUNCTION
-    if get_origin(return_annotation) is not Annotated:
-        return Scope.FUNCTION
-    annotation_args = get_args(return_annotation)
-    if len(annotation_args) != 2:  # noqa: PLR2004
-        return Scope.FUNCTION
-    annotation_param = annotation_args[1]
-    if isinstance(annotation_param, Scope):
-        return annotation_param
-    return Scope.FUNCTION
+def session_fixture[R]() -> Callable[
+    [Callable[[], AsyncGenerator[R]]], Callable[[], AsyncGenerator[R]]
+]:
+    def decorator(
+        fixture_func: Callable[[], AsyncGenerator[R]],
+    ) -> Callable[[], AsyncGenerator[R]]:
+        register_session_fixture(fixture_func)
+        return fixture_func
+
+    return decorator
 
 
 async def load_fixture[R](
-    gen: AsyncGenerator[R],
+    fixture_gen: AsyncGenerator[R],
 ) -> R:
-    original_function = cast(
+    fixture_func = cast(
         "Callable[..., Any]",
-        gen.ag_frame.f_globals[gen.ag_code.co_name],  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        fixture_gen.ag_frame.f_globals[fixture_gen.ag_code.co_name],  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     )
+    if fixture_func in get_registered_session_fixtures():
+        return await load_session_fixture(fixture_func)
     frame = currentframe()
     outer_frames = getouterframes(frame)
     function_frame = outer_frames[1]
     test_func = cast(
         "Callable[..., Any]",
+        # TODO: might be able to remove this horrible thing by storing code objects directly
         function_frame.frame.f_globals[function_frame.frame.f_code.co_name],
     )
-    register_fixture(
-        test_func, (original_function, _determine_scope(original_function), gen)
+    load_function_fixture(
+        test_func=test_func, fixture_func=fixture_func, fixture_gen=fixture_gen
     )
 
-    return await anext(gen)
+    return await anext(fixture_gen)

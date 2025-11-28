@@ -116,21 +116,21 @@ class Param[T]:
         return result
 
 
+class Scope(Enum):
+    FUNCTION = auto()
+    SESSION = auto()
+
+
 @dataclass(frozen=True)
 class FailedResult:
     message: str
+    exc_type: type[BaseException]
+    exc_value: BaseException
     traceback: TracebackType
-    exc_type: type[BaseException] | None
-    exc_value: BaseException | None
-    exc_traceback: TracebackType | None
 
 
 @dataclass
 class TestResult:
     name: TestName
+    duration: float
     result: PassedResult | FailedResult
-
-
-class Scope(Enum):
-    FUNCTION = auto()
-    SESSION = auto()
