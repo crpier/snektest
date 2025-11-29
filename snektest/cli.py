@@ -16,10 +16,8 @@ from pydantic import ValidationError
 
 from snektest import (
     _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
-    # TODO: This doesn't seem right...
-    Coroutine,
 )
-from snektest.annotations import PyFilePath, validate_PyFilePath
+from snektest.annotations import Coroutine, PyFilePath, validate_PyFilePath
 from snektest.models import (
     ArgsError,
     BadRequestError,
@@ -245,7 +243,7 @@ async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> None:
             raise session_teardown_error
 
 
-async def main() -> None:
+async def run_script() -> None:
     logging_level = logging.WARNING
     potential_filter: list[str] = []
     for command in sys.argv[1:]:
@@ -291,6 +289,10 @@ async def main() -> None:
         logger.info("Producer thread ended. Exiting.")
 
 
+def main() -> None:
+    asyncio.run(run_script())
+
+
 if __name__ == "__main__":
     # TODO: exit with proper error code
-    asyncio.run(main())
+    main()

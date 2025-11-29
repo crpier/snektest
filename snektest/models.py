@@ -25,10 +25,6 @@ SnektestError = CollectionError | ArgsError | UnreachableError
 
 class FilterItem:
     def __init__(self, raw_input: str) -> None:
-        """
-        Raises:
-            ValueError: if given bad input
-        """
         if "::" not in raw_input:
             path = Path(raw_input)
             function_name = None

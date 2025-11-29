@@ -1,3 +1,4 @@
+from collections.abc import Coroutine as _Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, NewType
@@ -13,6 +14,8 @@ from pydantic_core import CoreSchema, PydanticCustomError
 from pydantic_core.core_schema import (
     with_info_after_validator_function,
 )
+
+type Coroutine[T] = _Coroutine[None, None, T]
 
 
 @dataclass

@@ -51,7 +51,7 @@ def get_registered_session_fixtures() -> dict[
     return _SESSION_FIXTURES
 
 
-def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
+def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:  # noqa: C901
     if isasyncgen(fixture_gen):
         fixture_code = fixture_gen.ag_code
     elif isgenerator(fixture_gen):
@@ -67,9 +67,12 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
 
                 async def result_updater() -> R:
                     gen, _ = _SESSION_FIXTURES[fixture_code]
+                    if not isasyncgen(gen):
+                        msg = "This should not happen I think"
+                        raise UnreachableError(msg)
                     result = await anext(gen)
 
-                    async def async_wrapper():
+                    async def async_wrapper() -> R:  # noqa: RUF029
                         return result
 
                     _SESSION_FIXTURES[fixture_code] = (gen, async_wrapper())

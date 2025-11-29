@@ -1,6 +1,6 @@
 [project]
 name = "snektest"
-version = "0.1.0"
+version = "0.0.1"
 description = "Do testing and stuff"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -14,6 +14,9 @@ dev = [
     "pyright>=1.1.407",
     "ruff>=0.14.5",
 ]
+
+[project.scripts]             
+snektest = "snektest.cli:main"
 
 ### Formatting and static checking tools ###
 [tool.ruff]

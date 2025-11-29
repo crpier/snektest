@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator, Callable, Generator
-from collections.abc import Coroutine as _Coroutine
 from inspect import isasyncgen, isgenerator
 from typing import Any, overload
 
+from snektest.annotations import Coroutine
 from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
 from snektest.utils import (
@@ -17,8 +17,6 @@ from snektest.utils import (
 from snektest.utils import (
     get_registered_session_fixtures as get_registered_session_fixtures,
 )
-
-type Coroutine[T] = _Coroutine[None, None, T]
 
 
 @overload
