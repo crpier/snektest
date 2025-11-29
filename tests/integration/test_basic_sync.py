@@ -1,17 +1,17 @@
-from collections.abc import AsyncGenerator
+from collections.abc import Generator
 
 from snektest import load_fixture, session_fixture, test
 from snektest.models import Param
 
 
 @session_fixture()
-async def fixture_for_session() -> AsyncGenerator[int]:
+def fixture_for_session() -> Generator[int]:
     print("session fixture started")
     yield 10
     print("session fixture ended")
 
 
-async def simple_fixture_lol() -> AsyncGenerator[None]:
+def simple_fixture_lol() -> Generator[None]:
     print("simple fixture started")
     yield
     print("simple fixture ended")
@@ -20,20 +20,20 @@ async def simple_fixture_lol() -> AsyncGenerator[None]:
 @test()
 async def test_with_session_fixture() -> None:
     print("test started")
-    session_fixture_result = await load_fixture(fixture_for_session())
-    await load_fixture(simple_fixture_lol())
+    session_fixture_result = load_fixture(fixture_for_session())
+    load_fixture(simple_fixture_lol())
     assert session_fixture_result == 10
     print("test ends")
 
 
 @test()
-async def another_test_with_session_fixture() -> None:
-    session_fixture_result = await load_fixture(fixture_for_session())
+def another_test_with_session_fixture() -> None:
+    session_fixture_result = load_fixture(fixture_for_session())
     assert session_fixture_result == 10
 
 
 @test()
-async def test_no_params() -> None:
+def test_no_params() -> None:
     assert True
 
 
@@ -51,45 +51,45 @@ second_param_set = [
 
 
 @test(first_param_set)
-async def test_1_params(param1: str) -> None:
+def test_1_params(param1: str) -> None:
     assert param1.strip() == "bab"
 
 
 @test(first_param_set, second_param_set)
-async def test_2_params(param1: str, param2: int) -> None:
+def test_2_params(param1: str, param2: int) -> None:
     assert param1.strip() == "bab"
     assert param2 == 5
 
 
-async def simple_fixture() -> AsyncGenerator[str]:
+def simple_fixture() -> Generator[str]:
     yield "some fixture"
 
 
-async def fixture_with_param(param1: str) -> AsyncGenerator[str]:
+def fixture_with_param(param1: str) -> Generator[str]:
     yield param1
 
 
-async def fixture_with_teardown() -> AsyncGenerator[str]:
+def fixture_with_teardown() -> Generator[str]:
     yield "some fixture"
 
 
-async def fixture_with_teardown_and_param(param: str) -> AsyncGenerator[str]:
+def fixture_with_teardown_and_param(param: str) -> Generator[str]:
     yield param
 
 
 @test()
-async def test_with_simple_fixture() -> None:
-    fixture = await load_fixture(simple_fixture())
+def test_with_simple_fixture() -> None:
+    fixture = load_fixture(simple_fixture())
     assert fixture == "some fixture"
 
 
 @test([Param("the number", "single-param"), Param("the number2", "single-param-2")])
-async def test_with_param_fixture(param1: str) -> None:
-    _ = await load_fixture(fixture_with_param(param1))
+def test_with_param_fixture(param1: str) -> None:
+    _ = load_fixture(fixture_with_param(param1))
     assert True
 
 
 @test([Param("the number", "single-param")])
-async def test_with_param_and_teardown_fixture(param1: str) -> None:
-    fixture_result = await load_fixture(fixture_with_teardown_and_param(param1))
+def test_with_param_and_teardown_fixture(param1: str) -> None:
+    fixture_result = load_fixture(fixture_with_teardown_and_param(param1))
     assert fixture_result == "the number"

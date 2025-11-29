@@ -3,8 +3,10 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Callable
 from importlib.util import module_from_spec, spec_from_file_location
-from inspect import getmembers, isfunction
+from inspect import getmembers, isasyncgen, iscoroutine, isfunction, isgenerator
+from io import StringIO
 from pathlib import Path
 from sys import modules
 from types import FunctionType
@@ -12,14 +14,22 @@ from typing import Any, TypeGuard
 
 from pydantic import ValidationError
 
-from snektest import _FUNCTION_FIXTURES  # pyright: ignore[reportPrivateUsage]
+from snektest import (
+    _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
+    # TODO: This doesn't seem right...
+    Coroutine,
+)
 from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.models import (
+    ArgsError,
+    BadRequestError,
+    CollectionError,
     FailedResult,
     FilterItem,
     PassedResult,
     TestName,
     TestResult,
+    UnreachableError,
 )
 from snektest.presenter import (
     print_error,
@@ -41,7 +51,6 @@ ClassTestEntry = tuple[TestName, type[Any]]
 TestsQueue = asyncio.Queue[FuncTestEntry | ClassTestEntry]
 
 
-# TODO: this should just return test names, not do the queue call
 def load_tests_from_file(
     file_path: PyFilePath,
     filter_item: FilterItem,
@@ -58,7 +67,7 @@ def load_tests_from_file(
         spec = spec_from_file_location(module_name, file_path)
         if not spec or not spec.loader:
             msg = f"Could not load spec from {file_path}"
-            raise ImportError(msg)
+            raise CollectionError(msg)
 
         module = module_from_spec(spec)
         modules[module_name] = module
@@ -73,13 +82,10 @@ def load_tests_from_file(
 
     for func in runnable_functions:
         for param_names in get_test_function_params(func):
-            # TODO: this could be made cleaner
-            if filter_item.params and ", ".join(filter_item.params) != ", ".join(
-                param_names
-            ):
+            if filter_item.params and filter_item.params != param_names:
                 continue
             test_name = TestName(
-                file_path=file_path, func_name=func.__name__, param_names=param_names
+                file_path=file_path, func_name=func.__name__, params_part=param_names
             )
             logger.info("Producing test named %s", test_name)
             _ = loop.call_soon_threadsafe(queue.put_nowait, (test_name, func))
@@ -140,65 +146,103 @@ def load_tests_from_filters(
     _ = loop.call_soon_threadsafe(queue.shutdown)
 
 
-async def execute_stuff(queue: TestsQueue, *, logger: logging.Logger) -> None:  # noqa: C901, PLR0912
+async def execute_test(
+    name: TestName, func: Callable[..., Coroutine[None] | None]
+) -> TestResult:
+    output_buffer = StringIO()
+    system_stdout = sys.stdout
+    system_stderr = sys.stderr
+    sys.stdout = output_buffer
+    sys.stderr = output_buffer
+    param_values = ()
+    if name.params_part:
+        param_values = [
+            param.value for param in get_test_function_params(func)[name.params_part]
+        ]
+    test_start = time.monotonic()
+    try:
+        res = func(*param_values)
+        if iscoroutine(res):
+            await res
+        duration = time.monotonic() - test_start
+        result = PassedResult()
+    except Exception:
+        duration = time.monotonic() - test_start
+        exc_type, exc_value, traceback = sys.exc_info()
+        if exc_type is None or exc_value is None or traceback is None:
+            msg = "Invalid exception info gathered. This shouldn't be possible!"
+            raise UnreachableError(msg) from None
+        result = FailedResult(
+            exc_type=exc_type,
+            exc_value=exc_value,
+            traceback=traceback,
+        )
+    # TODO: report teardown failure separately
+    for generator in reversed(_FUNCTION_FIXTURES):
+        try:
+            if isasyncgen(generator):
+                await anext(generator)
+            elif isgenerator(generator):
+                next(generator)
+            else:
+                msg = "Is there no better way"
+                raise UnreachableError(msg)
+        except StopAsyncIteration, StopIteration:
+            pass
+        else:
+            # TODO: if there's multiple generators for a fixture, we should mention which one had the problem
+            msg = f"Incorrect fixture function {generator.ag_code.co_name}"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+            raise BadRequestError(msg)
+    _FUNCTION_FIXTURES.clear()
+    sys.stdout = system_stdout
+    sys.stderr = system_stderr
+    return TestResult(
+        name=name, duration=duration, result=result, captured_output=output_buffer
+    )
+
+
+async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> None:
     total_duration = time.monotonic()
+    test_results: list[TestResult] = []
     try:
         while True:
             name, func = await queue.get()
             logger.info("Processing item %s", name)
-            params = ()
-            if name.param_names:
-                params = [
-                    param.value
-                    for param in get_test_function_params(func)[name.param_names]
-                ]
-            test_start = time.monotonic()
-            try:
-                # TODO: capture output
-                await func(*params)
-                duration = time.monotonic() - test_start
-                result = PassedResult()
-            except Exception:
-                duration = time.monotonic() - test_start
-                exc_type, exc_value, traceback = sys.exc_info()
-                if exc_type is None or exc_value is None or traceback is None:
-                    msg = "Is this even possible?"
-                    raise RuntimeError(msg) from None
-                result = FailedResult(
-                    exc_type=exc_type,
-                    exc_value=exc_value,
-                    traceback=traceback,
-                )
-            print_test_result(TestResult(name=name, duration=duration, result=result))
-            # TODO: report teardown failure separately
-            for generator in reversed(_FUNCTION_FIXTURES):
-                try:
-                    await anext(generator)
-                except StopAsyncIteration:
-                    pass
-                else:
-                    # TODO: if there's multiple generators for a fixture, we should mention which one had the problem
-                    msg = f"Incorrect fixture function {generator.ag_code.co_name}"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-                    raise ValueError(msg)
-            _FUNCTION_FIXTURES.clear()
+            test_results.append(await execute_test(name, func))
+            print_test_result(test_results[-1])
     except asyncio.QueueShutDown:
         pass
     finally:
+        # TODO: this could be done with a context manager
+        system_stdout = sys.stdout
+        system_stderr = sys.stderr
+        sys.stdout = StringIO()
+        sys.stderr = StringIO()
+        session_teardown_error: BadRequestError | None = None
         for fixture_func, (gen, _) in reversed(
             get_registered_session_fixtures().items()
         ):
             if gen is not None:
                 try:
-                    await anext(gen)
-                except StopAsyncIteration:
+                    if isasyncgen(gen):
+                        await anext(gen)
+                    elif isgenerator(gen):
+                        next(gen)
+                    else:
+                        msg = "I should stop doing this"
+                        raise UnreachableError(msg)
+                except StopAsyncIteration, StopIteration:
                     pass
                 else:
-                    msg = f"Incorrect fixture function {fixture_func}"
-                    raise ValueError(msg)
-        # TODO: I don't really like this way of working with the presenter.
-        # It feels like spooky action at a distance
-        print_failures()
-        print_summary(time.monotonic() - total_duration)
+                    # TODO: don't stop at the first error
+                    msg = f"Fixture function {fixture_func} more than one yield"
+                    session_teardown_error = BadRequestError(msg)
+        sys.stdout = system_stdout
+        sys.stderr = system_stderr
+        print_failures(test_results)
+        print_summary(test_results, total_duration=time.monotonic() - total_duration)
+        if session_teardown_error:
+            raise session_teardown_error
 
 
 async def main() -> None:
@@ -212,7 +256,6 @@ async def main() -> None:
                 case "--v":
                     logging_level = logging.DEBUG
                 case _:
-                    # TODO: should raise a proper error. Also, use rich to print this in red I guess.
                     print_error(f"Invalid option: `{command}`")
                     return
         else:
@@ -224,9 +267,8 @@ async def main() -> None:
 
     try:
         filter_items = [FilterItem(item) for item in potential_filter]
-    except ValueError as e:
+    except ArgsError as e:
         print_error(str(e))
-        # TODO: don't simply return
         return
     logger.info("Filters=%s", filter_items)
     queue = TestsQueue()
@@ -241,14 +283,14 @@ async def main() -> None:
     )
     producer_thread.start()
     try:
-        await execute_stuff(queue=queue, logger=logger)
+        await run_tests(queue=queue, logger=logger)
     except asyncio.CancelledError:
         logger.info("Execution stopped")
     finally:
-        # TODO: should make the function be able to exit early
         producer_thread.join()
         logger.info("Producer thread ended. Exiting.")
 
 
 if __name__ == "__main__":
+    # TODO: exit with proper error code
     asyncio.run(main())

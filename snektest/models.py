@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from io import StringIO
 from itertools import product
 from pathlib import Path
 from types import TracebackType
-from typing import Any, cast
+from typing import Any
 
 
 class CollectionError(BaseException): ...
@@ -12,8 +13,14 @@ class CollectionError(BaseException): ...
 class ArgsError(BaseException): ...
 
 
-# TODO: make sure we raise custom errors everywhere possible
-SnektestError = CollectionError | ArgsError
+class UnreachableError(BaseException): ...
+
+
+class BadRequestError(BaseException):
+    """When user didn't write test code correctly"""
+
+
+SnektestError = CollectionError | ArgsError | UnreachableError
 
 
 class FilterItem:
@@ -25,43 +32,42 @@ class FilterItem:
         if "::" not in raw_input:
             path = Path(raw_input)
             function_name = None
-            params = cast("tuple[str, ...]", ())
+            params = None
         else:
             file_part, rest = raw_input.split("::", 1)
             if rest == "":
                 msg = f"Invalid test filter - nothing given after semicolon in '{raw_input}'"
-                raise ValueError(msg)
+                raise ArgsError(msg)
 
             path = Path(file_part)
 
             if "[" in rest:
                 if not rest.endswith("]"):
                     msg = f"Invalid test filter - unterminated `[` in '{raw_input}'"
-                    raise ValueError(msg)
+                    raise ArgsError(msg)
                 rest = rest.removesuffix("]")
-                function_name, raw_params = rest.split("[", 1)
-                params = tuple(param.strip() for param in raw_params.split(","))
+                function_name, params = rest.split("[", 1)
             else:
                 function_name = rest
-                params = cast("tuple[str, ...]", ())
+                params = None
 
         if not path.exists():
             msg = f"Invalid test filter - provided path does not exist in '{raw_input}'"
-            raise ValueError(msg)
+            raise ArgsError(msg)
 
         if path.is_file() and path.suffix != ".py":
             msg = f"Invalid test filter - file is not a Python script in '{raw_input}'"
-            raise ValueError(msg)
+            raise ArgsError(msg)
 
         if path.is_file() and not path.name.startswith("test_"):
             msg = (
                 f"Invalid test filter - file does not start with _test in '{raw_input}'"
             )
-            raise ValueError(msg)
+            raise ArgsError(msg)
 
         if function_name is not None and not function_name.isidentifier():
             msg = f"Invalid test filter - invalid identifier {function_name} in '{raw_input}'"
-            raise ValueError(msg)
+            raise ArgsError(msg)
 
         self.file_path = path
         self.function_name = function_name
@@ -80,40 +86,40 @@ class FilterItem:
 
 
 # Set kw_only so we can write attributes in the order they appear
-# TODO: would this actually be better as a regular class?
 @dataclass(kw_only=True)
 class TestName:
     file_path: Path
     func_name: str
-    param_names: tuple[str, ...]
+    params_part: str
 
     def __str__(self) -> str:
         result = str(self.file_path)
         result += f"::{self.func_name}"
-        if self.param_names:
-            result += f"[{', '.join(self.param_names)}]"
+        if self.params_part:
+            result += f"[{self.params_part}]"
         return result
 
 
 class PassedResult: ...
 
 
-# TODO: param names need to be known at import time -> allow users to load
-# their value lazily
 @dataclass
 class Param[T]:
     value: T
     name: str
 
+    # TODO: when there are no params, this generates a dict where the only item's
+    # key is an empty string, making tests work by accident. This isn't good,
+    # we should return `None` when there are no params for the test.
     @staticmethod
     def to_dict(
         params: tuple[list[Param[Any]], ...],
-    ) -> dict[tuple[str, ...], tuple[Param[Any], ...]]:
+    ) -> dict[str, tuple[Param[Any], ...]]:
         """Create a dictionary that contains all possible params combinations"""
         combinations = product(*params)
-        result: dict[tuple[str, ...], tuple[Param[Any], ...]] = {}
+        result: dict[str, tuple[Param[Any], ...]] = {}
         for combination in combinations:
-            result[tuple(param.name for param in combination)] = combination
+            result[", ".join([param.name for param in combination])] = combination
         return result
 
 
@@ -134,3 +140,4 @@ class TestResult:
     name: TestName
     duration: float
     result: PassedResult | FailedResult
+    captured_output: StringIO
