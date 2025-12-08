@@ -16,7 +16,7 @@ dev = [
 ]
 
 [project.scripts]             
-snektest = "snektest.cli:main"
+snek = "snektest.cli:main"
 
 ### Formatting and static checking tools ###
 [tool.ruff]

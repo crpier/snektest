@@ -1,9 +1,14 @@
+import difflib
 from typing import cast
 
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 from rich.traceback import Traceback
 
-from snektest.models import FailedResult, PassedResult, TestResult
+import snektest
+from snektest.models import AssertionFailure, FailedResult, PassedResult, TestResult
 
 # Initialize console
 console = Console()
@@ -40,14 +45,18 @@ def print_failures(test_results: list[TestResult]) -> None:
 
     for result in failures:
         console.rule(f"[bold red]{result.name}", characters="=", style="red")
-
         # We already made sure to filter for failing results only
         failing_result = cast("FailedResult", result.result)
         tb = Traceback.from_exception(
-            failing_result.exc_type, failing_result.exc_value, failing_result.traceback
+            failing_result.exc_type,
+            failing_result.exc_value,
+            failing_result.traceback,
+            suppress=[snektest],
+            max_frames=3
         )
         console.print(tb)
-        console.print()
+        # if isinstance(failing_result.exc_value, AssertionFailure):
+        #     render_assertion_failure(failing_result.exc_value)
 
 
 def print_summary(test_results: list[TestResult], total_duration: float) -> None:
@@ -79,3 +88,58 @@ def print_summary(test_results: list[TestResult], total_duration: float) -> None
     )
 
     console.rule(status_text, style=status_color)
+
+
+def render_assertion_failure(exc: AssertionFailure) -> None:
+    """
+    Pretty-print an AssertionFailure using Rich.
+    """
+
+    # Build a simple Expected/Actual table
+    table = Table(show_header=False, box=None)
+    table.add_row("Expected:", repr(exc.expected))
+    table.add_row("Actual:", repr(exc.actual))
+
+    # Optional string diff
+    diff_block = None
+    if isinstance(exc.actual, str) and isinstance(exc.expected, str):
+        diff_block = _render_string_diff(exc.actual, exc.expected)
+
+    # Build a Rich group with components
+    parts: list[Text | Table] = [table]
+    if diff_block:
+        parts.append(diff_block)
+
+    # Show the exception message + failure panel
+    content = Panel(
+        Text(exc.args[0], style="red") if exc.args else table,
+        title="[bold red]Assertion Failed[/bold red]",
+        border_style="red",
+    )
+
+    console.print(content)
+
+    # print the details (Expected/Actual + diff)
+    for part in parts:
+        console.print(part)
+
+
+def _render_string_diff(a: str, b: str) -> Text:
+    """
+    Colored diff output for strings using difflib.
+    """
+
+    diff_lines = difflib.ndiff(b.splitlines(), a.splitlines())
+    text = Text()
+
+    for line in diff_lines:
+        if line.startswith("+"):
+            _ = text.append(line + "\n", style="green")
+        elif line.startswith("-"):
+            _ = text.append(line + "\n", style="red")
+        elif line.startswith("?"):
+            _ = text.append(line + "\n", style="yellow")
+        else:
+            _ = text.append(line + "\n")
+
+    return text

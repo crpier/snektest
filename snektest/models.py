@@ -20,7 +20,20 @@ class BadRequestError(BaseException):
     """When user didn't write test code correctly"""
 
 
-SnektestError = CollectionError | ArgsError | UnreachableError
+class AssertionFailure(AssertionError):  # noqa: N818
+    def __init__(
+        self,
+        message: str,
+        *,
+        actual: Any = None,
+        expected: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.actual = actual
+        self.expected = expected
+
+
+SnektestError = CollectionError | ArgsError | UnreachableError | AssertionFailure
 
 
 class FilterItem:
