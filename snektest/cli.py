@@ -199,7 +199,7 @@ async def execute_test(
     )
 
 
-async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> None:
+async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> list[TestResult]:
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
     try:
@@ -241,9 +241,10 @@ async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> None:
         print_summary(test_results, total_duration=time.monotonic() - total_duration)
         if session_teardown_error:
             raise session_teardown_error
+    return test_results
 
 
-async def run_script() -> None:
+async def run_script() -> int:
     logging_level = logging.WARNING
     potential_filter: list[str] = []
     for command in sys.argv[1:]:
@@ -255,7 +256,7 @@ async def run_script() -> None:
                     logging_level = logging.DEBUG
                 case _:
                     print_error(f"Invalid option: `{command}`")
-                    return
+                    return 2
         else:
             potential_filter.append(command)
     if not potential_filter:
@@ -267,7 +268,7 @@ async def run_script() -> None:
         filter_items = [FilterItem(item) for item in potential_filter]
     except ArgsError as e:
         print_error(str(e))
-        return
+        return 2
     logger.info("Filters=%s", filter_items)
     queue = TestsQueue()
     producer_thread = threading.Thread(
@@ -281,16 +282,39 @@ async def run_script() -> None:
     )
     producer_thread.start()
     try:
-        await run_tests(queue=queue, logger=logger)
+        test_results = await run_tests(queue=queue, logger=logger)
     except asyncio.CancelledError:
         logger.info("Execution stopped")
+        return 2
     finally:
         producer_thread.join()
         logger.info("Producer thread ended. Exiting.")
 
+    # Return 0 if all tests passed, 1 if any test failed
+    has_failures = any(isinstance(result.result, FailedResult) for result in test_results)
+    return 1 if has_failures else 0
+
 
 def main() -> None:
-    asyncio.run(run_script())
+    try:
+        exit_code = asyncio.run(run_script())
+    except CollectionError as e:
+        print_error(f"Collection error: {e}")
+        sys.exit(2)
+    except BadRequestError as e:
+        print_error(f"Bad request error: {e}")
+        sys.exit(2)
+    except UnreachableError as e:
+        print_error(f"Internal error: {e}")
+        sys.exit(2)
+    except KeyboardInterrupt:
+        print_error("Interrupted by user")
+        sys.exit(2)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        sys.exit(2)
+    else:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
