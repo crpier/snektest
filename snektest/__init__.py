@@ -3,6 +3,24 @@ from inspect import isasyncgen, isgenerator
 from typing import Any, overload
 
 from snektest.annotations import Coroutine
+from snektest.assertions import (
+    assert_eq as assert_eq,  # Backward compatibility
+)
+from snektest.assertions import (
+    assert_equal as assert_equal,
+)
+from snektest.assertions import (
+    assert_false as assert_false,
+)
+from snektest.assertions import (
+    assert_in as assert_in,
+)
+from snektest.assertions import (
+    assert_not_equal as assert_not_equal,
+)
+from snektest.assertions import (
+    assert_true as assert_true,
+)
 from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
 from snektest.utils import (

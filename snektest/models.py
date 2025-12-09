@@ -27,10 +27,12 @@ class AssertionFailure(AssertionError):  # noqa: N818
         *,
         actual: Any = None,
         expected: Any = None,
+        operator: str | None = None,
     ) -> None:
         super().__init__(message)
         self.actual = actual
         self.expected = expected
+        self.operator = operator
 
 
 SnektestError = CollectionError | ArgsError | UnreachableError | AssertionFailure

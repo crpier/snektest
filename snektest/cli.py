@@ -251,7 +251,7 @@ async def run_script() -> None:
             match command:
                 case "-v":
                     logging_level = logging.INFO
-                case "--v":
+                case "-vv":
                     logging_level = logging.DEBUG
                 case _:
                     print_error(f"Invalid option: `{command}`")
