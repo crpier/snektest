@@ -1,109 +1,29 @@
-from collections.abc import AsyncGenerator, Callable, Generator
-from inspect import isasyncgen, isgenerator
-from types import CodeType
+from collections.abc import Callable
 from typing import Any
 
-from snektest.annotations import Coroutine
-from snektest.models import Param, UnreachableError
+from snektest.models import Param
 
 TEST_ATTR_NAME = "__is_snektest__test__"
 TEST_ATTR_VALUE = object()
 
-FIXTURE_ATTR_NAME = "__snektest_fixtures__"
-
 PARAMS_ATTR_NAME = "__snektest_params__"
-
-_SESSION_FIXTURES: dict[
-    CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
-] = {}
-_FUNCTION_FIXTURES: list[AsyncGenerator[Any] | Generator[Any]] = []
 
 
 def mark_test_function(
     func: Callable[..., Any], params: tuple[list[Param[Any]], ...]
 ) -> None:
+    """Mark a function as a test and store its parameters."""
     setattr(func, TEST_ATTR_NAME, TEST_ATTR_VALUE)
     setattr(func, PARAMS_ATTR_NAME, Param.to_dict(params))
 
 
 def is_test_function(func: Callable[..., Any]) -> bool:
+    """Check if a function is marked as a test."""
     return getattr(func, TEST_ATTR_NAME, None) is TEST_ATTR_VALUE
 
 
 def get_test_function_params(
     func: Callable[..., Any],
 ) -> dict[str, tuple[Param[Any], ...]]:
+    """Get the parameters dict for a test function."""
     return getattr(func, PARAMS_ATTR_NAME)
-
-
-def register_session_fixture(
-    fixture_code: CodeType,
-) -> None:
-    if fixture_code not in _SESSION_FIXTURES:
-        _SESSION_FIXTURES[fixture_code] = (None, None)
-
-
-def get_registered_session_fixtures() -> dict[
-    CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
-]:
-    return _SESSION_FIXTURES
-
-
-def is_session_fixture(fixture_code: CodeType) -> bool:
-    """Check if a fixture code object is registered as a session fixture."""
-    return fixture_code in _SESSION_FIXTURES
-
-
-def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:  # noqa: C901
-    if isasyncgen(fixture_gen):
-        fixture_code = fixture_gen.ag_code
-    elif isgenerator(fixture_gen):
-        fixture_code = fixture_gen.gi_code
-    else:
-        msg = "I'm only doing this to please the type checker"
-        raise UnreachableError(msg)
-    try:
-        gen, result = _SESSION_FIXTURES[fixture_code]
-        if gen is None:
-            gen = fixture_gen
-            if isasyncgen(gen):
-
-                async def result_updater() -> R:
-                    gen, _ = _SESSION_FIXTURES[fixture_code]
-                    if not isasyncgen(gen):
-                        msg = "This should not happen I think"
-                        raise UnreachableError(msg)
-                    result = await anext(gen)
-
-                    async def async_wrapper() -> R:  # noqa: RUF029
-                        return result
-
-                    _SESSION_FIXTURES[fixture_code] = (gen, async_wrapper())
-                    return result
-
-                result = result_updater()
-            elif isgenerator(gen):
-                result = next(gen)
-            else:
-                msg = "Ooof, why?"
-                raise UnreachableError(msg)
-            _SESSION_FIXTURES[fixture_code] = (gen, result)
-    except IndexError:
-        msg = f"Function {fixture_code.__qualname__} was not registered as a session fixture. This shouldn't be possible!"
-        raise UnreachableError(msg) from None
-    else:
-        return result  # pyright: ignore[reportReturnType]
-
-
-def load_function_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> Coroutine[R] | R:
-    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value.
-
-    This encapsulates the internal structure of function fixture management.
-    """
-    _FUNCTION_FIXTURES.append(fixture_gen)
-    if isasyncgen(fixture_gen):
-        return anext(fixture_gen)
-    if isgenerator(fixture_gen):
-        return next(fixture_gen)
-    msg = "Fixture must be a generator or async generator"
-    raise UnreachableError(msg)

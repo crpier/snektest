@@ -227,14 +227,18 @@ def assert_not_in(member: Any, container: Any, *, msg: str | None = None) -> Non
         )
 
 
-def assert_isinstance(obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None) -> None:
+def assert_isinstance(
+    obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None
+) -> None:
     """Assert that isinstance(obj, classinfo) is True.
 
     Raises:
         AssertionFailure: If isinstance(obj, classinfo) is False
     """
     if not isinstance(obj, classinfo):
-        type_name = classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
+        type_name = (
+            classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
+        )
         message = msg or f"{obj!r} is not an instance of {type_name}"
         raise AssertionFailure(
             message,
@@ -244,14 +248,18 @@ def assert_isinstance(obj: Any, classinfo: type | tuple[type, ...], *, msg: str 
         )
 
 
-def assert_not_isinstance(obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None) -> None:
+def assert_not_isinstance(
+    obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None
+) -> None:
     """Assert that isinstance(obj, classinfo) is False.
 
     Raises:
         AssertionFailure: If isinstance(obj, classinfo) is True
     """
     if isinstance(obj, classinfo):
-        type_name = classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
+        type_name = (
+            classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
+        )
         message = msg or f"{obj!r} is an instance of {type_name}"
         raise AssertionFailure(
             message,

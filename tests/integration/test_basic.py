@@ -12,9 +12,9 @@ async def fixture_for_session() -> AsyncGenerator[int]:
 
 
 async def simple_fixture_lol() -> AsyncGenerator[None]:
-    print("simple fixture started")
+    print("simple async fixture started")
     yield
-    print("simple fixture ended")
+    print("simple async fixture ended")
 
 
 @test()

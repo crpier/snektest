@@ -5,7 +5,6 @@ from typing import Any, overload
 from snektest.annotations import Coroutine
 from snektest.assertions import (
     assert_eq as assert_eq,
-    assert_eq as assert_eq,
     assert_false as assert_false,
     assert_ge as assert_ge,
     assert_gt as assert_gt,
@@ -19,23 +18,20 @@ from snektest.assertions import (
     assert_len as assert_len,
     assert_lt as assert_lt,
     assert_ne as assert_ne,
-    assert_ne as assert_ne,
     assert_not_in as assert_not_in,
     assert_not_isinstance as assert_not_isinstance,
     assert_raise as assert_raise,
     assert_true as assert_true,
 )
-from snektest.models import Param, UnreachableError
-from snektest.models import Scope as Scope
-from snektest.utils import (
-    _SESSION_FIXTURES as _SESSION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
-    get_registered_session_fixtures as get_registered_session_fixtures,
+from snektest.fixtures import (
     is_session_fixture,
     load_function_fixture,
     load_session_fixture,
-    mark_test_function,
     register_session_fixture,
 )
+from snektest.models import Param, UnreachableError
+from snektest.models import Scope as Scope
+from snektest.utils import mark_test_function
 
 
 @overload
@@ -101,7 +97,7 @@ def load_fixture[R](
 ) -> Coroutine[R]: ...
 
 
-def load_fixture[R](  # noqa: RET503
+def load_fixture[R](
     fixture_gen: AsyncGenerator[R] | Generator[R],
 ) -> Coroutine[R] | R:
     if isasyncgen(fixture_gen):

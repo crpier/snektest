@@ -89,7 +89,7 @@ class FilterItem:
         if self.function_name is not None:
             result += f"::{self.function_name}"
         if self.params:
-            result += f"[{', '.join(self.params)}]"
+            result += f"[{self.params}]"
         return result
 
     def __repr__(self) -> str:
@@ -153,6 +153,7 @@ class FailedResult:
 @dataclass(frozen=True)
 class TeardownFailure:
     """Represents a fixture teardown failure"""
+
     fixture_name: str
     exc_type: type[BaseException]
     exc_value: BaseException
@@ -166,4 +167,5 @@ class TestResult:
     result: PassedResult | FailedResult
     captured_output: StringIO
     fixture_teardown_failures: list[TeardownFailure]
+    fixture_teardown_output: str | None
     warnings: list[str]

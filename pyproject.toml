@@ -62,8 +62,25 @@ ignore = [
   "SLF001",  # Allow private member access.
   "RUF029",  # Allow async functions without async features.
 ]
+"snektest/__init__.py" = [
+  "I001",    # Allow unsorted imports for better readability of re-exports.
+]
 "snektest/annotations.py" = [
   "N816"     # Let me use mixed case for names like `validate_SomeType`.
+]
+"snektest/collection.py" = [
+  "DOC501",  # Don't require documenting internal exceptions.
+]
+"snektest/execution.py" = [
+  "DOC501",  # Don't require documenting internal exceptions.
+  "TRY301",  # Allow direct raises in functions.
+]
+"snektest/fixtures.py" = [
+  "DOC501",  # Don't require documenting internal exceptions.
+]
+"snektest/output.py" = [
+  "DOC402",  # Don't require documenting yields in context managers.
+  "FBT001",  # Allow boolean positional arguments for simple flags.
 ]
 
 [tool.pyright]
