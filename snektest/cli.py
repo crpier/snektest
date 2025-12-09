@@ -25,6 +25,7 @@ from snektest.models import (
     FailedResult,
     FilterItem,
     PassedResult,
+    TeardownFailure,
     TestName,
     TestResult,
     UnreachableError,
@@ -49,6 +50,7 @@ ClassTestEntry = tuple[TestName, type[Any]]
 TestsQueue = asyncio.Queue[FuncTestEntry | ClassTestEntry]
 
 
+# TODO: Might improve naming of many functions
 def load_tests_from_file(
     file_path: PyFilePath,
     filter_item: FilterItem,
@@ -131,6 +133,7 @@ def load_tests_from_filters(
     for filter_item in filter_items:
         file_paths = generate_file_list(filter_item, logger=logger)
         if len(file_paths) == 0:
+            # TODO: Double check levels of the logs: some are definitely wrong
             logger.debug("Filter item %s had no runnable files", filter_item)
         for file_path in file_paths:
             load_tests_from_file(
@@ -175,8 +178,19 @@ async def execute_test(
             exc_value=exc_value,
             traceback=traceback,
         )
-    # TODO: report teardown failure separately
+
+    # Teardown function fixtures and track failures
+    fixture_teardown_failures: list[TeardownFailure] = []
     for generator in reversed(_FUNCTION_FIXTURES):
+        # Get fixture name before try block so it's available in all branches
+        if isasyncgen(generator):
+            fixture_name = generator.ag_code.co_name
+        elif isgenerator(generator):
+            fixture_name = generator.gi_code.co_name
+        else:
+            msg = "Is there no better way"
+            raise UnreachableError(msg)
+
         try:
             if isasyncgen(generator):
                 await anext(generator)
@@ -187,19 +201,40 @@ async def execute_test(
                 raise UnreachableError(msg)
         except StopAsyncIteration, StopIteration:
             pass
+        except Exception:
+            # Capture teardown failure
+            exc_type, exc_value, traceback = sys.exc_info()
+            if exc_type is None or exc_value is None or traceback is None:
+                msg = "Invalid exception info gathered during teardown. This shouldn't be possible!"
+                raise UnreachableError(msg) from None
+            fixture_teardown_failures.append(
+                TeardownFailure(
+                    fixture_name=fixture_name,
+                    exc_type=exc_type,
+                    exc_value=exc_value,
+                    traceback=traceback,
+                )
+            )
         else:
-            # TODO: if there's multiple generators for a fixture, we should mention which one had the problem
-            msg = f"Incorrect fixture function {generator.ag_code.co_name}"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+            # Generator yielded more than once
+            msg = f"Incorrect fixture function {fixture_name} yielded more than once"
             raise BadRequestError(msg)
+
     _FUNCTION_FIXTURES.clear()
     sys.stdout = system_stdout
     sys.stderr = system_stderr
     return TestResult(
-        name=name, duration=duration, result=result, captured_output=output_buffer
+        name=name,
+        duration=duration,
+        result=result,
+        captured_output=output_buffer,
+        fixture_teardown_failures=fixture_teardown_failures,
     )
 
 
-async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> list[TestResult]:
+async def run_tests(
+    queue: TestsQueue, *, logger: logging.Logger
+) -> tuple[list[TestResult], list[TeardownFailure]]:
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
     try:
@@ -211,16 +246,18 @@ async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> list[TestRe
     except asyncio.QueueShutDown:
         pass
     finally:
-        # TODO: this could be done with a context manager
+        # Teardown session fixtures and track failures
         system_stdout = sys.stdout
         system_stderr = sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-        session_teardown_error: BadRequestError | None = None
+        teardown_output = StringIO()
+        sys.stdout = teardown_output
+        sys.stderr = teardown_output
+        session_teardown_failures: list[TeardownFailure] = []
         for fixture_func, (gen, _) in reversed(
             get_registered_session_fixtures().items()
         ):
             if gen is not None:
+                fixture_name = fixture_func.co_name
                 try:
                     if isasyncgen(gen):
                         await anext(gen)
@@ -231,17 +268,40 @@ async def run_tests(queue: TestsQueue, *, logger: logging.Logger) -> list[TestRe
                         raise UnreachableError(msg)
                 except StopAsyncIteration, StopIteration:
                     pass
+                except Exception:
+                    # Capture teardown failure
+                    exc_type, exc_value, traceback = sys.exc_info()
+                    if exc_type is None or exc_value is None or traceback is None:
+                        msg = "Invalid exception info gathered during session teardown. This shouldn't be possible!"
+                        raise UnreachableError(msg) from None
+                    session_teardown_failures.append(
+                        TeardownFailure(
+                            fixture_name=fixture_name,
+                            exc_type=exc_type,
+                            exc_value=exc_value,
+                            traceback=traceback,
+                        )
+                    )
                 else:
-                    # TODO: don't stop at the first error
-                    msg = f"Fixture function {fixture_func} more than one yield"
-                    session_teardown_error = BadRequestError(msg)
+                    # Generator yielded more than once
+                    msg = f"Session fixture function {fixture_name} yielded more than once"
+                    raise BadRequestError(msg)
+
         sys.stdout = system_stdout
         sys.stderr = system_stderr
+
+        # Print any output from session teardowns
+        if teardown_output.getvalue():
+            print_error("Output from session fixture teardowns:")
+            print_error(teardown_output.getvalue())
+
         print_failures(test_results)
-        print_summary(test_results, total_duration=time.monotonic() - total_duration)
-        if session_teardown_error:
-            raise session_teardown_error
-    return test_results
+        print_summary(
+            test_results,
+            session_teardown_failures=session_teardown_failures,
+            total_duration=time.monotonic() - total_duration,
+        )
+    return test_results, session_teardown_failures
 
 
 async def run_script() -> int:
@@ -282,7 +342,9 @@ async def run_script() -> int:
     )
     producer_thread.start()
     try:
-        test_results = await run_tests(queue=queue, logger=logger)
+        test_results, session_teardown_failures = await run_tests(
+            queue=queue, logger=logger
+        )
     except asyncio.CancelledError:
         logger.info("Execution stopped")
         return 2
@@ -290,9 +352,25 @@ async def run_script() -> int:
         producer_thread.join()
         logger.info("Producer thread ended. Exiting.")
 
-    # Return 0 if all tests passed, 1 if any test failed
-    has_failures = any(isinstance(result.result, FailedResult) for result in test_results)
-    return 1 if has_failures else 0
+    # Return 0 if all tests passed and no teardowns failed
+    # Return 1 if any test failed or any teardown failed
+    has_test_failures = any(
+        isinstance(result.result, FailedResult) for result in test_results
+    )
+    has_fixture_teardown_failures = any(
+        result.fixture_teardown_failures for result in test_results
+    )
+    has_session_teardown_failures = len(session_teardown_failures) > 0
+
+    return (
+        1
+        if (
+            has_test_failures
+            or has_fixture_teardown_failures
+            or has_session_teardown_failures
+        )
+        else 0
+    )
 
 
 def main() -> None:

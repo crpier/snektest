@@ -146,9 +146,19 @@ class FailedResult:
     traceback: TracebackType
 
 
+@dataclass(frozen=True)
+class TeardownFailure:
+    """Represents a fixture teardown failure"""
+    fixture_name: str
+    exc_type: type[BaseException]
+    exc_value: BaseException
+    traceback: TracebackType
+
+
 @dataclass
 class TestResult:
     name: TestName
     duration: float
     result: PassedResult | FailedResult
     captured_output: StringIO
+    fixture_teardown_failures: list[TeardownFailure]

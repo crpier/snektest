@@ -8,7 +8,13 @@ from rich.console import Console
 from rich.syntax import Syntax
 
 import snektest
-from snektest.models import AssertionFailure, FailedResult, PassedResult, TestResult
+from snektest.models import (
+    AssertionFailure,
+    FailedResult,
+    PassedResult,
+    TeardownFailure,
+    TestResult,
+)
 
 # Initialize console
 console = Console()
@@ -93,13 +99,18 @@ def print_failures(test_results: list[TestResult]) -> None:
     failures = [
         result for result in test_results if isinstance(result.result, FailedResult)
     ]
-    if not failures:
+    fixture_teardown_failures = [
+        result for result in test_results if result.fixture_teardown_failures
+    ]
+
+    if not failures and not fixture_teardown_failures:
         return
 
     console.print()
     console.rule("[bold orange3]FAILURES", style="orange3", characters="=")
     console.print()
 
+    # Print test failures
     for result in failures:
         console.rule(f"[bold red]{result.name}", style="red")
         # We already made sure to filter for failing results only
@@ -116,13 +127,40 @@ def print_failures(test_results: list[TestResult]) -> None:
         if isinstance(failing_result.exc_value, AssertionFailure):
             render_assertion_failure(failing_result.exc_value)
 
+    # Print fixture teardown failures
+    for result in fixture_teardown_failures:
+        for teardown_failure in result.fixture_teardown_failures:
+            console.rule(
+                f"[bold red]{result.name} - Fixture teardown: {teardown_failure.fixture_name}",
+                style="red",
+            )
+            _render_traceback_no_box(
+                console,
+                teardown_failure.exc_type,
+                teardown_failure.exc_value,
+                teardown_failure.traceback,
+            )
 
-def print_summary(test_results: list[TestResult], total_duration: float) -> None:
+
+def print_summary(
+    test_results: list[TestResult],
+    total_duration: float,
+    session_teardown_failures: list[TeardownFailure] | None = None,
+) -> None:
+    if session_teardown_failures is None:
+        session_teardown_failures = []
+
     passed_count = sum(1 for _ in test_results if isinstance(_.result, PassedResult))
     failed_count = sum(1 for _ in test_results if isinstance(_.result, FailedResult))
+    fixture_teardown_count = sum(
+        len(result.fixture_teardown_failures) for result in test_results
+    )
+    session_teardown_count = len(session_teardown_failures)
 
-    if failed_count > 0:
+    if failed_count > 0 or fixture_teardown_count > 0 or session_teardown_count > 0:
         console.rule("[wheat1]SUMMARY", style="wheat1")
+
+        # Show test failures
         for result in test_results:
             if (failed_result := result.result) and isinstance(
                 failed_result, FailedResult
@@ -139,12 +177,38 @@ def print_summary(test_results: list[TestResult], total_duration: float) -> None
                         f"{result.name}",
                         markup=False,
                     )
+
+        # Show fixture teardown failures
+        for result in test_results:
+            for teardown_failure in result.fixture_teardown_failures:
+                console.print("FIXTURE TEARDOWN FAILED", style="red", end=" ")
+                console.print(
+                    f"{result.name} - {teardown_failure.fixture_name}: {teardown_failure.exc_value}",
+                    markup=False,
+                )
+
+        # Show session teardown failures
+        for teardown_failure in session_teardown_failures:
+            console.print("SESSION TEARDOWN FAILED", style="red", end=" ")
+            console.print(
+                f"{teardown_failure.fixture_name}: {teardown_failure.exc_value}",
+                markup=False,
+            )
+
         console.print()
 
-    status_color = "red" if failed_count > 0 else "green"
+    status_color = (
+        "red"
+        if (failed_count > 0 or fixture_teardown_count > 0 or session_teardown_count > 0)
+        else "green"
+    )
     status_text = f"[bold {status_color}]"
     if failed_count > 0:
         status_text += f"{failed_count} failed, "
+    if fixture_teardown_count > 0:
+        status_text += f"{fixture_teardown_count} fixture teardown failed, "
+    if session_teardown_count > 0:
+        status_text += f"{session_teardown_count} session teardown failed, "
     status_text += (
         f"{passed_count} passed in {total_duration:.2f}s[/bold {status_color}]"
     )
