@@ -4,21 +4,25 @@ from typing import Any, overload
 
 from snektest.annotations import Coroutine
 from snektest.assertions import (
-    assert_eq as assert_eq,  # Backward compatibility
-)
-from snektest.assertions import (
-    assert_equal as assert_equal,
-)
-from snektest.assertions import (
+    assert_eq as assert_eq,
+    assert_eq as assert_eq,
     assert_false as assert_false,
-)
-from snektest.assertions import (
+    assert_ge as assert_ge,
+    assert_gt as assert_gt,
     assert_in as assert_in,
-)
-from snektest.assertions import (
-    assert_not_equal as assert_not_equal,
-)
-from snektest.assertions import (
+    assert_is as assert_is,
+    assert_is_none as assert_is_none,
+    assert_is_not as assert_is_not,
+    assert_is_not_none as assert_is_not_none,
+    assert_isinstance as assert_isinstance,
+    assert_le as assert_le,
+    assert_len as assert_len,
+    assert_lt as assert_lt,
+    assert_ne as assert_ne,
+    assert_ne as assert_ne,
+    assert_not_in as assert_not_in,
+    assert_not_isinstance as assert_not_isinstance,
+    assert_raise as assert_raise,
     assert_true as assert_true,
 )
 from snektest.models import Param, UnreachableError

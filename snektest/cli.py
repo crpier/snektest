@@ -294,5 +294,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # TODO: exit with proper error code
     main()

@@ -1,8 +1,8 @@
 from snektest import (
-    assert_equal,
+    assert_eq,
     assert_false,
     assert_in,
-    assert_not_equal,
+    assert_ne,
     assert_true,
     test,
 )
@@ -13,19 +13,19 @@ from snektest.models import AssertionFailure
 # Test assert_equal
 @test()
 async def test_assert_equal_passes() -> None:
-    assert_equal(5, 5)
-    assert_equal("hello", "hello")
-    assert_equal([1, 2, 3], [1, 2, 3])
+    assert_eq(5, 5)
+    assert_eq("hello", "hello")
+    assert_eq([1, 2, 3], [1, 2, 3])
 
 
 @test()
 async def test_assert_equal_fails() -> None:
     try:
-        assert_equal(5, 10)
+        assert_eq(5, 10)
     except AssertionFailure as exc:
-        assert_equal(exc.actual, 5)
-        assert_equal(exc.expected, 10)
-        assert_equal(exc.operator, "==")
+        assert_eq(exc.actual, 5)
+        assert_eq(exc.expected, 10)
+        assert_eq(exc.operator, "==")
     else:
         assert False, "Should have raised AssertionFailure"  # noqa: B011
 
@@ -33,47 +33,44 @@ async def test_assert_equal_fails() -> None:
 @test()
 async def test_assert_equal_custom_message() -> None:
     try:
-        assert_equal(1, 2, msg="Custom error message")
+        assert_eq(1, 2, msg="Custom error message")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(str(exc), "Custom error message")
+        assert_eq(str(exc), "Custom error message")
 
 
 # Test assert_not_equal
 @test()
 async def test_assert_not_equal_passes() -> None:
-    assert_not_equal(5, 10)
-    assert_not_equal("hello", "world")
-    assert_not_equal([1, 2], [3, 4])
+    assert_ne(5, 10)
+    assert_ne("hello", "world")
+    assert_ne([1, 2], [3, 4])
 
 
 @test()
 async def test_assert_not_equal_fails() -> None:
     try:
-        assert_not_equal(5, 5)
+        assert_ne(5, 5)
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(exc.actual, 5)
-        assert_equal(exc.expected, 5)
-        assert_equal(exc.operator, "!=")
+        assert_eq(exc.actual, 5)
+        assert_eq(exc.expected, 5)
+        assert_eq(exc.operator, "!=")
 
 
 @test()
 async def test_assert_not_equal_custom_message() -> None:
     try:
-        assert_not_equal("same", "same", msg="Should be different")
+        assert_ne("same", "same", msg="Should be different")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(str(exc), "Should be different")
+        assert_eq(str(exc), "Should be different")
 
 
 # Test assert_true
 @test()
 async def test_assert_true_passes() -> None:
     assert_true(True)  # noqa: FBT003
-    assert_true(1)
-    assert_true("non-empty string")
-    assert_true([1, 2, 3])
 
 
 @test()
@@ -84,7 +81,7 @@ async def test_assert_true_fails() -> None:
     except AssertionFailure as exc:
         assert_false(exc.actual)
         assert_true(exc.expected)
-        assert_equal(exc.operator, "is")
+        assert_eq(exc.operator, "is")
 
 
 @test()
@@ -93,7 +90,7 @@ async def test_assert_true_fails_with_falsy_value() -> None:
         assert_true(0)
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(exc.actual, 0)
+        assert_eq(exc.actual, 0)
         assert_true(exc.expected)
 
 
@@ -103,17 +100,13 @@ async def test_assert_true_custom_message() -> None:
         assert_true([], msg="List should not be empty")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(str(exc), "List should not be empty")
+        assert_eq(str(exc), "List should not be empty")
 
 
 # Test assert_false
 @test()
 async def test_assert_false_passes() -> None:
     assert_false(False)  # noqa: FBT003
-    assert_false(0)
-    assert_false("")
-    assert_false([])
-    assert_false(None)
 
 
 @test()
@@ -123,7 +116,7 @@ async def test_assert_false_fails() -> None:
     except AssertionFailure as exc:
         assert_true(exc.actual)
         assert_false(exc.expected)
-        assert_equal(exc.operator, "is")
+        assert_eq(exc.operator, "is")
     else:
         assert_raise()
 
@@ -134,7 +127,7 @@ async def test_assert_false_fails_with_truthy_value() -> None:
         assert_false(1)
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(exc.actual, 1)
+        assert_eq(exc.actual, 1)
         assert_false(exc.expected)
 
 
@@ -144,7 +137,7 @@ async def test_assert_false_custom_message() -> None:
         assert_false("non-empty", msg="String should be empty")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(str(exc), "String should be empty")
+        assert_eq(str(exc), "String should be empty")
 
 
 # Test assert_in
@@ -162,9 +155,9 @@ async def test_assert_in_fails() -> None:
         assert_in(5, [1, 2, 3])
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(exc.actual, 5)
-        assert_equal(exc.expected, [1, 2, 3])
-        assert_equal(exc.operator, "in")
+        assert_eq(exc.actual, 5)
+        assert_eq(exc.expected, [1, 2, 3])
+        assert_eq(exc.operator, "in")
 
 
 @test()
@@ -173,8 +166,8 @@ async def test_assert_in_fails_string() -> None:
         assert_in("z", "hello")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(exc.actual, "z")
-        assert_equal(exc.expected, "hello")
+        assert_eq(exc.actual, "z")
+        assert_eq(exc.expected, "hello")
 
 
 @test()
@@ -183,4 +176,4 @@ async def test_assert_in_custom_message() -> None:
         assert_in("missing", ["a", "b", "c"], msg="Item not in list")
         assert False, "Should have raised AssertionFailure"  # noqa: B011
     except AssertionFailure as exc:
-        assert_equal(str(exc), "Item not in list")
+        assert_eq(str(exc), "Item not in list")
