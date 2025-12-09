@@ -95,7 +95,14 @@ def print_test_result(result: TestResult) -> None:
         )
 
 
-def print_failures(test_results: list[TestResult]) -> None:
+def print_failures(
+    test_results: list[TestResult],
+    session_teardown_failures: list[TeardownFailure] | None = None,
+    session_teardown_output: str | None = None,
+) -> None:
+    if session_teardown_failures is None:
+        session_teardown_failures = []
+
     failures = [
         result for result in test_results if isinstance(result.result, FailedResult)
     ]
@@ -103,7 +110,7 @@ def print_failures(test_results: list[TestResult]) -> None:
         result for result in test_results if result.fixture_teardown_failures
     ]
 
-    if not failures and not fixture_teardown_failures:
+    if not failures and not fixture_teardown_failures and not session_teardown_failures:
         return
 
     console.print()
@@ -127,6 +134,13 @@ def print_failures(test_results: list[TestResult]) -> None:
         if isinstance(failing_result.exc_value, AssertionFailure):
             render_assertion_failure(failing_result.exc_value)
 
+        # Display captured output if any
+        captured = result.captured_output.getvalue()
+        if captured:
+            console.print()
+            console.print("[yellow]Captured output:[/yellow]")
+            console.print(captured, markup=False, highlight=False)
+
     # Print fixture teardown failures
     for result in fixture_teardown_failures:
         for teardown_failure in result.fixture_teardown_failures:
@@ -140,6 +154,28 @@ def print_failures(test_results: list[TestResult]) -> None:
                 teardown_failure.exc_value,
                 teardown_failure.traceback,
             )
+
+    # Print session teardown failures
+    for teardown_failure in session_teardown_failures:
+        console.rule(
+            f"[bold red]Session fixture teardown: {teardown_failure.fixture_name}",
+            style="red",
+        )
+        _render_traceback_no_box(
+            console,
+            teardown_failure.exc_type,
+            teardown_failure.exc_value,
+            teardown_failure.traceback,
+        )
+
+    # Print session teardown output if there were test failures
+    if session_teardown_output and failures:
+        console.print()
+        console.rule(
+            "[bold yellow]Output from session fixture teardowns",
+            style="yellow",
+        )
+        console.print(session_teardown_output, markup=False, highlight=False)
 
 
 def print_summary(
@@ -156,6 +192,19 @@ def print_summary(
         len(result.fixture_teardown_failures) for result in test_results
     )
     session_teardown_count = len(session_teardown_failures)
+
+    # Collect all warnings
+    all_warnings: list[str] = []
+    for result in test_results:
+        all_warnings.extend(result.warnings)
+
+    # Display warnings if any
+    if all_warnings:
+        console.print()
+        console.rule("[bold yellow]WARNINGS", style="yellow")
+        for warning in all_warnings:
+            console.print(f"[yellow]{warning}[/yellow]", markup=False)
+        console.print()
 
     if failed_count > 0 or fixture_teardown_count > 0 or session_teardown_count > 0:
         console.rule("[wheat1]SUMMARY", style="wheat1")
@@ -189,7 +238,7 @@ def print_summary(
 
         # Show session teardown failures
         for teardown_failure in session_teardown_failures:
-            console.print("SESSION TEARDOWN FAILED", style="red", end=" ")
+            console.print("SESSION FIXTURE TEARDOWN FAILED", style="red", end=" ")
             console.print(
                 f"{teardown_failure.fixture_name}: {teardown_failure.exc_value}",
                 markup=False,
@@ -208,7 +257,7 @@ def print_summary(
     if fixture_teardown_count > 0:
         status_text += f"{fixture_teardown_count} fixture teardown failed, "
     if session_teardown_count > 0:
-        status_text += f"{session_teardown_count} session teardown failed, "
+        status_text += f"{session_teardown_count} session fixture teardown failed, "
     status_text += (
         f"{passed_count} passed in {total_duration:.2f}s[/bold {status_color}]"
     )

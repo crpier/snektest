@@ -3,6 +3,7 @@ import logging
 import sys
 import threading
 import time
+import warnings
 from collections.abc import Callable
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isasyncgen, iscoroutine, isfunction, isgenerator
@@ -14,9 +15,6 @@ from typing import Any, TypeGuard
 
 from pydantic import ValidationError
 
-from snektest import (
-    _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
-)
 from snektest.annotations import Coroutine, PyFilePath, validate_PyFilePath
 from snektest.models import (
     ArgsError,
@@ -37,6 +35,7 @@ from snektest.presenter import (
     print_test_result,
 )
 from snektest.utils import (
+    _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
     get_registered_session_fixtures,
     get_test_function_params,
     is_test_function,
@@ -50,7 +49,6 @@ ClassTestEntry = tuple[TestName, type[Any]]
 TestsQueue = asyncio.Queue[FuncTestEntry | ClassTestEntry]
 
 
-# TODO: Might improve naming of many functions
 def load_tests_from_file(
     file_path: PyFilePath,
     filter_item: FilterItem,
@@ -133,8 +131,7 @@ def load_tests_from_filters(
     for filter_item in filter_items:
         file_paths = generate_file_list(filter_item, logger=logger)
         if len(file_paths) == 0:
-            # TODO: Double check levels of the logs: some are definitely wrong
-            logger.debug("Filter item %s had no runnable files", filter_item)
+            logger.info("Filter item %s had no runnable files", filter_item)
         for file_path in file_paths:
             load_tests_from_file(
                 file_path=file_path,
@@ -148,36 +145,55 @@ def load_tests_from_filters(
 
 
 async def execute_test(
-    name: TestName, func: Callable[..., Coroutine[None] | None]
+    name: TestName,
+    func: Callable[..., Coroutine[None] | None],
+    *,
+    capture_output: bool = True,
 ) -> TestResult:
     output_buffer = StringIO()
     system_stdout = sys.stdout
     system_stderr = sys.stderr
-    sys.stdout = output_buffer
-    sys.stderr = output_buffer
-    param_values = ()
-    if name.params_part:
-        param_values = [
-            param.value for param in get_test_function_params(func)[name.params_part]
-        ]
-    test_start = time.monotonic()
-    try:
-        res = func(*param_values)
-        if iscoroutine(res):
-            await res
-        duration = time.monotonic() - test_start
-        result = PassedResult()
-    except Exception:
-        duration = time.monotonic() - test_start
-        exc_type, exc_value, traceback = sys.exc_info()
-        if exc_type is None or exc_value is None or traceback is None:
-            msg = "Invalid exception info gathered. This shouldn't be possible!"
-            raise UnreachableError(msg) from None
-        result = FailedResult(
-            exc_type=exc_type,
-            exc_value=exc_value,
-            traceback=traceback,
-        )
+
+    # Capture warnings
+    captured_warnings: list[str] = []
+
+    if capture_output:
+        sys.stdout = output_buffer
+        sys.stderr = output_buffer
+
+    # Set up warning capture
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter("always")
+
+        param_values = ()
+        if name.params_part:
+            param_values = [
+                param.value
+                for param in get_test_function_params(func)[name.params_part]
+            ]
+        test_start = time.monotonic()
+        try:
+            res = func(*param_values)
+            if iscoroutine(res):
+                await res
+            duration = time.monotonic() - test_start
+            result = PassedResult()
+        except Exception:
+            duration = time.monotonic() - test_start
+            exc_type, exc_value, traceback = sys.exc_info()
+            if exc_type is None or exc_value is None or traceback is None:
+                msg = "Invalid exception info gathered. This shouldn't be possible!"
+                raise UnreachableError(msg) from None
+            result = FailedResult(
+                exc_type=exc_type,
+                exc_value=exc_value,
+                traceback=traceback,
+            )
+
+        # Collect warnings
+        for warning in warning_list:
+            warning_msg = f"{warning.filename}:{warning.lineno}: {warning.category.__name__}: {warning.message}"
+            captured_warnings.append(warning_msg)
 
     # Teardown function fixtures and track failures
     fixture_teardown_failures: list[TeardownFailure] = []
@@ -221,19 +237,23 @@ async def execute_test(
             raise BadRequestError(msg)
 
     _FUNCTION_FIXTURES.clear()
-    sys.stdout = system_stdout
-    sys.stderr = system_stderr
+
+    if capture_output:
+        sys.stdout = system_stdout
+        sys.stderr = system_stderr
+
     return TestResult(
         name=name,
         duration=duration,
         result=result,
         captured_output=output_buffer,
         fixture_teardown_failures=fixture_teardown_failures,
+        warnings=captured_warnings,
     )
 
 
 async def run_tests(
-    queue: TestsQueue, *, logger: logging.Logger
+    queue: TestsQueue, *, logger: logging.Logger, capture_output: bool = True
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
@@ -241,7 +261,9 @@ async def run_tests(
         while True:
             name, func = await queue.get()
             logger.info("Processing item %s", name)
-            test_results.append(await execute_test(name, func))
+            test_results.append(
+                await execute_test(name, func, capture_output=capture_output)
+            )
             print_test_result(test_results[-1])
     except asyncio.QueueShutDown:
         pass
@@ -250,8 +272,12 @@ async def run_tests(
         system_stdout = sys.stdout
         system_stderr = sys.stderr
         teardown_output = StringIO()
-        sys.stdout = teardown_output
-        sys.stderr = teardown_output
+
+        # Only capture output if capture_output is enabled
+        if capture_output:
+            sys.stdout = teardown_output
+            sys.stderr = teardown_output
+
         session_teardown_failures: list[TeardownFailure] = []
         for fixture_func, (gen, _) in reversed(
             get_registered_session_fixtures().items()
@@ -272,7 +298,7 @@ async def run_tests(
                     # Capture teardown failure
                     exc_type, exc_value, traceback = sys.exc_info()
                     if exc_type is None or exc_value is None or traceback is None:
-                        msg = "Invalid exception info gathered during session teardown. This shouldn't be possible!"
+                        msg = "Invalid exception info gathered during session fixture teardown. This shouldn't be possible!"
                         raise UnreachableError(msg) from None
                     session_teardown_failures.append(
                         TeardownFailure(
@@ -287,15 +313,37 @@ async def run_tests(
                     msg = f"Session fixture function {fixture_name} yielded more than once"
                     raise BadRequestError(msg)
 
-        sys.stdout = system_stdout
-        sys.stderr = system_stderr
+        if capture_output:
+            sys.stdout = system_stdout
+            sys.stderr = system_stderr
 
-        # Print any output from session teardowns
-        if teardown_output.getvalue():
-            print_error("Output from session fixture teardowns:")
-            print_error(teardown_output.getvalue())
+        # Check if there were any failures
+        has_test_failures = any(
+            isinstance(result.result, FailedResult) for result in test_results
+        )
+        has_fixture_teardown_failures = any(
+            result.fixture_teardown_failures for result in test_results
+        )
+        has_session_teardown_failures = len(session_teardown_failures) > 0
 
-        print_failures(test_results)
+        # Prepare session teardown output for display
+        session_output_for_display = None
+        if (
+            capture_output
+            and teardown_output.getvalue()
+            and (
+                has_test_failures
+                or has_fixture_teardown_failures
+                or has_session_teardown_failures
+            )
+        ):
+            session_output_for_display = teardown_output.getvalue()
+
+        print_failures(
+            test_results,
+            session_teardown_failures=session_teardown_failures,
+            session_teardown_output=session_output_for_display,
+        )
         print_summary(
             test_results,
             session_teardown_failures=session_teardown_failures,
@@ -307,6 +355,7 @@ async def run_tests(
 async def run_script() -> int:
     logging_level = logging.WARNING
     potential_filter: list[str] = []
+    capture_output = True
     for command in sys.argv[1:]:
         if command.startswith("-"):
             match command:
@@ -314,6 +363,8 @@ async def run_script() -> int:
                     logging_level = logging.INFO
                 case "-vv":
                     logging_level = logging.DEBUG
+                case "-s":
+                    capture_output = False
                 case _:
                     print_error(f"Invalid option: `{command}`")
                     return 2
@@ -343,7 +394,7 @@ async def run_script() -> int:
     producer_thread.start()
     try:
         test_results, session_teardown_failures = await run_tests(
-            queue=queue, logger=logger
+            queue=queue, logger=logger, capture_output=capture_output
         )
     except asyncio.CancelledError:
         logger.info("Execution stopped")

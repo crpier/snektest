@@ -119,14 +119,18 @@ class Param[T]:
     value: T
     name: str
 
-    # TODO: when there are no params, this generates a dict where the only item's
-    # key is an empty string, making tests work by accident. This isn't good,
-    # we should return `None` when there are no params for the test.
     @staticmethod
     def to_dict(
         params: tuple[list[Param[Any]], ...],
     ) -> dict[str, tuple[Param[Any], ...]]:
-        """Create a dictionary that contains all possible params combinations"""
+        """Create a dictionary that contains all possible params combinations.
+
+        For tests with no parameters, returns {"": ()} to ensure the test runs once.
+        """
+        # Handle the no-params case explicitly
+        if not params:
+            return {"": ()}
+
         combinations = product(*params)
         result: dict[str, tuple[Param[Any], ...]] = {}
         for combination in combinations:
@@ -162,3 +166,4 @@ class TestResult:
     result: PassedResult | FailedResult
     captured_output: StringIO
     fixture_teardown_failures: list[TeardownFailure]
+    warnings: list[str]

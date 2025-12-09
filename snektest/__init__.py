@@ -28,16 +28,13 @@ from snektest.assertions import (
 from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
 from snektest.utils import (
-    _FUNCTION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
+    _SESSION_FIXTURES as _SESSION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
+    get_registered_session_fixtures as get_registered_session_fixtures,
+    is_session_fixture,
+    load_function_fixture,
     load_session_fixture,
     mark_test_function,
     register_session_fixture,
-)
-from snektest.utils import (
-    _SESSION_FIXTURES as _SESSION_FIXTURES,  # pyright: ignore[reportPrivateUsage]
-)
-from snektest.utils import (
-    get_registered_session_fixtures as get_registered_session_fixtures,
 )
 
 
@@ -115,11 +112,7 @@ def load_fixture[R](  # noqa: RET503
         msg = "Hmm..."
         raise UnreachableError(msg)
 
-    if fixture_gen_code in get_registered_session_fixtures():
+    if is_session_fixture(fixture_gen_code):
         return load_session_fixture(fixture_gen)
 
-    _FUNCTION_FIXTURES.append(fixture_gen)
-    if isasyncgen(fixture_gen):
-        return anext(fixture_gen)
-    if isgenerator(fixture_gen):
-        return next(fixture_gen)
+    return load_function_fixture(fixture_gen)

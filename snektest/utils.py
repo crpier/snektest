@@ -3,6 +3,7 @@ from inspect import isasyncgen, isgenerator
 from types import CodeType
 from typing import Any
 
+from snektest.annotations import Coroutine
 from snektest.models import Param, UnreachableError
 
 TEST_ATTR_NAME = "__is_snektest__test__"
@@ -16,9 +17,6 @@ _SESSION_FIXTURES: dict[
     CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
 ] = {}
 _FUNCTION_FIXTURES: list[AsyncGenerator[Any] | Generator[Any]] = []
-
-# TODO: the functions in this module should do more work, so that callers
-# don't have to know the internal structure
 
 
 def mark_test_function(
@@ -49,6 +47,11 @@ def get_registered_session_fixtures() -> dict[
     CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
 ]:
     return _SESSION_FIXTURES
+
+
+def is_session_fixture(fixture_code: CodeType) -> bool:
+    """Check if a fixture code object is registered as a session fixture."""
+    return fixture_code in _SESSION_FIXTURES
 
 
 def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:  # noqa: C901
@@ -90,3 +93,17 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
         raise UnreachableError(msg) from None
     else:
         return result  # pyright: ignore[reportReturnType]
+
+
+def load_function_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> Coroutine[R] | R:
+    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value.
+
+    This encapsulates the internal structure of function fixture management.
+    """
+    _FUNCTION_FIXTURES.append(fixture_gen)
+    if isasyncgen(fixture_gen):
+        return anext(fixture_gen)
+    if isgenerator(fixture_gen):
+        return next(fixture_gen)
+    msg = "Fixture must be a generator or async generator"
+    raise UnreachableError(msg)
