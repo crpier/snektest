@@ -2,53 +2,167 @@ import asyncio
 import logging
 import sys
 import threading
+from importlib.util import module_from_spec, spec_from_file_location
+from inspect import getmembers, isfunction
+from sys import modules
+from types import FunctionType
+from typing import Any
 
-from snektest.collection import TestsQueue, load_tests_from_filters
-from snektest.execution import run_tests
-from snektest.models import (
-    ArgsError,
-    BadRequestError,
-    CollectionError,
-    FailedResult,
-    FilterItem,
-    UnreachableError,
+from pydantic import ValidationError
+
+from snektest.annotations import PyFilePath, validate_PyFilePath
+from snektest.models import FilterItem, Scope, TestName
+from snektest.utils import (
+    get_registered_fixtures,
+    get_test_function_params,
+    is_test_function,
 )
-from snektest.presenter import print_error
+
+TEST_FILE_PREFIX = "test_"
+
+FuncTestEntry = tuple[TestName, FunctionType]
+ClassTestEntry = tuple[TestName, type[Any]]
+
+TestsQueue = asyncio.Queue[FuncTestEntry | ClassTestEntry]
 
 
-async def run_script() -> int:
-    """Parse arguments and run tests."""
+def load_from_file(
+    file_path: PyFilePath,
+    filter_item: FilterItem,
+    queue: TestsQueue,
+    loop: asyncio.AbstractEventLoop,
+    *,
+    logger: logging.Logger,
+) -> None:
+    module_name = ".".join(file_path.with_suffix("").parts)
+    if module_name in modules:
+        module = modules[module_name]
+    else:
+        logger.info("Will import module: %s", module_name)
+        spec = spec_from_file_location(module_name, file_path)
+        if not spec or not spec.loader:
+            msg = f"Could not load spec from {file_path}"
+            raise ImportError(msg)
+
+        module = module_from_spec(spec)
+        modules[module_name] = module
+        spec.loader.exec_module(module)
+
+    for name, func in getmembers(module, isfunction):
+        if not is_test_function(func):
+            continue
+        if filter_item.function_name is not None and filter_item.function_name != name:
+            continue
+        for param_names in get_test_function_params(func):
+            if filter_item.params and ", ".join(filter_item.params) != ", ".join(
+                param_names
+            ):
+                continue
+            test_name = TestName(
+                file_path=file_path, func_name=name, param_names=param_names
+            )
+            logger.info("Producing test named %s", test_name)
+            _ = loop.call_soon_threadsafe(queue.put_nowait, (test_name, func))
+
+
+def load_from_filters(
+    filter_items: list[FilterItem],
+    queue: TestsQueue,
+    loop: asyncio.AbstractEventLoop,
+    *,
+    logger: logging.Logger,
+) -> None:
+    logger.info("Test collector started")
+    for filter_item in filter_items:
+        if filter_item.file_path.is_dir():
+            for dirpath, _, filenames in filter_item.file_path.walk():
+                for name in filenames:
+                    if not name.startswith(TEST_FILE_PREFIX):
+                        logger.debug("Skipping non-test python file %s", dirpath / name)
+                        continue
+                    try:
+                        file_path = validate_PyFilePath(dirpath / name)
+                    except ValidationError:
+                        logger.debug("Skipping non-python file %s", dirpath / name)
+                        continue
+                    load_from_file(
+                        file_path=file_path,
+                        filter_item=filter_item,
+                        queue=queue,
+                        loop=loop,
+                        logger=logger,
+                    )
+        else:
+            if not filter_item.file_path.name.startswith(TEST_FILE_PREFIX):
+                logger.debug("Skipping non-test python file %s", filter_item.file_path)
+                continue
+            try:
+                file_path = validate_PyFilePath(filter_item.file_path)
+            except ValidationError:
+                logger.debug("Skipping non-python file %s", filter_item.file_path)
+                continue
+            load_from_file(
+                file_path=file_path,
+                filter_item=filter_item,
+                queue=queue,
+                loop=loop,
+                logger=logger,
+            )
+    _ = loop.call_soon_threadsafe(queue.shutdown)
+
+
+async def execute_stuff(queue: TestsQueue, *, logger: logging.Logger) -> None:
+    while True:
+        name, func = await queue.get()
+        logger.info("Processing item %s", name)
+        params = ()
+        if name.param_names:
+            params = [
+                param.value
+                for param in get_test_function_params(func)[name.param_names]
+            ]
+        await func(*params)
+        if (fixtures := get_registered_fixtures(func)) is not None:
+            for fixture, (scope, generator) in fixtures.items():
+                if scope == Scope.FUNCTION:
+                    try:
+                        await anext(generator)
+                    except StopAsyncIteration:
+                        pass
+                    else:
+                        msg = f"Incorrect fixture function {fixture}"
+                        raise ValueError(msg)
+
+
+async def main() -> None:
     logging_level = logging.WARNING
     potential_filter: list[str] = []
-    capture_output = True
     for command in sys.argv[1:]:
         if command.startswith("-"):
             match command:
                 case "-v":
                     logging_level = logging.INFO
-                case "-vv":
+                case "--v":
                     logging_level = logging.DEBUG
-                case "-s":
-                    capture_output = False
                 case _:
-                    print_error(f"Invalid option: `{command}`")
-                    return 2
+                    # TODO: should raise a proper error. Also, use rich to print this in red I guess.
+                    print(f"Invalid command: {command}")
         else:
-            potential_filter.append(command)
-    if not potential_filter:
-        potential_filter.append(".")
+            try:
+                potential_filter.append(command)
+            except ValueError as e:
+                # TODO: use `rich` to color the error in red
+                print(e)
+                # TODO: is there a better option than simple return? We should at least set the exit code
+                return
     logging.basicConfig(level=logging_level)
     logger = logging.getLogger("snektest")
 
-    try:
-        filter_items = [FilterItem(item) for item in potential_filter]
-    except ArgsError as e:
-        print_error(str(e))
-        return 2
+    filter_items = [FilterItem(item) for item in potential_filter]
     logger.info("Filters=%s", filter_items)
     queue = TestsQueue()
     producer_thread = threading.Thread(
-        target=load_tests_from_filters,
+        target=load_from_filters,
         kwargs={
             "filter_items": filter_items,
             "queue": queue,
@@ -58,59 +172,14 @@ async def run_script() -> int:
     )
     producer_thread.start()
     try:
-        test_results, session_teardown_failures = await run_tests(
-            queue=queue, logger=logger, capture_output=capture_output
-        )
-    except asyncio.CancelledError:
+        await execute_stuff(queue=queue, logger=logger)
+    except asyncio.CancelledError, asyncio.QueueShutDown:
         logger.info("Execution stopped")
-        return 2
     finally:
+        # TODO: should make the function be able to exit early
         producer_thread.join()
         logger.info("Producer thread ended. Exiting.")
 
-    # Return 0 if all tests passed and no teardowns failed
-    # Return 1 if any test failed or any teardown failed
-    has_test_failures = any(
-        isinstance(result.result, FailedResult) for result in test_results
-    )
-    has_fixture_teardown_failures = any(
-        result.fixture_teardown_failures for result in test_results
-    )
-    has_session_teardown_failures = len(session_teardown_failures) > 0
-
-    return (
-        1
-        if (
-            has_test_failures
-            or has_fixture_teardown_failures
-            or has_session_teardown_failures
-        )
-        else 0
-    )
-
-
-def main() -> None:
-    """Main entry point for the CLI."""
-    try:
-        exit_code = asyncio.run(run_script())
-    except CollectionError as e:
-        print_error(f"Collection error: {e}")
-        sys.exit(2)
-    except BadRequestError as e:
-        print_error(f"Bad request error: {e}")
-        sys.exit(2)
-    except UnreachableError as e:
-        print_error(f"Internal error: {e}")
-        sys.exit(2)
-    except KeyboardInterrupt:
-        print_error("Interrupted by user")
-        sys.exit(2)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        sys.exit(2)
-    else:
-        sys.exit(exit_code)
-
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
