@@ -4,6 +4,7 @@ from rich.console import Console
 
 from snektest.models import (
     AssertionFailure,
+    ErrorResult,
     FailedResult,
     TeardownFailure,
     TestResult,
@@ -25,11 +26,14 @@ def print_failures(
     failures = [
         result for result in test_results if isinstance(result.result, FailedResult)
     ]
+    errors = [
+        result for result in test_results if isinstance(result.result, ErrorResult)
+    ]
     fixture_teardown_failures = [
         result for result in test_results if result.fixture_teardown_failures
     ]
 
-    if not failures and not fixture_teardown_failures and not session_teardown_failures:
+    if not failures and not errors and not fixture_teardown_failures and not session_teardown_failures:
         return
 
     console.print()
@@ -59,6 +63,31 @@ def print_failures(
             console.print(captured, markup=False, highlight=False)
 
         # Display fixture teardown output if any (shown when test fails)
+        if result.fixture_teardown_output:
+            console.print()
+            console.print("[yellow]Captured output from fixture teardowns:[/yellow]")
+            console.print(result.fixture_teardown_output, markup=False, highlight=False)
+
+    # Print test errors
+    for result in errors:
+        console.rule(f"[bold dark_orange]{result.name}", style="dark_orange")
+        error_result = cast("ErrorResult", result.result)
+
+        render_traceback(
+            console,
+            error_result.exc_type,
+            error_result.exc_value,
+            error_result.traceback,
+        )
+
+        # Display captured output if any
+        captured = result.captured_output.getvalue()
+        if captured:
+            console.print()
+            console.print("[yellow]Captured output:[/yellow]")
+            console.print(captured, markup=False, highlight=False)
+
+        # Display fixture teardown output if any
         if result.fixture_teardown_output:
             console.print()
             console.print("[yellow]Captured output from fixture teardowns:[/yellow]")
@@ -97,8 +126,8 @@ def print_failures(
             teardown_failure.traceback,
         )
 
-    # Print session teardown output if there were test failures
-    if session_teardown_output and failures:
+    # Print session teardown output if there were test failures or errors
+    if session_teardown_output and (failures or errors):
         console.print()
         console.rule(
             "[bold yellow]Output from session fixture teardowns",

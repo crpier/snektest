@@ -87,15 +87,16 @@ def load_function_fixture[R](
     raise UnreachableError(msg)
 
 
-def teardown_function_fixtures() -> list[
+def get_active_function_fixtures() -> list[
     tuple[str, AsyncGenerator[Any] | Generator[Any]]
 ]:
-    """Teardown all function fixtures and return the list for the caller to handle.
+    """Return the list of active function fixtures, as (function_name, generator) tuples.
 
     Returns:
         List of (fixture_name, generator) tuples in reverse order.
     """
     fixtures_to_teardown: list[tuple[str, AsyncGenerator[Any] | Generator[Any]]] = []
+    # Returning active fixtures in reverse order makes setup/teardown first-in-last-out
     for generator in reversed(_FUNCTION_FIXTURES):
         if isasyncgen(generator):
             fixture_name = generator.ag_code.co_name

@@ -387,3 +387,5 @@ def test_unreachable():
     else:
         assert_raise("This code path should never execute")
 ```
+
+#TODO: look at all instances of an `elif` and see if a `match` would be better

@@ -26,6 +26,7 @@ async def test_simple_passing_test() -> None:
     result = run_test_subprocess(test_file)
     assert result["passed"] == 1
     assert result["failed"] == 0
+    assert result["errors"] == 0
     assert result["returncode"] == 0
 
 
@@ -47,7 +48,8 @@ async def test_simple_failing_test() -> None:
 
     result = run_test_subprocess(test_file)
     assert result["passed"] == 0
-    assert result["failed"] == 1
+    assert result["failed"] == 0
+    assert result["errors"] == 1
     assert result["returncode"] != 0
 
 
@@ -78,4 +80,5 @@ async def test_multiple_tests() -> None:
     result = run_test_subprocess(test_file)
     assert result["passed"] == 3
     assert result["failed"] == 0
+    assert result["errors"] == 0
     assert result["returncode"] == 0

@@ -11,8 +11,10 @@ from snektest.models import (
     ArgsError,
     BadRequestError,
     CollectionError,
+    ErrorResult,
     FailedResult,
     FilterItem,
+    PassedResult,
     TeardownFailure,
     TestResult,
     UnreachableError,
@@ -27,6 +29,7 @@ class TestRunSummary:
     total_tests: int
     passed: int
     failed: int
+    errors: int
     fixture_teardown_failed: int
     session_teardown_failed: int
     test_results: list[TestResult]
@@ -78,8 +81,9 @@ async def run_tests_programmatic(
 
     return TestRunSummary(
         total_tests=len(test_results),
-        passed=sum(1 for r in test_results if not isinstance(r.result, FailedResult)),
+        passed=sum(1 for r in test_results if isinstance(r.result, PassedResult)),
         failed=sum(1 for r in test_results if isinstance(r.result, FailedResult)),
+        errors=sum(1 for r in test_results if isinstance(r.result, ErrorResult)),
         fixture_teardown_failed=sum(
             1 for r in test_results if r.fixture_teardown_failures
         ),
@@ -133,12 +137,13 @@ async def run_script() -> int:
                 {
                     "passed": summary.passed,
                     "failed": summary.failed,
+                    "errors": summary.errors,
                     "fixture_teardown_failed": summary.fixture_teardown_failed,
                     "session_teardown_failed": summary.session_teardown_failed,
                 }
             )
         )
-        return 0 if summary.failed == 0 else 1
+        return 0 if (summary.failed == 0 and summary.errors == 0) else 1
     queue = TestsQueue()
     collection_exception: list[BaseException] = []
 
@@ -168,9 +173,9 @@ async def run_script() -> int:
             raise collection_exception[0]
 
     # Return 0 if all tests passed and no teardowns failed
-    # Return 1 if any test failed or any teardown failed
+    # Return 1 if any test failed, errored, or any teardown failed
     has_test_failures = any(
-        isinstance(result.result, FailedResult) for result in test_results
+        isinstance(result.result, (FailedResult, ErrorResult)) for result in test_results
     )
     has_fixture_teardown_failures = any(
         result.fixture_teardown_failures for result in test_results

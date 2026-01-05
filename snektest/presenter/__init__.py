@@ -1,6 +1,6 @@
 from rich.console import Console
 
-from snektest.models import PassedResult, TeardownFailure, TestResult
+from snektest.models import ErrorResult, FailedResult, PassedResult, TeardownFailure, TestResult  # noqa: F401
 from snektest.presenter.errors import print_failures as _print_failures
 from snektest.presenter.summary import print_summary as _print_summary
 
@@ -22,9 +22,13 @@ def print_test_result(result: TestResult) -> None:
         console.print(
             f"[green]OK[/green] ({result.duration:.2f}s)", highlight=False, no_wrap=True
         )
-    else:
+    elif isinstance(result.result, FailedResult):
         console.print(
             f"[red]FAIL[/red] ({result.duration:.2f}s)", highlight=False, no_wrap=True
+        )
+    else:  # ErrorResult
+        console.print(
+            f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)", highlight=False, no_wrap=True
         )
 
 

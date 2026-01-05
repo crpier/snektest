@@ -8,11 +8,13 @@ from inspect import isasyncgen, iscoroutine, isgenerator
 from snektest.annotations import Coroutine
 from snektest.collection import TestsQueue
 from snektest.fixtures import (
+    get_active_function_fixtures,
     get_registered_session_fixtures,
-    teardown_function_fixtures,
 )
 from snektest.models import (
+    AssertionFailure,
     BadRequestError,
+    ErrorResult,
     FailedResult,
     PassedResult,
     TeardownFailure,
@@ -76,13 +78,24 @@ async def execute_test(
                 await res
             duration = time.monotonic() - test_start
             result = PassedResult()
-        except Exception:
+        except AssertionFailure:
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = sys.exc_info()
             if exc_type is None or exc_value is None or traceback is None:
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
             result = FailedResult(
+                exc_type=exc_type,
+                exc_value=exc_value,
+                traceback=traceback,
+            )
+        except Exception:
+            duration = time.monotonic() - test_start
+            exc_type, exc_value, traceback = sys.exc_info()
+            if exc_type is None or exc_value is None or traceback is None:
+                msg = "Invalid exception info gathered. This shouldn't be possible!"
+                raise UnreachableError(msg) from None
+            result = ErrorResult(
                 exc_type=exc_type,
                 exc_value=exc_value,
                 traceback=traceback,
@@ -94,7 +107,7 @@ async def execute_test(
         _,
     ):
         fixture_teardown_failures: list[TeardownFailure] = []
-        for fixture_name, generator in teardown_function_fixtures():
+        for fixture_name, generator in get_active_function_fixtures():
             failure = await teardown_fixture(fixture_name, generator)
             if failure:
                 fixture_teardown_failures.append(failure)
@@ -136,7 +149,7 @@ def has_any_failures(
 ) -> tuple[bool, bool, bool]:
     """Check for test failures, fixture failures, and session failures."""
     has_test_failures = any(
-        isinstance(result.result, FailedResult) for result in test_results
+        isinstance(result.result, (FailedResult, ErrorResult)) for result in test_results
     )
     has_fixture_teardown_failures = any(
         result.fixture_teardown_failures for result in test_results
