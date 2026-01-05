@@ -96,20 +96,35 @@ def load_tests_from_filters(
     loop: asyncio.AbstractEventLoop,
     *,
     logger: logging.Logger,
+    exception_holder: list[BaseException] | None = None,
 ) -> None:
-    """Load tests from all filter items and populate the queue."""
-    logger.info("Test collector started")
-    for filter_item in filter_items:
-        file_paths = generate_file_list(filter_item, logger=logger)
-        if len(file_paths) == 0:
-            logger.info("Filter item %s had no runnable files", filter_item)
-        for file_path in file_paths:
-            load_tests_from_file(
-                file_path=file_path,
-                filter_item=filter_item,
-                queue=queue,
-                loop=loop,
-                logger=logger,
-            )
+    """Load tests from all filter items and populate the queue.
 
-    _ = loop.call_soon_threadsafe(queue.shutdown)
+    Args:
+        filter_items: List of filter items to load tests from
+        queue: Queue to populate with tests
+        loop: Event loop for thread-safe queue operations
+        logger: Logger instance
+        exception_holder: Optional list to store exception if one occurs during collection
+    """
+    logger.info("Test collector started")
+    try:
+        for filter_item in filter_items:
+            file_paths = generate_file_list(filter_item, logger=logger)
+            if len(file_paths) == 0:
+                logger.info("Filter item %s had no runnable files", filter_item)
+            for file_path in file_paths:
+                load_tests_from_file(
+                    file_path=file_path,
+                    filter_item=filter_item,
+                    queue=queue,
+                    loop=loop,
+                    logger=logger,
+                )
+    except BaseException as e:
+        # Store exception to be re-raised in main thread
+        if exception_holder is not None:
+            exception_holder.append(e)
+        logger.exception("Exception during test collection")
+    finally:
+        _ = loop.call_soon_threadsafe(queue.shutdown)

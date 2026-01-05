@@ -52,6 +52,7 @@ async def run_tests_programmatic(
     """
     logger = logging.getLogger("snektest")
     queue = TestsQueue()
+    collection_exception: list[BaseException] = []
 
     producer_thread = threading.Thread(
         target=load_tests_from_filters,
@@ -60,6 +61,7 @@ async def run_tests_programmatic(
             "queue": queue,
             "loop": asyncio.get_running_loop(),
             "logger": logger,
+            "exception_holder": collection_exception,
         },
     )
     producer_thread.start()
@@ -70,6 +72,9 @@ async def run_tests_programmatic(
         )
     finally:
         producer_thread.join()
+        # Re-raise any exception that occurred during collection
+        if collection_exception:
+            raise collection_exception[0]
 
     return TestRunSummary(
         total_tests=len(test_results),
@@ -135,6 +140,8 @@ async def run_script() -> int:
         )
         return 0 if summary.failed == 0 else 1
     queue = TestsQueue()
+    collection_exception: list[BaseException] = []
+
     producer_thread = threading.Thread(
         target=load_tests_from_filters,
         kwargs={
@@ -142,6 +149,7 @@ async def run_script() -> int:
             "queue": queue,
             "loop": asyncio.get_running_loop(),
             "logger": logger,
+            "exception_holder": collection_exception,
         },
     )
     producer_thread.start()
@@ -155,6 +163,9 @@ async def run_script() -> int:
     finally:
         producer_thread.join()
         logger.info("Producer thread ended. Exiting.")
+        # Re-raise any exception that occurred during collection
+        if collection_exception:
+            raise collection_exception[0]
 
     # Return 0 if all tests passed and no teardowns failed
     # Return 1 if any test failed or any teardown failed
