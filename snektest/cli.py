@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import sys
 import threading
+from dataclasses import dataclass
 
 from snektest.collection import TestsQueue, load_tests_from_filters
 from snektest.execution import run_tests
@@ -11,9 +13,75 @@ from snektest.models import (
     CollectionError,
     FailedResult,
     FilterItem,
+    TeardownFailure,
+    TestResult,
     UnreachableError,
 )
 from snektest.presenter import print_error
+
+
+@dataclass
+class TestRunSummary:
+    """Summary of test run results."""
+
+    total_tests: int
+    passed: int
+    failed: int
+    fixture_teardown_failed: int
+    session_teardown_failed: int
+    test_results: list[TestResult]
+    session_teardown_failures: list[TeardownFailure]
+
+
+async def run_tests_programmatic(
+    filter_items: list[FilterItem],
+    *,
+    capture_output: bool = True,
+) -> TestRunSummary:
+    """Run tests and return structured results instead of printing.
+
+    This is the programmatic API for testing snektest itself.
+    Returns structured data instead of just printing and exiting.
+
+    Args:
+        filter_items: List of filter items to run tests from
+        capture_output: Whether to capture test output
+
+    Returns:
+        TestRunSummary with test results and counts
+    """
+    logger = logging.getLogger("snektest")
+    queue = TestsQueue()
+
+    producer_thread = threading.Thread(
+        target=load_tests_from_filters,
+        kwargs={
+            "filter_items": filter_items,
+            "queue": queue,
+            "loop": asyncio.get_running_loop(),
+            "logger": logger,
+        },
+    )
+    producer_thread.start()
+
+    try:
+        test_results, session_teardown_failures = await run_tests(
+            queue=queue, logger=logger, capture_output=capture_output
+        )
+    finally:
+        producer_thread.join()
+
+    return TestRunSummary(
+        total_tests=len(test_results),
+        passed=sum(1 for r in test_results if not isinstance(r.result, FailedResult)),
+        failed=sum(1 for r in test_results if isinstance(r.result, FailedResult)),
+        fixture_teardown_failed=sum(
+            1 for r in test_results if r.fixture_teardown_failures
+        ),
+        session_teardown_failed=len(session_teardown_failures),
+        test_results=test_results,
+        session_teardown_failures=session_teardown_failures,
+    )
 
 
 async def run_script() -> int:
@@ -21,6 +89,7 @@ async def run_script() -> int:
     logging_level = logging.WARNING
     potential_filter: list[str] = []
     capture_output = True
+    json_output = False
     for command in sys.argv[1:]:
         if command.startswith("-"):
             match command:
@@ -30,6 +99,8 @@ async def run_script() -> int:
                     logging_level = logging.DEBUG
                 case "-s":
                     capture_output = False
+                case "--json-output":
+                    json_output = True
                 case _:
                     print_error(f"Invalid option: `{command}`")
                     return 2
@@ -46,6 +117,23 @@ async def run_script() -> int:
         print_error(str(e))
         return 2
     logger.info("Filters=%s", filter_items)
+
+    # Use programmatic API if JSON output requested
+    if json_output:
+        summary = await run_tests_programmatic(
+            filter_items, capture_output=capture_output
+        )
+        print(
+            json.dumps(
+                {
+                    "passed": summary.passed,
+                    "failed": summary.failed,
+                    "fixture_teardown_failed": summary.fixture_teardown_failed,
+                    "session_teardown_failed": summary.session_teardown_failed,
+                }
+            )
+        )
+        return 0 if summary.failed == 0 else 1
     queue = TestsQueue()
     producer_thread = threading.Thread(
         target=load_tests_from_filters,
