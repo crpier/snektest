@@ -3,10 +3,11 @@ from snektest import (
     assert_false,
     assert_in,
     assert_ne,
+    assert_raises,
     assert_true,
+    fail,
     test,
 )
-from snektest.assertions import assert_raise
 from snektest.models import AssertionFailure
 
 
@@ -20,23 +21,20 @@ async def test_assert_equal_passes() -> None:
 
 @test()
 async def test_assert_equal_fails() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_eq(5, 10)
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, 5)
-        assert_eq(exc.expected, 10)
-        assert_eq(exc.operator, "==")
-    else:
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
+
+    assert_eq(exc_info.exception.actual, 5)
+    assert_eq(exc_info.exception.expected, 10)
+    assert_eq(exc_info.exception.operator, "==")
 
 
 @test()
 async def test_assert_equal_custom_message() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_eq(1, 2, msg="Custom error message")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(str(exc), "Custom error message")
+
+    assert_eq(str(exc_info.exception), "Custom error message")
 
 
 # Test assert_not_equal
@@ -49,22 +47,20 @@ async def test_assert_not_equal_passes() -> None:
 
 @test()
 async def test_assert_not_equal_fails() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_ne(5, 5)
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, 5)
-        assert_eq(exc.expected, 5)
-        assert_eq(exc.operator, "!=")
+
+    assert_eq(exc_info.exception.actual, 5)
+    assert_eq(exc_info.exception.expected, 5)
+    assert_eq(exc_info.exception.operator, "!=")
 
 
 @test()
 async def test_assert_not_equal_custom_message() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_ne("same", "same", msg="Should be different")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(str(exc), "Should be different")
+
+    assert_eq(str(exc_info.exception), "Should be different")
 
 
 # Test assert_true
@@ -75,32 +71,29 @@ async def test_assert_true_passes() -> None:
 
 @test()
 async def test_assert_true_fails() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_true(False)  # noqa: FBT003
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_false(exc.actual)
-        assert_true(exc.expected)
-        assert_eq(exc.operator, "is")
+
+    assert_false(exc_info.exception.actual)
+    assert_true(exc_info.exception.expected)
+    assert_eq(exc_info.exception.operator, "is")
 
 
 @test()
 async def test_assert_true_fails_with_falsy_value() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_true(0)
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, 0)
-        assert_true(exc.expected)
+
+    assert_eq(exc_info.exception.actual, 0)
+    assert_true(exc_info.exception.expected)
 
 
 @test()
 async def test_assert_true_custom_message() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_true([], msg="List should not be empty")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(str(exc), "List should not be empty")
+
+    assert_eq(str(exc_info.exception), "List should not be empty")
 
 
 # Test assert_false
@@ -111,33 +104,29 @@ async def test_assert_false_passes() -> None:
 
 @test()
 async def test_assert_false_fails() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_false(True)  # noqa: FBT003
-    except AssertionFailure as exc:
-        assert_true(exc.actual)
-        assert_false(exc.expected)
-        assert_eq(exc.operator, "is")
-    else:
-        assert_raise()
+
+    assert_true(exc_info.exception.actual)
+    assert_false(exc_info.exception.expected)
+    assert_eq(exc_info.exception.operator, "is")
 
 
 @test()
 async def test_assert_false_fails_with_truthy_value() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_false(1)
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, 1)
-        assert_false(exc.expected)
+
+    assert_eq(exc_info.exception.actual, 1)
+    assert_false(exc_info.exception.expected)
 
 
 @test()
 async def test_assert_false_custom_message() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_false("non-empty", msg="String should be empty")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(str(exc), "String should be empty")
+
+    assert_eq(str(exc_info.exception), "String should be empty")
 
 
 # Test assert_in
@@ -151,29 +140,127 @@ async def test_assert_in_passes() -> None:
 
 @test()
 async def test_assert_in_fails() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_in(5, [1, 2, 3])
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, 5)
-        assert_eq(exc.expected, [1, 2, 3])
-        assert_eq(exc.operator, "in")
+
+    assert_eq(exc_info.exception.actual, 5)
+    assert_eq(exc_info.exception.expected, [1, 2, 3])
+    assert_eq(exc_info.exception.operator, "in")
 
 
 @test()
 async def test_assert_in_fails_string() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_in("z", "hello")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(exc.actual, "z")
-        assert_eq(exc.expected, "hello")
+
+    assert_eq(exc_info.exception.actual, "z")
+    assert_eq(exc_info.exception.expected, "hello")
 
 
 @test()
 async def test_assert_in_custom_message() -> None:
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_in("missing", ["a", "b", "c"], msg="Item not in list")
-        assert False, "Should have raised AssertionFailure"  # noqa: B011
-    except AssertionFailure as exc:
-        assert_eq(str(exc), "Item not in list")
+
+    assert_eq(str(exc_info.exception), "Item not in list")
+
+
+# Test assert_raises
+@test()
+def test_assert_raises_catches_exception() -> None:
+    """Test that assert_raises catches expected exception."""
+    with assert_raises(ValueError) as exc_info:
+        msg = "test error"
+        raise ValueError(msg)
+
+    assert_eq(type(exc_info.exception), ValueError)
+    assert_eq(str(exc_info.exception), "test error")
+
+
+@test()
+def test_assert_raises_catches_assertion_failure() -> None:
+    """Test that assert_raises works with AssertionFailure."""
+    with assert_raises(AssertionFailure) as exc_info:
+        assert_eq(5, 10)
+
+    assert_eq(exc_info.exception.actual, 5)
+    assert_eq(exc_info.exception.expected, 10)
+    assert_eq(exc_info.exception.operator, "==")
+
+
+@test()
+def test_assert_raises_fails_when_no_exception() -> None:
+    """Test that assert_raises fails if no exception is raised."""
+    with assert_raises(AssertionFailure) as exc_info:
+        with assert_raises(ValueError):
+            pass  # No exception raised
+
+    assert "no exception was raised" in str(exc_info.exception)
+
+
+@test()
+def test_assert_raises_fails_on_wrong_exception_type() -> None:
+    """Test that assert_raises fails if wrong exception type is raised."""
+    with assert_raises(AssertionFailure) as exc_info:
+        with assert_raises(ValueError):
+            msg = "wrong type"
+            raise TypeError(msg)
+
+    error_msg = str(exc_info.exception)
+    assert "Expected ValueError but got TypeError" in error_msg
+
+
+@test()
+def test_assert_raises_custom_message() -> None:
+    """Test assert_raises with custom message."""
+    with assert_raises(AssertionFailure) as exc_info:
+        with assert_raises(ValueError, msg="Custom error message"):
+            pass
+
+    assert_eq(str(exc_info.exception), "Custom error message")
+
+
+@test()
+def test_assert_raises_tuple_of_exceptions() -> None:
+    """Test assert_raises with tuple of exception types."""
+    with assert_raises((ValueError, TypeError)) as exc_info:
+        msg = "value error"
+        raise ValueError(msg)
+
+    assert_eq(type(exc_info.exception), ValueError)
+
+    with assert_raises((ValueError, TypeError)) as exc_info:
+        msg = "type error"
+        raise TypeError(msg)
+
+    assert_eq(type(exc_info.exception), TypeError)
+
+
+@test()
+def test_assert_raises_tuple_fails_on_wrong_type() -> None:
+    """Test that assert_raises with tuple fails on exception not in tuple."""
+    with assert_raises(AssertionFailure) as exc_info:
+        with assert_raises((ValueError, TypeError)):
+            msg = "wrong type"
+            raise KeyError(msg)
+
+    error_msg = str(exc_info.exception)
+    assert "ValueError | TypeError" in error_msg
+    assert "KeyError" in error_msg
+
+
+# Test fail function
+@test()
+def test_fail_always_raises() -> None:
+    """Test that fail always raises AssertionFailure."""
+    with assert_raises(AssertionFailure):
+        fail()
+
+
+@test()
+def test_fail_with_message() -> None:
+    """Test fail with custom message."""
+    with assert_raises(AssertionFailure) as exc_info:
+        fail("Custom failure message")
+
+    assert_eq(str(exc_info.exception), "Custom failure message")

@@ -21,8 +21,9 @@ from snektest.assertions import (
     assert_ne,
     assert_not_in,
     assert_not_isinstance,
-    assert_raise,
+    assert_raises,
     assert_true,
+    fail,
 )
 from snektest.models import AssertionFailure, TestName
 from snektest.utils import (
@@ -156,13 +157,12 @@ def test_assert_eq_passes():
 @test()
 def test_assert_eq_fails():
     """Test assert_eq raises AssertionFailure on inequality."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_eq(1, 2)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure as e:
-        assert_eq(e.actual, 1)
-        assert_eq(e.expected, 2)
-        assert_eq(e.operator, "==")
+
+    assert_eq(exc_info.exception.actual, 1)
+    assert_eq(exc_info.exception.expected, 2)
+    assert_eq(exc_info.exception.operator, "==")
 
 
 @test()
@@ -175,13 +175,12 @@ def test_assert_ne_passes():
 @test()
 def test_assert_ne_fails():
     """Test assert_ne raises AssertionFailure on equality."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_ne(5, 5)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure as e:
-        assert_eq(e.actual, 5)
-        assert_eq(e.expected, 5)
-        assert_eq(e.operator, "!=")
+
+    assert_eq(exc_info.exception.actual, 5)
+    assert_eq(exc_info.exception.expected, 5)
+    assert_eq(exc_info.exception.operator, "!=")
 
 
 @test()
@@ -193,12 +192,11 @@ def test_assert_true_passes():
 @test()
 def test_assert_true_fails_with_truthy():
     """Test assert_true fails even with truthy values (identity check)."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_true(1)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure as e:
-        assert_eq(e.actual, 1)
-        assert_eq(e.expected, True)
+
+    assert_eq(exc_info.exception.actual, 1)
+    assert_eq(exc_info.exception.expected, True)
 
 
 @test()
@@ -210,12 +208,11 @@ def test_assert_false_passes():
 @test()
 def test_assert_false_fails_with_falsy():
     """Test assert_false fails even with falsy values (identity check)."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_false(0)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure as e:
-        assert_eq(e.actual, 0)
-        assert_eq(e.expected, False)
+
+    assert_eq(exc_info.exception.actual, 0)
+    assert_eq(exc_info.exception.expected, False)
 
 
 @test()
@@ -227,11 +224,8 @@ def test_assert_is_none_passes():
 @test()
 def test_assert_is_none_fails():
     """Test assert_is_none fails with non-None values."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_is_none(0)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -245,11 +239,8 @@ def test_assert_is_not_none_passes():
 @test()
 def test_assert_is_not_none_fails():
     """Test assert_is_not_none fails with None."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_is_not_none(None)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -262,11 +253,8 @@ def test_assert_is_passes():
 @test()
 def test_assert_is_fails():
     """Test assert_is fails with different objects."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_is([], [])
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -279,11 +267,8 @@ def test_assert_is_not_passes():
 def test_assert_is_not_fails():
     """Test assert_is_not fails with same object."""
     obj: list[int] = []
-    try:
+    with assert_raises(AssertionFailure):
         assert_is_not(obj, obj)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -296,11 +281,8 @@ def test_assert_lt_passes():
 @test()
 def test_assert_lt_fails():
     """Test assert_lt fails when not less than."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_lt(2, 1)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -313,11 +295,8 @@ def test_assert_gt_passes():
 @test()
 def test_assert_gt_fails():
     """Test assert_gt fails when not greater than."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_gt(1, 2)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -330,11 +309,8 @@ def test_assert_le_passes():
 @test()
 def test_assert_le_fails():
     """Test assert_le fails when greater than."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_le(3, 2)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -347,11 +323,8 @@ def test_assert_ge_passes():
 @test()
 def test_assert_ge_fails():
     """Test assert_ge fails when less than."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_ge(1, 2)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -365,11 +338,8 @@ def test_assert_in_passes():
 @test()
 def test_assert_in_fails():
     """Test assert_in fails when member not in container."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_in(4, [1, 2, 3])
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -382,11 +352,8 @@ def test_assert_not_in_passes():
 @test()
 def test_assert_not_in_fails():
     """Test assert_not_in fails when member in container."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_not_in(1, [1, 2, 3])
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -400,11 +367,8 @@ def test_assert_isinstance_passes():
 @test()
 def test_assert_isinstance_fails():
     """Test assert_isinstance fails with wrong type."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_isinstance(1, str)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -424,11 +388,8 @@ def test_assert_not_isinstance_passes():
 @test()
 def test_assert_not_isinstance_fails():
     """Test assert_not_isinstance fails with correct type."""
-    try:
+    with assert_raises(AssertionFailure):
         assert_not_isinstance(1, int)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure:
-        pass
 
 
 @test()
@@ -442,40 +403,33 @@ def test_assert_len_passes():
 @test()
 def test_assert_len_fails():
     """Test assert_len fails with wrong length."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_len([1, 2, 3], 5)
-        assert_raise("Should have raised AssertionFailure")
-    except AssertionFailure as e:
-        assert_eq(e.actual, 3)
-        assert_eq(e.expected, 5)
+
+    assert_eq(exc_info.exception.actual, 3)
+    assert_eq(exc_info.exception.expected, 5)
 
 
 @test()
-def test_assert_raise_always_fails():
-    """Test that assert_raise always raises AssertionFailure."""
-    try:
-        assert_raise()
-        # This should never be reached
-        msg = "assert_raise should always raise"
-        raise RuntimeError(msg)
-    except AssertionFailure:
-        pass
+def test_fail_always_raises():
+    """Test that fail always raises AssertionFailure."""
+    with assert_raises(AssertionFailure):
+        fail()
 
 
 @test()
-def test_assert_raise_with_message():
-    """Test assert_raise with custom message."""
-    try:
-        assert_raise("Custom failure message")
-    except AssertionFailure as e:
-        assert_eq(str(e), "Custom failure message")
+def test_fail_with_message():
+    """Test fail with custom message."""
+    with assert_raises(AssertionFailure) as exc_info:
+        fail("Custom failure message")
+
+    assert_eq(str(exc_info.exception), "Custom failure message")
 
 
 @test()
 def test_assertion_failure_custom_message():
     """Test that custom messages work in assertions."""
-    try:
+    with assert_raises(AssertionFailure) as exc_info:
         assert_eq(1, 2, msg="Values don't match")
-        assert_raise("Should have raised")
-    except AssertionFailure as e:
-        assert_eq(str(e), "Values don't match")
+
+    assert_eq(str(exc_info.exception), "Values don't match")

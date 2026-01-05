@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from snektest import test
-from snektest.assertions import assert_eq, assert_raise
+from snektest.assertions import assert_eq, assert_raises
 from snektest.models import ArgsError, FilterItem
 
 
@@ -68,12 +68,11 @@ def test_filter_item_str_with_params():
 @test()
 def test_filter_item_nonexistent_path():
     """Test FilterItem raises error for nonexistent path."""
-    try:
+    with assert_raises(ArgsError) as exc_info:
         FilterItem("nonexistent/path/to/file.py")
-        assert_raise("Should have raised ArgsError")
-    except ArgsError as e:
-        msg = str(e)
-        assert_eq("provided path does not exist" in msg, True)
+
+    msg = str(exc_info.exception)
+    assert_eq("provided path does not exist" in msg, True)
 
 
 @test()
@@ -84,12 +83,11 @@ def test_filter_item_non_python_file():
         test_file = Path(tmpdir) / "test_file.txt"
         test_file.write_text("content")
 
-        try:
+        with assert_raises(ArgsError) as exc_info:
             FilterItem(str(test_file))
-            assert_raise("Should have raised ArgsError")
-        except ArgsError as e:
-            msg = str(e)
-            assert_eq("file is not a Python script" in msg, True)
+
+        msg = str(exc_info.exception)
+        assert_eq("file is not a Python script" in msg, True)
 
 
 @test()
@@ -100,45 +98,41 @@ def test_filter_item_file_not_starting_with_test():
         test_file = Path(tmpdir) / "myfile.py"
         test_file.write_text("# python code")
 
-        try:
+        with assert_raises(ArgsError) as exc_info:
             FilterItem(str(test_file))
-            assert_raise("Should have raised ArgsError")
-        except ArgsError as e:
-            msg = str(e)
-            assert_eq("file does not start with _test" in msg, True)
+
+        msg = str(exc_info.exception)
+        assert_eq("file does not start with _test" in msg, True)
 
 
 @test()
 def test_filter_item_empty_after_double_colon():
     """Test FilterItem raises error when nothing follows ::."""
-    try:
+    with assert_raises(ArgsError) as exc_info:
         FilterItem("tests/isolated/test_basic.py::")
-        assert_raise("Should have raised ArgsError")
-    except ArgsError as e:
-        msg = str(e)
-        assert_eq("nothing given after semicolon" in msg, True)
+
+    msg = str(exc_info.exception)
+    assert_eq("nothing given after semicolon" in msg, True)
 
 
 @test()
 def test_filter_item_unterminated_bracket():
     """Test FilterItem raises error for unterminated bracket."""
-    try:
+    with assert_raises(ArgsError) as exc_info:
         FilterItem("tests/isolated/test_basic.py::test_func[param")
-        assert_raise("Should have raised ArgsError")
-    except ArgsError as e:
-        msg = str(e)
-        assert_eq("unterminated" in msg, True)
+
+    msg = str(exc_info.exception)
+    assert_eq("unterminated" in msg, True)
 
 
 @test()
 def test_filter_item_invalid_identifier():
     """Test FilterItem raises error for invalid function name."""
-    try:
+    with assert_raises(ArgsError) as exc_info:
         FilterItem("tests/isolated/test_basic.py::123invalid")
-        assert_raise("Should have raised ArgsError")
-    except ArgsError as e:
-        msg = str(e)
-        assert_eq("invalid identifier" in msg, True)
+
+    msg = str(exc_info.exception)
+    assert_eq("invalid identifier" in msg, True)
 
 
 @test()

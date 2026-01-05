@@ -4,6 +4,7 @@ from typing import Any, overload
 
 from snektest.annotations import Coroutine
 from snektest.assertions import (
+    ExceptionInfo as ExceptionInfo,
     assert_eq as assert_eq,
     assert_false as assert_false,
     assert_ge as assert_ge,
@@ -20,8 +21,9 @@ from snektest.assertions import (
     assert_ne as assert_ne,
     assert_not_in as assert_not_in,
     assert_not_isinstance as assert_not_isinstance,
-    assert_raise as assert_raise,
+    assert_raises as assert_raises,
     assert_true as assert_true,
+    fail as fail,
 )
 from snektest.fixtures import (
     is_session_fixture,

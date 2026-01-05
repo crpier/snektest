@@ -1,6 +1,63 @@
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 from snektest.models import AssertionFailure
+
+
+class ExceptionInfo:
+    """Container for exception information captured by assert_raises."""
+
+    def __init__(self) -> None:
+        self.exception: BaseException | None = None
+
+
+@contextmanager
+def assert_raises(
+    expected_exception: type[BaseException] | tuple[type[BaseException], ...],
+    *,
+    msg: str | None = None,
+) -> Generator[ExceptionInfo, None, None]:
+    """Context manager that asserts code raises expected exception.
+
+    Args:
+        expected_exception: Exception type(s) to expect
+        msg: Optional custom message
+
+    Yields:
+        ExceptionInfo: Object containing the caught exception
+
+    Raises:
+        AssertionFailure: If no exception raised or wrong type
+
+    Example:
+        with assert_raises(ValueError) as exc_info:
+            raise ValueError("test")
+        assert_eq(str(exc_info.exception), "test")
+    """
+    exc_info = ExceptionInfo()
+    try:
+        yield exc_info
+    except expected_exception as exc:
+        exc_info.exception = exc
+        return
+    except BaseException as exc:
+        # Wrong exception type
+        if isinstance(expected_exception, tuple):
+            expected_name = " | ".join(e.__name__ for e in expected_exception)
+        else:
+            expected_name = expected_exception.__name__
+        actual_name = type(exc).__name__
+        message = msg or f"Expected {expected_name} but got {actual_name}"
+        raise AssertionFailure(message, actual=actual_name, expected=expected_name) from exc
+
+    # No exception raised
+    if isinstance(expected_exception, tuple):
+        expected_name = " | ".join(e.__name__ for e in expected_exception)
+    else:
+        expected_name = expected_exception.__name__
+    message = msg or f"Expected {expected_name} but no exception was raised"
+    raise AssertionFailure(message, expected=expected_name)
 
 
 def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:
@@ -286,8 +343,8 @@ def assert_len(obj: Any, expected_length: int, *, msg: str | None = None) -> Non
         )
 
 
-def assert_raise(msg: str | None = None) -> None:
-    """Raise an AssertionFailure with an optional message.
+def fail(msg: str | None = None) -> None:
+    """Unconditionally raise an AssertionFailure.
 
     Args:
         msg: Optional custom message
@@ -296,6 +353,4 @@ def assert_raise(msg: str | None = None) -> None:
         AssertionFailure: Always raises
     """
     message = msg or "Assertion failed"
-    raise AssertionFailure(
-        message,
-    )
+    raise AssertionFailure(message)
