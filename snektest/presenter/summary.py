@@ -10,7 +10,7 @@ def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
         console.print()
         console.rule("[bold yellow]WARNINGS", style="yellow")
         for warning in all_warnings:
-            console.print(warning, markup=False, style="yello")
+            console.print(f"[yellow]{warning}[/yellow]", markup=False)
         console.print()
 
 
