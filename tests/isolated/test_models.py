@@ -20,8 +20,8 @@ def test_filter_item_directory():
 @test()
 def test_filter_item_file():
     """Test FilterItem with a file path."""
-    filter_item = FilterItem("tests/unit/test_basic.py")
-    assert_eq(filter_item.file_path, Path("tests/unit/test_basic.py"))
+    filter_item = FilterItem("tests/isolated/test_basic.py")
+    assert_eq(filter_item.file_path, Path("tests/isolated/test_basic.py"))
     assert_eq(filter_item.function_name, None)
     assert_eq(filter_item.params, None)
 
@@ -29,8 +29,8 @@ def test_filter_item_file():
 @test()
 def test_filter_item_with_function():
     """Test FilterItem with file and function name."""
-    filter_item = FilterItem("tests/unit/test_basic.py::test_assert_eq_passes")
-    assert_eq(filter_item.file_path, Path("tests/unit/test_basic.py"))
+    filter_item = FilterItem("tests/isolated/test_basic.py::test_assert_eq_passes")
+    assert_eq(filter_item.file_path, Path("tests/isolated/test_basic.py"))
     assert_eq(filter_item.function_name, "test_assert_eq_passes")
     assert_eq(filter_item.params, None)
 
@@ -38,8 +38,8 @@ def test_filter_item_with_function():
 @test()
 def test_filter_item_with_params():
     """Test FilterItem with file, function, and params."""
-    filter_item = FilterItem("tests/unit/test_basic.py::test_func[param1, param2]")
-    assert_eq(filter_item.file_path, Path("tests/unit/test_basic.py"))
+    filter_item = FilterItem("tests/isolated/test_basic.py::test_func[param1, param2]")
+    assert_eq(filter_item.file_path, Path("tests/isolated/test_basic.py"))
     assert_eq(filter_item.function_name, "test_func")
     assert_eq(filter_item.params, "param1, param2")
 
@@ -54,15 +54,15 @@ def test_filter_item_str_simple():
 @test()
 def test_filter_item_str_with_function():
     """Test FilterItem string representation with function."""
-    filter_item = FilterItem("tests/unit/test_basic.py::test_func")
-    assert_eq(str(filter_item), "tests/unit/test_basic.py::test_func")
+    filter_item = FilterItem("tests/isolated/test_basic.py::test_func")
+    assert_eq(str(filter_item), "tests/isolated/test_basic.py::test_func")
 
 
 @test()
 def test_filter_item_str_with_params():
     """Test FilterItem string representation with params."""
-    filter_item = FilterItem("tests/unit/test_basic.py::test_func[params]")
-    assert_eq(str(filter_item), "tests/unit/test_basic.py::test_func[params]")
+    filter_item = FilterItem("tests/isolated/test_basic.py::test_func[params]")
+    assert_eq(str(filter_item), "tests/isolated/test_basic.py::test_func[params]")
 
 
 @test()
@@ -112,7 +112,7 @@ def test_filter_item_file_not_starting_with_test():
 def test_filter_item_empty_after_double_colon():
     """Test FilterItem raises error when nothing follows ::."""
     try:
-        FilterItem("tests/unit/test_basic.py::")
+        FilterItem("tests/isolated/test_basic.py::")
         assert_raise("Should have raised ArgsError")
     except ArgsError as e:
         msg = str(e)
@@ -123,7 +123,7 @@ def test_filter_item_empty_after_double_colon():
 def test_filter_item_unterminated_bracket():
     """Test FilterItem raises error for unterminated bracket."""
     try:
-        FilterItem("tests/unit/test_basic.py::test_func[param")
+        FilterItem("tests/isolated/test_basic.py::test_func[param")
         assert_raise("Should have raised ArgsError")
     except ArgsError as e:
         msg = str(e)
@@ -134,7 +134,7 @@ def test_filter_item_unterminated_bracket():
 def test_filter_item_invalid_identifier():
     """Test FilterItem raises error for invalid function name."""
     try:
-        FilterItem("tests/unit/test_basic.py::123invalid")
+        FilterItem("tests/isolated/test_basic.py::123invalid")
         assert_raise("Should have raised ArgsError")
     except ArgsError as e:
         msg = str(e)
@@ -144,7 +144,7 @@ def test_filter_item_invalid_identifier():
 @test()
 def test_filter_item_repr():
     """Test FilterItem repr includes all components."""
-    filter_item = FilterItem("tests/unit/test_basic.py::test_func[params]")
+    filter_item = FilterItem("tests/isolated/test_basic.py::test_func[params]")
     repr_str = repr(filter_item)
 
     # Check that repr contains the key parts
