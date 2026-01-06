@@ -35,7 +35,7 @@ def test_strings():
 Run your tests:
 
 ```bash
-snek
+snektest
 ```
 
 ## Features
@@ -126,13 +126,13 @@ def test_concatenation(greeting: str, target: str):
 
 ```bash
 # Run all tests
-snek
+snektest
 
 # Run specific file
-snek tests/test_myfeature.py
+snektest tests/test_myfeature.py
 
 # Run specific test
-snek tests/test_myfeature.py::test_something
+snektest tests/test_myfeature.py::test_something
 ```
 
 ## How It Works

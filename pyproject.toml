@@ -11,12 +11,13 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.13.1",
     "pyright>=1.1.407",
     "ruff>=0.14.5",
 ]
 
-[project.scripts]             
-snek = "snektest.cli:main"
+[project.scripts]
+snektest = "snektest.cli:main"
 
 ### Formatting and static checking tools ###
 [tool.ruff]

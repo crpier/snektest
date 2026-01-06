@@ -26,7 +26,7 @@ def create_test_file(
 
 
 def run_test_subprocess(test_file: Path) -> dict[str, Any]:
-    """Run snek subprocess on test file and return structured results.
+    """Run snektest subprocess on test file and return structured results.
 
     Args:
         test_file: Path to test file to run
@@ -38,7 +38,7 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
     Raises:
         subprocess.TimeoutExpired: If test takes longer than 0.5 seconds
     """
-    # Run snek with special flag to output JSON results
+    # Run snektest with special flag to output JSON results
     cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
 
     result = subprocess.run(
