@@ -93,7 +93,7 @@ async def run_tests_programmatic(
     )
 
 
-async def run_script() -> int:
+async def run_script() -> int:  # noqa: PLR0912, C901
     """Parse arguments and run tests."""
     logging_level = logging.WARNING
     potential_filter: list[str] = []
@@ -175,7 +175,8 @@ async def run_script() -> int:
     # Return 0 if all tests passed and no teardowns failed
     # Return 1 if any test failed, errored, or any teardown failed
     has_test_failures = any(
-        isinstance(result.result, (FailedResult, ErrorResult)) for result in test_results
+        isinstance(result.result, (FailedResult, ErrorResult))
+        for result in test_results
     )
     has_fixture_teardown_failures = any(
         result.fixture_teardown_failures for result in test_results

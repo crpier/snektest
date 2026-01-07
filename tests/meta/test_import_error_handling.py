@@ -1,15 +1,17 @@
 """Meta tests for handling import errors in test collection."""
 
 import subprocess
+import sys
 from textwrap import dedent
 
 from snektest import load_fixture, test
+from snektest.assertions import fail
 from snektest.testing import create_test_file
 from tests.fixtures import tmp_dir_fixture
 
 
 @test()
-async def test_import_error_does_not_hang() -> None:
+def test_import_error_does_not_hang() -> None:
     """Test that import errors don't cause the test runner to hang.
 
     When a test file fails to import (e.g., raises an exception at module level),
@@ -36,10 +38,10 @@ async def test_import_error_does_not_hang() -> None:
     # The run_test_subprocess has a 0.5 second timeout, so if it hangs
     # it will raise subprocess.TimeoutExpired
     try:
-        import sys
         cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
         result = subprocess.run(
             cmd,
+            check=False,
             capture_output=True,
             text=True,
             timeout=0.5,
@@ -47,5 +49,4 @@ async def test_import_error_does_not_hang() -> None:
         # We expect a non-zero return code due to the collection error
         assert result.returncode != 0
     except subprocess.TimeoutExpired:
-        # If we hit this, the bug is present - the runner is hanging
-        raise AssertionError("Test runner hung on import error - bug is present!")
+        fail("Test runner hung on import error")

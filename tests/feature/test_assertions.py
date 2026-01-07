@@ -66,13 +66,13 @@ async def test_assert_not_equal_custom_message() -> None:
 # Test assert_true
 @test()
 async def test_assert_true_passes() -> None:
-    assert_true(True)  # noqa: FBT003
+    assert_true(True)
 
 
 @test()
 async def test_assert_true_fails() -> None:
     with assert_raises(AssertionFailure) as exc_info:
-        assert_true(False)  # noqa: FBT003
+        assert_true(False)
 
     assert_false(exc_info.exception.actual)
     assert_true(exc_info.exception.expected)
@@ -99,13 +99,13 @@ async def test_assert_true_custom_message() -> None:
 # Test assert_false
 @test()
 async def test_assert_false_passes() -> None:
-    assert_false(False)  # noqa: FBT003
+    assert_false(False)
 
 
 @test()
 async def test_assert_false_fails() -> None:
     with assert_raises(AssertionFailure) as exc_info:
-        assert_false(True)  # noqa: FBT003
+        assert_false(True)
 
     assert_true(exc_info.exception.actual)
     assert_false(exc_info.exception.expected)
@@ -168,7 +168,7 @@ async def test_assert_in_custom_message() -> None:
 # Test assert_raises
 @test()
 def test_assert_raises_catches_exception() -> None:
-    """Test that assert_raises catches expected exception."""
+    """Test that assert_raises catches expected exception."""  # noqa: DOC501
     with assert_raises(ValueError) as exc_info:
         msg = "test error"
         raise ValueError(msg)
@@ -191,29 +191,28 @@ def test_assert_raises_catches_assertion_failure() -> None:
 @test()
 def test_assert_raises_fails_when_no_exception() -> None:
     """Test that assert_raises fails if no exception is raised."""
-    with assert_raises(AssertionFailure) as exc_info:
-        with assert_raises(ValueError):
-            pass  # No exception raised
+    with assert_raises(AssertionFailure) as exc_info, assert_raises(ValueError):
+        pass  # No exception raised
 
     assert "no exception was raised" in str(exc_info.exception)
 
 
 @test()
 def test_assert_raises_fails_on_wrong_exception_type() -> None:
-    """Test that assert_raises fails if wrong exception type is raised."""
-    with assert_raises(AssertionFailure) as exc_info:
+    """Test that assert_raises fails if wrong exception type is raised."""  # noqa: DOC501
+    with assert_raises(AssertionFailure) as exc_info:  # noqa: SIM117
         with assert_raises(ValueError):
             msg = "wrong type"
             raise TypeError(msg)
 
     error_msg = str(exc_info.exception)
-    assert "Expected ValueError but got TypeError" in error_msg
+    assert_eq(error_msg, "Expected to raise ValueError but raised TypeError")
 
 
 @test()
 def test_assert_raises_custom_message() -> None:
     """Test assert_raises with custom message."""
-    with assert_raises(AssertionFailure) as exc_info:
+    with assert_raises(AssertionFailure) as exc_info:  # noqa: SIM117
         with assert_raises(ValueError, msg="Custom error message"):
             pass
 
@@ -222,14 +221,14 @@ def test_assert_raises_custom_message() -> None:
 
 @test()
 def test_assert_raises_tuple_of_exceptions() -> None:
-    """Test assert_raises with tuple of exception types."""
-    with assert_raises((ValueError, TypeError)) as exc_info:
+    """Test assert_raises with tuple of exception types."""  # noqa: DOC501
+    with assert_raises(ValueError, TypeError) as exc_info:
         msg = "value error"
         raise ValueError(msg)
 
     assert_eq(type(exc_info.exception), ValueError)
 
-    with assert_raises((ValueError, TypeError)) as exc_info:
+    with assert_raises(ValueError, TypeError) as exc_info:
         msg = "type error"
         raise TypeError(msg)
 
@@ -238,9 +237,9 @@ def test_assert_raises_tuple_of_exceptions() -> None:
 
 @test()
 def test_assert_raises_tuple_fails_on_wrong_type() -> None:
-    """Test that assert_raises with tuple fails on exception not in tuple."""
-    with assert_raises(AssertionFailure) as exc_info:
-        with assert_raises((ValueError, TypeError)):
+    """Test that assert_raises with tuple fails on exception not in tuple."""  # noqa: DOC501
+    with assert_raises(AssertionFailure) as exc_info:  # noqa: SIM117
+        with assert_raises(ValueError, TypeError):
             msg = "wrong type"
             raise KeyError(msg)
 

@@ -33,7 +33,11 @@ def is_session_fixture(fixture_code: CodeType) -> bool:
 
 
 def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:  # noqa: C901
-    """Load a session-scoped fixture, creating it on first use and reusing thereafter."""
+    """Load a session-scoped fixture, creating it on first use and reusing thereafter.
+
+    Raises:
+        UnreachableError: Error that theoretically can't be reached
+    """
     if isasyncgen(fixture_gen):
         fixture_code = fixture_gen.ag_code
     elif isgenerator(fixture_gen):
@@ -77,7 +81,11 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
 def load_function_fixture[R](
     fixture_gen: AsyncGenerator[R] | Generator[R],
 ) -> Coroutine[R] | R:
-    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value."""
+    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value.
+
+    Raises:
+        UnreachableError: Error that theoretically can't be reached
+    """
     _FUNCTION_FIXTURES.append(fixture_gen)
     if isasyncgen(fixture_gen):
         return anext(fixture_gen)
@@ -94,6 +102,9 @@ def get_active_function_fixtures() -> list[
 
     Returns:
         List of (fixture_name, generator) tuples in reverse order.
+
+    Raises:
+        UnreachableError: Error that theoretically can't be reached
     """
     fixtures_to_teardown: list[tuple[str, AsyncGenerator[Any] | Generator[Any]]] = []
     # Returning active fixtures in reverse order makes setup/teardown first-in-last-out

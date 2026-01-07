@@ -1,6 +1,11 @@
 from rich.console import Console
 
-from snektest.models import ErrorResult, FailedResult, PassedResult, TeardownFailure, TestResult  # noqa: F401
+from snektest.models import (
+    FailedResult,
+    PassedResult,
+    TeardownFailure,
+    TestResult,
+)
 from snektest.presenter.errors import print_failures as _print_failures
 from snektest.presenter.summary import print_summary as _print_summary
 
@@ -28,7 +33,9 @@ def print_test_result(result: TestResult) -> None:
         )
     else:  # ErrorResult
         console.print(
-            f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)", highlight=False, no_wrap=True
+            f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)",
+            highlight=False,
+            no_wrap=True,
         )
 
 

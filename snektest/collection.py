@@ -27,7 +27,11 @@ def load_tests_from_file(
     *,
     logger: logging.Logger,
 ) -> None:
-    """Load and queue tests from a single Python file."""
+    """Load and queue tests from a single Python file.
+
+    Raises:
+        CollectionError: If file could not be loaded
+    """
     module_name = ".".join(file_path.with_suffix("").parts)
     if module_name in modules:
         module = modules[module_name]

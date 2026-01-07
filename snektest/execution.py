@@ -30,7 +30,12 @@ from snektest.utils import get_test_function_params
 async def teardown_fixture(
     fixture_name: str, generator: object
 ) -> TeardownFailure | None:
-    """Teardown a single fixture and return failure if it occurs."""
+    """Teardown a single fixture and return failure if it occurs.
+
+    Raises:
+        BadRequestError: If the fixture function had more than one `yield`
+        UnreachableError: Error that theoretically can't be reached
+    """
     try:
         if isasyncgen(generator):
             await anext(generator)
@@ -38,7 +43,7 @@ async def teardown_fixture(
             next(generator)
         else:
             msg = "Is there no better way"
-            raise UnreachableError(msg)
+            raise UnreachableError(msg)  # noqa: TRY301
     except StopAsyncIteration, StopIteration:
         return None
     except Exception:
@@ -63,7 +68,11 @@ async def execute_test(
     *,
     capture_output: bool = True,
 ) -> TestResult:
-    """Execute a single test function with fixtures and output capture."""
+    """Execute a single test function with fixtures and output capture.
+
+    Raises:
+        UnreachableError: Error that theoretically can't be reached
+    """
     with maybe_capture_output(capture_output) as (output_buffer, captured_warnings):
         param_values = ()
         if name.params_part:
@@ -149,7 +158,8 @@ def has_any_failures(
 ) -> tuple[bool, bool, bool]:
     """Check for test failures, fixture failures, and session failures."""
     has_test_failures = any(
-        isinstance(result.result, (FailedResult, ErrorResult)) for result in test_results
+        isinstance(result.result, (FailedResult, ErrorResult))
+        for result in test_results
     )
     has_fixture_teardown_failures = any(
         result.fixture_teardown_failures for result in test_results

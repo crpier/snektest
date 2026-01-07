@@ -1,7 +1,7 @@
 """Helper functions for testing snektest itself."""
 
 import json
-import subprocess
+import subprocess  # noqa: S404
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ def create_test_file(
         Path to created file
     """
     filepath = tmp_dir / f"{name}.py"
-    filepath.write_text(content)
+    _ = filepath.write_text(content)
     return filepath
 
 
@@ -34,15 +34,13 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
     Returns:
         Dict with keys: passed, failed, fixture_teardown_failed,
                        session_teardown_failed, returncode
-
-    Raises:
-        subprocess.TimeoutExpired: If test takes longer than 0.5 seconds
     """
     # Run snektest with special flag to output JSON results
     cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
 
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         cmd,
+        check=False,
         capture_output=True,
         text=True,
         timeout=0.5,  # Hardcoded 0.5 second timeout

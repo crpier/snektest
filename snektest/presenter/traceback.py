@@ -29,9 +29,7 @@ def render_traceback(
         name = frame.f_code.co_name
 
         # Skip snektest internal frames (like cli.py)
-        if not filename.startswith(snektest_path) or filename.endswith(
-            "/assertions.py"
-        ):
+        if not filename.startswith(snektest_path):
             console.print(
                 f'  File "[cyan]{filename}[/cyan]", line {lineno}, in [yellow]{name}[/yellow]'
             )

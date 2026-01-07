@@ -1,63 +1,65 @@
-from collections.abc import Generator
-from contextlib import contextmanager
-from typing import Any
+from types import TracebackType
+from typing import Any, Self, TypeIs, cast
 
-from snektest.models import AssertionFailure
-
-
-class ExceptionInfo:
-    """Container for exception information captured by assert_raises."""
-
-    def __init__(self) -> None:
-        self.exception: BaseException | None = None
+from snektest.models import AssertionFailure, BadRequestError
 
 
-@contextmanager
-def assert_raises(
-    expected_exception: type[BaseException] | tuple[type[BaseException], ...],
-    *,
+def assert_raises[T](
+    *expected_exceptions: type[T],
     msg: str | None = None,
-) -> Generator[ExceptionInfo, None, None]:
-    """Context manager that asserts code raises expected exception.
+) -> RaisesContex[T]:
+    return RaisesContex(*expected_exceptions, msg=msg)
 
-    Args:
-        expected_exception: Exception type(s) to expect
-        msg: Optional custom message
 
-    Yields:
-        ExceptionInfo: Object containing the caught exception
+# Context manager class for assert_raises
+class RaisesContex[T]:
+    def __init__(self, *expected_exceptions: type[T], msg: str | None = None) -> None:
+        self.msg = msg
+        self.expected_exceptions = expected_exceptions
+        self._exception: T | None = None
+        self.has_exited = False
 
-    Raises:
-        AssertionFailure: If no exception raised or wrong type
+    def __enter__(self) -> Self:
+        return self
 
-    Example:
-        with assert_raises(ValueError) as exc_info:
-            raise ValueError("test")
-        assert_eq(str(exc_info.exception), "test")
-    """
-    exc_info = ExceptionInfo()
-    try:
-        yield exc_info
-    except expected_exception as exc:
-        exc_info.exception = exc
-        return
-    except BaseException as exc:
-        # Wrong exception type
-        if isinstance(expected_exception, tuple):
-            expected_name = " | ".join(e.__name__ for e in expected_exception)
-        else:
-            expected_name = expected_exception.__name__
-        actual_name = type(exc).__name__
-        message = msg or f"Expected {expected_name} but got {actual_name}"
-        raise AssertionFailure(message, actual=actual_name, expected=expected_name) from exc
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        self.has_exited = True
+        if exc_type is None:
+            message = (
+                self.msg or "Expected to raise an exception but no exception was raised"
+            )
+            raise AssertionFailure(
+                message,
+                actual=None,
+                expected=self.expected_exceptions,
+            )
+        if not isinstance(exc_value, self.expected_exceptions):
+            expected_exceptions_display_name = " | ".join(
+                e.__name__ for e in self.expected_exceptions
+            )
+            message = (
+                self.msg
+                or f"Expected to raise {expected_exceptions_display_name} but raised {type(exc_value).__name__}"
+            )
+            raise AssertionFailure(
+                message,
+                actual=exc_value,
+                expected=self.expected_exceptions,
+            )
+        self._exception = exc_value
+        return True
 
-    # No exception raised
-    if isinstance(expected_exception, tuple):
-        expected_name = " | ".join(e.__name__ for e in expected_exception)
-    else:
-        expected_name = expected_exception.__name__
-    message = msg or f"Expected {expected_name} but no exception was raised"
-    raise AssertionFailure(message, expected=expected_name)
+    @property
+    def exception(self) -> T:
+        if not self.has_exited:
+            msg = "Exception under assert_raises was accessed before exiting the context manager"
+            raise BadRequestError(msg)
+        return cast("T", self._exception)
 
 
 def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:
@@ -140,7 +142,7 @@ def assert_is_none(value: Any, *, msg: str | None = None) -> None:
         )
 
 
-def assert_is_not_none(value: Any, *, msg: str | None = None) -> None:
+def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> TypeIs[T]:
     """Assert that value is not None.
 
     Raises:
@@ -154,6 +156,7 @@ def assert_is_not_none(value: Any, *, msg: str | None = None) -> None:
             expected="not None",
             operator="is not",
         )
+    return True
 
 
 def assert_is(actual: Any, expected: Any, *, msg: str | None = None) -> None:

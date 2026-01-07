@@ -77,6 +77,7 @@ def test_with_assertions():
     assert_true(5 > 3)
     assert_in("hello", ["hello", "world"])
 ```
+
 ### Async Support
 
 Write async tests as naturally as sync ones:
@@ -120,6 +121,7 @@ def test_concatenation(greeting: str, target: str):
 ```
 
 ### Static type checking
+
 ...
 
 ## Running Tests
@@ -372,20 +374,46 @@ def test_length():
     assert_len({"a": 1, "b": 2}, 2)
 ```
 
-### Unconditional Failure
+### Exception Assertions
 
-**`assert_raise(msg=None)`** - Raise an AssertionFailure unconditionally
+**`assert_raises(*expected_exceptions, msg=None)`** - Assert that code raises an expected exception
+
+Use as a context manager to verify that a specific exception is raised:
 
 ```python
-from snektest import test
-from snektest.assertions import assert_raise
+from snektest import test, assert_raises, assert_eq
+
+@test()
+def test_division_by_zero():
+    with assert_raises(ZeroDivisionError):
+        1 / 0
+
+@test()
+def test_multiple_exception_types():
+    # Can accept multiple exception types
+    with assert_raises(ValueError, TypeError):
+        int("not a number")
+
+@test()
+def test_access_exception():
+    # Access the caught exception via the exception property
+    with assert_raises(ValueError) as exc_info:
+        raise ValueError("custom message")
+
+    assert_eq(exc_info.exception.args[0], "custom message")
+```
+
+### Unconditional Failure
+
+**`fail(msg=None)`** - Raise an AssertionFailure unconditionally
+
+```python
+from snektest import test, fail
 
 @test()
 def test_unreachable():
     if False:
         pass
     else:
-        assert_raise("This code path should never execute")
+        fail("This code path should never execute")
 ```
-
-#TODO: look at all instances of an `elif` and see if a `match` would be better

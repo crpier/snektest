@@ -13,7 +13,7 @@ from snektest.presenter.diff import render_assertion_failure
 from snektest.presenter.traceback import render_traceback
 
 
-def print_failures(
+def print_failures(  # noqa: PLR0912, C901
     console: Console,
     test_results: list[TestResult],
     session_teardown_failures: list[TeardownFailure] | None = None,
@@ -33,7 +33,12 @@ def print_failures(
         result for result in test_results if result.fixture_teardown_failures
     ]
 
-    if not failures and not errors and not fixture_teardown_failures and not session_teardown_failures:
+    if (
+        not failures
+        and not errors
+        and not fixture_teardown_failures
+        and not session_teardown_failures
+    ):
         return
 
     console.print()

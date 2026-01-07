@@ -1,6 +1,12 @@
 from rich.console import Console
 
-from snektest.models import ErrorResult, FailedResult, PassedResult, TeardownFailure, TestResult
+from snektest.models import (
+    ErrorResult,
+    FailedResult,
+    PassedResult,
+    TeardownFailure,
+    TestResult,
+)
 
 
 def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
@@ -63,7 +69,8 @@ def _print_session_teardown_failures(
         )
 
 
-def _build_status_text(
+def _build_status_text(  # noqa: PLR0913
+    *,
     passed_count: int,
     failed_count: int,
     error_count: int,
@@ -71,9 +78,12 @@ def _build_status_text(
     session_teardown_count: int,
     total_duration: float,
 ) -> tuple[str, str]:
-    """Build status text and color."""
+    """Build status text and set its color."""
     has_failures = (
-        failed_count > 0 or error_count > 0 or fixture_teardown_count > 0 or session_teardown_count > 0
+        failed_count > 0
+        or error_count > 0
+        or fixture_teardown_count > 0
+        or session_teardown_count > 0
     )
     status_color = "red" if has_failures else "green"
     status_text = f"[bold {status_color}]"
@@ -112,7 +122,10 @@ def print_summary(
     _print_warnings(console, test_results)
 
     has_failures = (
-        failed_count > 0 or error_count > 0 or fixture_teardown_count > 0 or session_teardown_count > 0
+        failed_count > 0
+        or error_count > 0
+        or fixture_teardown_count > 0
+        or session_teardown_count > 0
     )
     if has_failures:
         console.rule("[wheat1]SUMMARY", style="wheat1")
@@ -123,11 +136,11 @@ def print_summary(
         console.print()
 
     status_text, status_color = _build_status_text(
-        passed_count,
-        failed_count,
-        error_count,
-        fixture_teardown_count,
-        session_teardown_count,
-        total_duration,
+        passed_count=passed_count,
+        failed_count=failed_count,
+        error_count=error_count,
+        fixture_teardown_count=fixture_teardown_count,
+        session_teardown_count=session_teardown_count,
+        total_duration=total_duration,
     )
     console.rule(status_text, style=status_color)

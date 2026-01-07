@@ -11,20 +11,20 @@ snektest is a Python testing framework with first class support for async and st
 ### Running Tests
 ```bash
 # Run all tests
-snektest
+uv run snektest
 
 # Run with verbose logging
-snektest -v    # INFO level
-snektest -vv   # DEBUG level
+uv run snektest -v    # INFO level
+uv run snektest -vv   # DEBUG level
 
 # Run specific test file
-snektest tests/integration/test_basic.py
+uv run snektest tests/integration/test_basic.py
 
 # Run specific test function
-snektest tests/integration/test_basic.py::test_no_params
+uv run snektest tests/integration/test_basic.py::test_no_params
 
 # Run specific parameterized test
-snektest tests/integration/test_basic.py::test_1_params[ascii name]
+uv run snektest tests/integration/test_basic.py::test_1_params[ascii name]
 ```
 
 ### Type Checking & Linting
