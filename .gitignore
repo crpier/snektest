@@ -12,3 +12,6 @@ wheels/
 # Coverage reports
 .coverage
 htmlcov/
+
+# Hypothesis-generated
+.hypothesis

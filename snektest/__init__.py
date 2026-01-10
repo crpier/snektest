@@ -23,6 +23,7 @@ from snektest.decorators import (
     load_fixture,
     session_fixture,
     test,
+    test_hypothesis,
 )
 from snektest.models import Param as Param
 from snektest.models import Scope as Scope
@@ -54,4 +55,5 @@ __all__ = [
     "load_fixture",
     "session_fixture",
     "test",
+    "test_hypothesis",
 ]
