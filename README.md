@@ -169,6 +169,118 @@ snektest tests/test_myfeature.py
 snektest tests/test_myfeature.py::test_something
 ```
 
+## Property-Based Testing with Hypothesis
+
+Snektest provides first-class integration with [Hypothesis](https://hypothesis.readthedocs.io/) for property-based testing. Property-based tests automatically generate test cases to explore edge cases and verify properties that should hold for all inputs.
+
+### Basic Usage
+
+Use the `@test_hypothesis()` decorator with Hypothesis strategies to automatically generate test inputs:
+
+```python
+from hypothesis import strategies as st
+from snektest import test_hypothesis
+from snektest.assertions import assert_ge
+
+@test_hypothesis(st.integers())
+async def test_absolute_value_is_non_negative(x: int) -> None:
+    result = abs(x)
+    assert_ge(result, 0)
+```
+
+### Multiple Strategies
+
+Pass multiple strategies for functions with multiple parameters:
+
+```python
+from hypothesis import strategies as st
+from snektest import test_hypothesis
+from snektest.assertions import assert_eq
+
+@test_hypothesis(st.text(), st.text())
+async def test_string_concatenation_length(s1: str, s2: str) -> None:
+    result = s1 + s2
+    assert_eq(len(result), len(s1) + len(s2))
+```
+
+### Async Function Support
+
+Property-based tests work seamlessly with async functions. Snektest automatically handles the complexity of running Hypothesis (which doesn't natively support async) by executing the Hypothesis engine in a worker thread and scheduling each generated test case back onto the main event loop:
+
+```python
+import asyncio
+from hypothesis import strategies as st
+from snektest import test_hypothesis
+from snektest.assertions import assert_eq, assert_true
+
+@test_hypothesis(st.integers(min_value=0, max_value=100))
+async def test_async_computation(n: int) -> None:
+    # Simulate async operation
+    await asyncio.sleep(0.001)
+    result = n * 2
+    assert_true(result >= 0)
+    assert_eq(result % 2, 0)
+```
+
+### Configuring Hypothesis
+
+Use Hypothesis's `@settings()` decorator to configure test behavior. Apply it above or below `@test_hypothesis()`:
+
+```python
+from hypothesis import Phase, settings, strategies as st
+from snektest import test_hypothesis
+from snektest.assertions import assert_isinstance
+
+@settings(max_examples=500, deadline=None)
+@test_hypothesis(st.lists(st.integers()))
+async def test_list_operations(numbers: list[int]) -> None:
+    reversed_twice = list(reversed(list(reversed(numbers))))
+    assert_isinstance(reversed_twice, list)
+```
+
+### Type Safety
+
+The decorator provides full type safety - strategy types are checked against function parameters:
+
+```python
+from hypothesis import strategies as st
+from snektest import test_hypothesis
+
+# ✓ This type-checks correctly
+@test_hypothesis(st.integers(), st.text())
+async def test_correct_types(x: int, s: str) -> None:
+    pass
+
+# ✗ This will fail type checking - int strategy doesn't match str parameter
+@test_hypothesis(st.integers())
+async def test_wrong_type(x: str) -> None:  # Type error!
+    pass
+```
+
+### Combining with Traditional Tests
+
+You can mix property-based tests with traditional example-based tests in the same file:
+
+```python
+from hypothesis import strategies as st
+from snektest import test, test_hypothesis, Param
+from snektest.assertions import assert_eq
+
+# Property-based test
+@test_hypothesis(st.integers(), st.integers())
+async def test_addition_commutative(a: int, b: int) -> None:
+    assert_eq(a + b, b + a)
+
+# Traditional parameterized test
+@test([
+    Param(value=(2, 3, 5), name="small"),
+    Param(value=(100, 200, 300), name="large"),
+])
+async def test_addition_specific_cases(values: tuple[int, int, int]) -> None:
+    a, b, expected = values
+    assert_eq(a + b, expected)
+```
+
 ## Assertions Reference
 
 All assertion functions accept an optional `msg` keyword argument for custom error messages.
