@@ -205,7 +205,7 @@ async def test_string_concatenation_length(s1: str, s2: str) -> None:
 
 ### Async Function Support
 
-Property-based tests work seamlessly with async functions. Snektest automatically handles the complexity of running Hypothesis (which doesn't natively support async) by executing the Hypothesis engine in a worker thread and scheduling each generated test case back onto the main event loop:
+Property-based tests work seamlessly with async functions. Snektest automatically handles the complexity of running Hypothesis by executing the Hypothesis engine in a worker thread and scheduling each generated test case back onto the main event loop:
 
 ```python
 import asyncio

@@ -6,8 +6,8 @@ from textwrap import dedent
 
 from snektest import load_fixture, test
 from snektest.assertions import assert_ne, fail
-from tests.fixtures import tmp_dir_fixture
-from tests.testutils import create_test_file
+from testutils.fixtures import tmp_dir_fixture
+from testutils.helpers import create_test_file
 
 
 @test()
