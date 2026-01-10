@@ -1,6 +1,6 @@
 # snektest
 
-A Python testing framework with first-class support for async and static typing.
+A type-safe, async-native Python testing framework.
 
 ## Installation
 
@@ -68,14 +68,36 @@ async def test_connection():
 Get helpful error messages with custom assertions:
 
 ```python
-from snektest import test
-from snektest.assertions import assert_eq, assert_true, assert_in
+from snektest import assert_eq, test
+
 
 @test()
-def test_with_assertions():
-    assert_eq([1, 2, 3], [1, 2, 3])
-    assert_true(5 > 3)
-    assert_in("hello", ["hello", "world"])
+def test_show_dict_diff() -> None:
+    assert_eq({"name": "alice", "age": 30}, {"name": "bob", "age": 30})
+```
+
+```text
+E       AssertionError: {'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}
+
+E       - {'age': 30, 'name': 'bob'}
+E       ?                      ^^^
+
+E       + {'age': 30, 'name': 'alice'}
+E       ?                      ^^^^^
+```
+
+```python
+from snektest import assert_in, test
+
+
+@test()
+def test_show_in_assertion() -> None:
+    assert_in("qux", ["foo", "bar", "baz"])
+```
+
+```text
+E       AssertionError: 'qux' not found in ['foo', 'bar', 'baz']
+E       'qux' in ['foo', 'bar', 'baz']
 ```
 
 ### Async Support
@@ -84,8 +106,18 @@ Write async tests as naturally as sync ones:
 
 ```python
 import asyncio
+import time
+
 from snektest import test
 from snektest.assertions import assert_eq
+
+
+@test()
+def test_sync_operation():
+    time.sleep(0.1)
+    result = "completed"
+    assert_eq(result, "completed")
+
 
 @test()
 async def test_async_operation():
@@ -126,7 +158,7 @@ def test_concatenation(greeting: str, target: str):
 
 ## Running Tests
 
-```bash
+```sh
 # Run all tests
 snektest
 
@@ -136,12 +168,6 @@ snektest tests/test_myfeature.py
 # Run specific test
 snektest tests/test_myfeature.py::test_something
 ```
-
-## How It Works
-
-snektest discovers tests by walking your project directory and finding functions decorated with `@test()`. Tests run concurrently by default, with a producer thread discovering tests while consumer coroutines execute them in parallel.
-
-The fixture system uses Python generators to handle setup and teardown—code before `yield` runs before the test, code after `yield` runs after. Function fixtures are created fresh for each test, while session fixtures are shared across all tests for efficiency.
 
 ## Assertions Reference
 
@@ -176,7 +202,7 @@ def test_inequality():
 
 ### Boolean Values
 
-**`assert_true(value, *, msg=None)`** - Assert that `value is True` (identity check, not truthiness)
+**`assert_true(value, *, msg=None)`** - Assert that `value is True`
 
 ```python
 from snektest import test
@@ -188,7 +214,7 @@ def test_true():
     assert_true(True)
 ```
 
-**`assert_false(value, *, msg=None)`** - Assert that `value is False` (identity check, not falsiness)
+**`assert_false(value, *, msg=None)`** - Assert that `value is False`
 
 ```python
 from snektest import test

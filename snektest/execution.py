@@ -41,9 +41,6 @@ async def teardown_fixture(
             await anext(generator)
         elif isgenerator(generator):
             next(generator)
-        else:
-            msg = "Is there no better way"
-            raise UnreachableError(msg)  # noqa: TRY301
     except StopAsyncIteration, StopIteration:
         return None
     except Exception:

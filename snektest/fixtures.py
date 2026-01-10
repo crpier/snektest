@@ -5,6 +5,7 @@ from typing import Any
 
 from snektest.annotations import Coroutine
 from snektest.models import UnreachableError
+from snektest.utils import get_code_from_generator, get_func_name_from_generator
 
 _SESSION_FIXTURES: dict[
     CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
@@ -32,19 +33,13 @@ def is_session_fixture(fixture_code: CodeType) -> bool:
     return fixture_code in _SESSION_FIXTURES
 
 
-def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:  # noqa: C901
+def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
     """Load a session-scoped fixture, creating it on first use and reusing thereafter.
 
     Raises:
-        UnreachableError: Error that theoretically can't be reached
+        UnreachableError: Error that theoretically can't be reached.
     """
-    if isasyncgen(fixture_gen):
-        fixture_code = fixture_gen.ag_code
-    elif isgenerator(fixture_gen):
-        fixture_code = fixture_gen.gi_code
-    else:
-        msg = "I'm only doing this to please the type checker"
-        raise UnreachableError(msg)
+    fixture_code = get_code_from_generator(fixture_gen)
     try:
         gen, result = _SESSION_FIXTURES[fixture_code]
         if gen is None:
@@ -67,9 +62,6 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
                 result = result_updater()
             elif isgenerator(gen):
                 result = next(gen)
-            else:
-                msg = "Ooof, why?"
-                raise UnreachableError(msg)
             _SESSION_FIXTURES[fixture_code] = (gen, result)
     except IndexError:
         msg = f"Function {fixture_code.__qualname__} was not registered as a session fixture. This shouldn't be possible!"
@@ -102,20 +94,11 @@ def get_active_function_fixtures() -> list[
 
     Returns:
         List of (fixture_name, generator) tuples in reverse order.
-
-    Raises:
-        UnreachableError: Error that theoretically can't be reached
     """
     fixtures_to_teardown: list[tuple[str, AsyncGenerator[Any] | Generator[Any]]] = []
     # Returning active fixtures in reverse order makes setup/teardown first-in-last-out
     for generator in reversed(_FUNCTION_FIXTURES):
-        if isasyncgen(generator):
-            fixture_name = generator.ag_code.co_name
-        elif isgenerator(generator):
-            fixture_name = generator.gi_code.co_name
-        else:
-            msg = "Is there no better way"
-            raise UnreachableError(msg)
+        fixture_name = get_func_name_from_generator(generator)
         fixtures_to_teardown.append((fixture_name, generator))
 
     _FUNCTION_FIXTURES.clear()

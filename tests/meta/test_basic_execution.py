@@ -3,8 +3,9 @@
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.testing import create_test_file, run_test_subprocess
+from snektest.assertions import assert_eq
 from tests.fixtures import tmp_dir_fixture
+from tests.testutils import create_test_file, run_test_subprocess
 
 
 @test()
@@ -15,19 +16,19 @@ async def test_simple_passing_test() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import test
+            from snektest import test, assert_true
 
             @test()
             def test_example() -> None:
-                assert True
+                assert_true(True)
         """),
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 1
-    assert result["failed"] == 0
-    assert result["errors"] == 0
-    assert result["returncode"] == 0
+    assert_eq(result["passed"], 1)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["returncode"], 0)
 
 
 @test()
@@ -38,19 +39,19 @@ async def test_simple_failing_test() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import test
+            from snektest import test, fail
 
             @test()
             def test_will_fail() -> None:
-                assert False
+               fail("This test will fail")
         """),
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 0
-    assert result["errors"] == 1
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 1)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -61,24 +62,24 @@ async def test_multiple_tests() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import test
+            from snektest import test, assert_true
 
             @test()
             def test_one() -> None:
-                assert True
+                assert_true(True)
 
             @test()
             def test_two() -> None:
-                assert True
+                assert_true(True)
 
             @test()
             def test_three() -> None:
-                assert True
+                assert_true(True)
         """),
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 3
-    assert result["failed"] == 0
-    assert result["errors"] == 0
-    assert result["returncode"] == 0
+    assert_eq(result["passed"], 3)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["returncode"], 0)

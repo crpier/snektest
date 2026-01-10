@@ -194,7 +194,7 @@ def test_assert_raises_fails_when_no_exception() -> None:
     with assert_raises(AssertionFailure) as exc_info, assert_raises(ValueError):
         pass  # No exception raised
 
-    assert "no exception was raised" in str(exc_info.exception)
+    assert_in("no exception was raised", str(exc_info.exception))
 
 
 @test()
@@ -244,8 +244,8 @@ def test_assert_raises_tuple_fails_on_wrong_type() -> None:
             raise KeyError(msg)
 
     error_msg = str(exc_info.exception)
-    assert "ValueError | TypeError" in error_msg
-    assert "KeyError" in error_msg
+    assert_in("ValueError | TypeError", error_msg)
+    assert_in("KeyError", error_msg)
 
 
 # Test fail function

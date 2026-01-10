@@ -39,6 +39,8 @@ SnektestError = CollectionError | ArgsError | UnreachableError | AssertionFailur
 
 
 class FilterItem:
+    """Represents a single test filter item"""
+
     def __init__(self, raw_input: str) -> None:
         if "::" not in raw_input:
             path = Path(raw_input)

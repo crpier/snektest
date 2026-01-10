@@ -3,8 +3,9 @@
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.testing import create_test_file, run_test_subprocess
+from snektest.assertions import assert_eq
 from tests.fixtures import tmp_dir_fixture
+from tests.testutils import create_test_file, run_test_subprocess
 
 
 @test()
@@ -30,9 +31,9 @@ def test_function_fixture_teardown_failure() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 1
-    assert result["failed"] == 0
-    assert result["fixture_teardown_failed"] == 1
+    assert_eq(result["passed"], 1)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["fixture_teardown_failed"], 1)
 
 
 @test()
@@ -59,9 +60,9 @@ def test_session_fixture_teardown_failure() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 1
-    assert result["failed"] == 0
-    assert result["session_teardown_failed"] == 1
+    assert_eq(result["passed"], 1)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["session_teardown_failed"], 1)
 
 
 @test()
@@ -85,7 +86,7 @@ def test_good_fixture_no_errors() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 1
-    assert result["failed"] == 0
-    assert result["fixture_teardown_failed"] == 0
-    assert result["session_teardown_failed"] == 0
+    assert_eq(result["passed"], 1)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["fixture_teardown_failed"], 0)
+    assert_eq(result["session_teardown_failed"], 0)

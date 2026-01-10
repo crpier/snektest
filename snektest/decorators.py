@@ -1,5 +1,4 @@
 from collections.abc import AsyncGenerator, Callable, Generator
-from inspect import isasyncgen, isgenerator
 from typing import Any
 
 from snektest.annotations import Coroutine
@@ -9,8 +8,8 @@ from snektest.fixtures import (
     load_session_fixture,
     register_session_fixture,
 )
-from snektest.models import Param, UnreachableError
-from snektest.utils import mark_test_function
+from snektest.models import Param
+from snektest.utils import get_code_from_generator, mark_test_function
 
 
 def test(
@@ -19,6 +18,8 @@ def test(
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
 ]:
+    """Mark a function as a test function."""
+
     def decorator(
         test_func: Callable[[*tuple[Any, ...]], Coroutine[None] | None],
     ) -> Callable[[*tuple[Any, ...]], Coroutine[None] | None]:
@@ -31,6 +32,12 @@ def test(
 def session_fixture[T, R: AsyncGenerator[T] | Generator[T]]() -> Callable[  # pyright: ignore[reportGeneralTypeIssues]
     [Callable[[], R]], Callable[[], R]
 ]:
+    """Mark a function as a session fixture. Unlike regular fixtures,
+    session fixtures are loaded once per test session, not once per test
+    function.
+    Loading a session fixture multiple times returns the generate value from
+    the first load."""
+
     def decorator(
         fixture_func: Callable[[], R],
     ) -> Callable[[], R]:
@@ -43,13 +50,10 @@ def session_fixture[T, R: AsyncGenerator[T] | Generator[T]]() -> Callable[  # py
 def load_fixture[R](
     fixture_gen: AsyncGenerator[R] | Generator[R],
 ) -> Coroutine[R] | R:
-    if isasyncgen(fixture_gen):
-        fixture_gen_code = fixture_gen.ag_code
-    elif isgenerator(fixture_gen):
-        fixture_gen_code = fixture_gen.gi_code
-    else:
-        msg = "Hmm..."
-        raise UnreachableError(msg)
+    """Load a fixture from a generator.
+    When loading a fixture, `snektest` takes care to handle tearing down the
+    fixture after the test has finished."""
+    fixture_gen_code = get_code_from_generator(fixture_gen)
 
     if is_session_fixture(fixture_gen_code):
         return load_session_fixture(fixture_gen)

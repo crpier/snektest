@@ -17,10 +17,12 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
 
     # Handle different types with custom diff rendering
     if isinstance(actual, list) and isinstance(expected, list):
+        # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("list[Any]", actual)
         expected = cast("list[Any]", expected)
         render_list_diff(console, actual, expected)
     elif isinstance(actual, dict) and isinstance(expected, dict):
+        # I'm just casting dict[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("dict[Any, Any]", actual)
         expected = cast("dict[Any, Any]", expected)
         render_dict_diff(console, actual, expected)
@@ -77,14 +79,17 @@ def render_list_diff(console: Console, actual: list[Any], expected: list[Any]) -
     diff = list(difflib.ndiff(expected_lines, actual_lines))
 
     for line in diff:
-        if line.startswith("- "):
-            console.print(f"[red]E       {line}[/red]")
-        elif line.startswith("+ "):
-            console.print(f"[green]E       {line}[/green]")
-        elif line.startswith("? "):
-            console.print(f"[dim red]E       {line}[/dim red]")
-        elif line.startswith("  "):
-            console.print(f"[red]E       {line}[/red]")
+        match line[:2]:
+            case "- ":
+                console.print(f"[red]E       {line}[/red]")
+            case "+ ":
+                console.print(f"[green]E       {line}[/green]")
+            case "? ":
+                console.print(f"[dim red]E       {line}[/dim red]")
+            case "  ":
+                console.print(f"[red]E       {line}[/red]")
+            case _:
+                ...
 
 
 def render_dict_diff(
@@ -99,14 +104,17 @@ def render_dict_diff(
     diff = difflib.ndiff(expected_lines, actual_lines)
 
     for line in diff:
-        if line.startswith("- "):
-            console.print(f"[red]E       {line}[/red]")
-        elif line.startswith("+ "):
-            console.print(f"[green]E       {line}[/green]")
-        elif line.startswith("? "):
-            console.print(f"[yellow]E       {line}[/yellow]")
-        elif line.startswith("  "):
-            console.print(f"[red]E       {line}[/red]")
+        match line[:2]:
+            case "- ":
+                console.print(f"[red]E       {line}[/red]")
+            case "+ ":
+                console.print(f"[green]E       {line}[/green]")
+            case "? ":
+                console.print(f"[yellow]E       {line}[/yellow]")
+            case "  ":
+                console.print(f"[red]E       {line}[/red]")
+            case _:
+                ...
 
 
 def render_multiline_string_diff(console: Console, actual: str, expected: str) -> None:
@@ -116,11 +124,12 @@ def render_multiline_string_diff(console: Console, actual: str, expected: str) -
     diff_lines = difflib.ndiff(expected.splitlines(), actual.splitlines())
 
     for line in diff_lines:
-        if line.startswith("+ "):
-            console.print(f"[green]E       {line}[/green]")
-        elif line.startswith("- "):
-            console.print(f"[red]E       {line}[/red]")
-        elif line.startswith("? "):
-            console.print(f"[yellow]E       {line}[/yellow]")
-        else:
-            console.print(f"E       {line}")
+        match line[:2]:
+            case "+ ":
+                console.print(f"[green]E       {line}[/green]")
+            case "- ":
+                console.print(f"[red]E       {line}[/red]")
+            case "? ":
+                console.print(f"[yellow]E       {line}[/yellow]")
+            case _:
+                console.print(f"E       {line}")

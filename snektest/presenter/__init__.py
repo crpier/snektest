@@ -1,6 +1,7 @@
 from rich.console import Console
 
 from snektest.models import (
+    ErrorResult,
     FailedResult,
     PassedResult,
     TeardownFailure,
@@ -23,20 +24,25 @@ def print_test_result(result: TestResult) -> None:
     console.print(
         f"{result.name!s} ... ", end="", markup=False, highlight=False, no_wrap=True
     )
-    if isinstance(result.result, PassedResult):
-        console.print(
-            f"[green]OK[/green] ({result.duration:.2f}s)", highlight=False, no_wrap=True
-        )
-    elif isinstance(result.result, FailedResult):
-        console.print(
-            f"[red]FAIL[/red] ({result.duration:.2f}s)", highlight=False, no_wrap=True
-        )
-    else:  # ErrorResult
-        console.print(
-            f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)",
-            highlight=False,
-            no_wrap=True,
-        )
+    match result.result:
+        case PassedResult():
+            console.print(
+                f"[green]OK[/green] ({result.duration:.2f}s)",
+                highlight=False,
+                no_wrap=True,
+            )
+        case FailedResult():
+            console.print(
+                f"[red]FAIL[/red] ({result.duration:.2f}s)",
+                highlight=False,
+                no_wrap=True,
+            )
+        case ErrorResult():
+            console.print(
+                f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)",
+                highlight=False,
+                no_wrap=True,
+            )
 
 
 def print_failures(

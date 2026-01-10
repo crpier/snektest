@@ -3,8 +3,9 @@
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.testing import create_test_file, run_test_subprocess
+from snektest.assertions import assert_eq
 from tests.fixtures import tmp_dir_fixture
+from tests.testutils import create_test_file, run_test_subprocess
 
 
 @test()
@@ -25,10 +26,10 @@ async def test_assertion_failure_shows_as_failed() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 1
-    assert result["errors"] == 0
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 1)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -48,10 +49,10 @@ async def test_exception_shows_as_error() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 0
-    assert result["errors"] == 1
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 1)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -65,19 +66,19 @@ async def test_bare_assert_shows_as_error() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import test
+            from snektest import test, assert_eq
 
             @test()
             def test_with_bare_assert() -> None:
-                assert 1 == 2, "Numbers don't match"
+                assert_eq(1, 2, "Numbers don't match")
         """),
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 0
-    assert result["errors"] == 1
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 1)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -118,10 +119,10 @@ async def test_mixed_failures_and_errors() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 1
-    assert result["failed"] == 2
-    assert result["errors"] == 3
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 1)
+    assert_eq(result["failed"], 2)
+    assert_eq(result["errors"], 3)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -176,10 +177,10 @@ async def test_all_assertion_types_show_as_failed() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 7
-    assert result["errors"] == 0
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 7)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["returncode"], 1)
 
 
 @test()
@@ -217,7 +218,7 @@ async def test_various_exception_types_show_as_error() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert result["passed"] == 0
-    assert result["failed"] == 0
-    assert result["errors"] == 5
-    assert result["returncode"] != 0
+    assert_eq(result["passed"], 0)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 5)
+    assert_eq(result["returncode"], 1)

@@ -5,9 +5,9 @@ import sys
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.assertions import fail
-from snektest.testing import create_test_file
+from snektest.assertions import assert_ne, fail
 from tests.fixtures import tmp_dir_fixture
+from tests.testutils import create_test_file
 
 
 @test()
@@ -23,14 +23,14 @@ def test_import_error_does_not_hang() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import test
+            from snektest import test, assert_true
 
             # This will raise an exception at import time
             raise RuntimeError("Intentional import error for testing")
 
             @test()
             def test_unreachable() -> None:
-                assert True
+                assert_true(True)
         """),
     )
 
@@ -47,6 +47,6 @@ def test_import_error_does_not_hang() -> None:
             timeout=0.5,
         )
         # We expect a non-zero return code due to the collection error
-        assert result.returncode != 0
+        assert_ne(result.returncode, 0)
     except subprocess.TimeoutExpired:
         fail("Test runner hung on import error")

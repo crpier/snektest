@@ -1,7 +1,7 @@
 """Helper functions for testing snektest itself."""
 
 import json
-import subprocess  # noqa: S404
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,7 +38,7 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
     # Run snektest with special flag to output JSON results
     cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
 
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         cmd,
         check=False,
         capture_output=True,
