@@ -1,9 +1,12 @@
 import asyncio
 import logging
+import pdb  # noqa: T100
 import sys
 import time
 from collections.abc import Callable
 from inspect import isasyncgen, iscoroutine, isgenerator
+from pathlib import Path
+from types import TracebackType
 
 from snektest.annotations import Coroutine
 from snektest.collection import TestsQueue
@@ -169,26 +172,114 @@ def has_any_failures(
     )
 
 
+def _resolve_path(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    try:
+        return path.resolve()
+    except FileNotFoundError:
+        return path
+
+
+def _trim_traceback(
+    traceback: TracebackType, *, stop_at: TracebackType
+) -> TracebackType:
+    frames: list[TracebackType] = []
+    current = traceback
+    while current is not None:
+        frames.append(current)
+        if current is stop_at:
+            break
+        current = current.tb_next
+    new_traceback: TracebackType | None = None
+    for frame in reversed(frames):
+        new_traceback = TracebackType(
+            new_traceback, frame.tb_frame, frame.tb_lasti, frame.tb_lineno
+        )
+    return new_traceback or traceback
+
+
+def _traceback_for_file(
+    traceback: TracebackType, *, preferred_file: Path | None
+) -> TracebackType:
+    preferred = _resolve_path(preferred_file)
+    if preferred is None:
+        return traceback
+
+    selected: TracebackType | None = None
+    current = traceback
+    while current is not None:
+        frame_path = Path(current.tb_frame.f_code.co_filename)
+        resolved = _resolve_path(frame_path)
+        if resolved == preferred:
+            selected = current
+        current = current.tb_next
+    if selected is None:
+        return traceback
+    return _trim_traceback(traceback, stop_at=selected)
+
+
+def _maybe_debug_test_result(test_result: TestResult, *, pdb_on_failure: bool) -> bool:
+    if not pdb_on_failure:
+        return False
+    if isinstance(test_result.result, (FailedResult, ErrorResult)):
+        traceback = _traceback_for_file(
+            test_result.result.traceback, preferred_file=test_result.name.file_path
+        )
+        pdb.post_mortem(traceback)
+        return True
+    if test_result.fixture_teardown_failures:
+        traceback = _traceback_for_file(
+            test_result.fixture_teardown_failures[0].traceback,
+            preferred_file=test_result.name.file_path,
+        )
+        pdb.post_mortem(traceback)
+        return True
+    return False
+
+
+def _maybe_debug_session_teardown(
+    session_teardown_failures: list[TeardownFailure], *, pdb_on_failure: bool
+) -> bool:
+    if not pdb_on_failure or not session_teardown_failures:
+        return False
+    pdb.post_mortem(session_teardown_failures[0].traceback)
+    return True
+
+
 async def run_tests(
-    queue: TestsQueue, *, logger: logging.Logger, capture_output: bool = True
+    queue: TestsQueue,
+    *,
+    logger: logging.Logger,
+    capture_output: bool = True,
+    pdb_on_failure: bool = False,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     """Run all tests from the queue and handle session fixture teardown."""
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
+    pdb_triggered = False
     try:
         while True:
             name, func = await queue.get()
             logger.info("Processing item %s", name)
-            test_results.append(
-                await execute_test(name, func, capture_output=capture_output)
-            )
-            print_test_result(test_results[-1])
+            test_result = await execute_test(name, func, capture_output=capture_output)
+            test_results.append(test_result)
+            print_test_result(test_result)
+            if not pdb_triggered and _maybe_debug_test_result(
+                test_result, pdb_on_failure=pdb_on_failure
+            ):
+                pdb_triggered = True
+                break
     except asyncio.QueueShutDown:
         pass
     finally:
         session_teardown_failures, session_output = await teardown_session_fixtures(
             capture_output=capture_output
         )
+        if not pdb_triggered and _maybe_debug_session_teardown(
+            session_teardown_failures, pdb_on_failure=pdb_on_failure
+        ):
+            pdb_triggered = True
 
         # Determine if we should show session teardown output
         (

@@ -40,6 +40,7 @@ async def run_tests_programmatic(
     filter_items: list[FilterItem],
     *,
     capture_output: bool = True,
+    pdb_on_failure: bool = False,
 ) -> TestRunSummary:
     """Run tests and return structured results instead of printing.
 
@@ -71,7 +72,10 @@ async def run_tests_programmatic(
 
     try:
         test_results, session_teardown_failures = await run_tests(
-            queue=queue, logger=logger, capture_output=capture_output
+            queue=queue,
+            logger=logger,
+            capture_output=capture_output,
+            pdb_on_failure=pdb_on_failure,
         )
     finally:
         producer_thread.join()
@@ -93,12 +97,13 @@ async def run_tests_programmatic(
     )
 
 
-async def run_script() -> int:  # noqa: PLR0912, C901
+async def run_script() -> int:  # noqa: PLR0912, C901, PLR0915, PLR0914
     """Parse arguments and run tests."""
     logging_level = logging.WARNING
     potential_filter: list[str] = []
     capture_output = True
     json_output = False
+    pdb_on_failure = False
     for command in sys.argv[1:]:
         if command.startswith("-"):
             match command:
@@ -110,6 +115,8 @@ async def run_script() -> int:  # noqa: PLR0912, C901
                     capture_output = False
                 case "--json-output":
                     json_output = True
+                case "--pdb":
+                    pdb_on_failure = True
                 case _:
                     print_error(f"Invalid option: `{command}`")
                     return 2
@@ -130,7 +137,9 @@ async def run_script() -> int:  # noqa: PLR0912, C901
     # Use programmatic API if JSON output requested
     if json_output:
         summary = await run_tests_programmatic(
-            filter_items, capture_output=capture_output
+            filter_items,
+            capture_output=capture_output,
+            pdb_on_failure=pdb_on_failure,
         )
         print(
             json.dumps(
@@ -160,7 +169,10 @@ async def run_script() -> int:  # noqa: PLR0912, C901
     producer_thread.start()
     try:
         test_results, session_teardown_failures = await run_tests(
-            queue=queue, logger=logger, capture_output=capture_output
+            queue=queue,
+            logger=logger,
+            capture_output=capture_output,
+            pdb_on_failure=pdb_on_failure,
         )
     except asyncio.CancelledError:
         logger.info("Execution stopped")

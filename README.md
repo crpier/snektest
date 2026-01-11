@@ -167,7 +167,13 @@ snektest tests/test_myfeature.py
 
 # Run specific test
 snektest tests/test_myfeature.py::test_something
+
+# Drop into post-mortem debugging on first failure
+snektest --pdb
 ```
+
+When `--pdb` is set, snektest enters a post-mortem debugger on the first test
+failure or fixture error (setup/teardown), and stops executing further tests.
 
 ## Property-Based Testing with Hypothesis
 
