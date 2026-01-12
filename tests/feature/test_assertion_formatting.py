@@ -2,7 +2,6 @@
 # TODO: all these tests should assert that the entire output matches the expected output
 
 from snektest import assert_eq, assert_raises, test
-from snektest.assertions import assert_in
 from snektest.models import AssertionFailure
 
 
@@ -13,9 +12,7 @@ def test_list_diff_formatting() -> None:
         assert_eq(["foo"], ["bar"])
 
     error_msg = str(exc_info.exception)
-    # Should show the difference clearly
-    assert_in("['foo']", error_msg)
-    assert_in("['bar']", error_msg)
+    assert_eq(error_msg, "['foo'] != ['bar']")
 
 
 @test()
@@ -28,9 +25,7 @@ def test_nested_list_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    assert_in("foo", error_msg)
-    assert_in("bar", error_msg)
-    assert_in("[3, 4,", error_msg)
+    assert_eq(error_msg, "[1, 2, [3, 4, 'foo']] != [1, 2, [3, 4, 'bar']]")
 
 
 @test()
@@ -43,9 +38,7 @@ def test_dict_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    # Should show both values
-    assert_in("alice", error_msg)
-    assert_in("bob", error_msg)
+    assert_eq(error_msg, "{'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}")
 
 
 @test()
@@ -58,7 +51,4 @@ def test_multiline_string_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    # Should show the different lines
-    assert_in("foo", error_msg)
-    assert_in("bar", error_msg)
-    assert_in("hello", error_msg)
+    assert_eq(error_msg, "'hello\\nworld\\nfoo' != 'hello\\nworld\\nbar'")

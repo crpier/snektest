@@ -25,7 +25,6 @@ def test_import_error_does_not_hang() -> None:
         dedent("""
             from snektest import test, assert_true
 
-            # This will raise an exception at import time
             raise RuntimeError("Intentional import error for testing")
 
             @test()
@@ -34,9 +33,6 @@ def test_import_error_does_not_hang() -> None:
         """),
     )
 
-    # This should complete (with an error) rather than hanging
-    # The run_test_subprocess has a 0.5 second timeout, so if it hangs
-    # it will raise subprocess.TimeoutExpired
     try:
         cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
         result = subprocess.run(
@@ -46,7 +42,6 @@ def test_import_error_does_not_hang() -> None:
             text=True,
             timeout=0.5,
         )
-        # We expect a non-zero return code due to the collection error
         assert_ne(result.returncode, 0)
     except subprocess.TimeoutExpired:
         fail("Test runner hung on import error")

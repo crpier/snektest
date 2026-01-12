@@ -11,7 +11,6 @@ def assert_raises[T](
     return RaisesContex(*expected_exceptions, msg=msg)
 
 
-# Context manager class for assert_raises
 class RaisesContex[T]:
     def __init__(self, *expected_exceptions: type[T], msg: str | None = None) -> None:
         self.msg = msg
@@ -63,11 +62,7 @@ class RaisesContex[T]:
 
 
 def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual == expected.
-
-    Raises:
-        AssertionFailure: If actual != expected
-    """
+    """Assert that actual == expected."""
     if actual != expected:
         message = msg or f"{actual!r} != {expected!r}"
         raise AssertionFailure(
@@ -79,11 +74,7 @@ def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_ne(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual != expected.
-
-    Raises:
-        AssertionFailure: If actual == expected
-    """
+    """Assert that actual != expected."""
     if actual == expected:
         message = msg or f"{actual!r} == {expected!r}"
         raise AssertionFailure(
@@ -95,11 +86,7 @@ def assert_ne(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_true(value: Any, *, msg: str | None = None) -> None:
-    """Assert that value is True (identity check, not truthiness).
-
-    Raises:
-        AssertionFailure: If value is not True
-    """
+    """Assert that value is True (identity check, not truthiness)."""
     if value is not True:
         message = msg or f"{value!r} is not True"
         raise AssertionFailure(
@@ -111,11 +98,7 @@ def assert_true(value: Any, *, msg: str | None = None) -> None:
 
 
 def assert_false(value: Any, *, msg: str | None = None) -> None:
-    """Assert that value is False (identity check, not falsiness).
-
-    Raises:
-        AssertionFailure: If value is not False
-    """
+    """Assert that value is False (identity check, not falsiness)."""
     if value is not False:
         message = msg or f"{value!r} is not False"
         raise AssertionFailure(
@@ -127,11 +110,7 @@ def assert_false(value: Any, *, msg: str | None = None) -> None:
 
 
 def assert_is_none(value: Any, *, msg: str | None = None) -> None:
-    """Assert that value is None.
-
-    Raises:
-        AssertionFailure: If value is not None
-    """
+    """Assert that value is None."""
     if value is not None:
         message = msg or f"{value!r} is not None"
         raise AssertionFailure(
@@ -143,11 +122,7 @@ def assert_is_none(value: Any, *, msg: str | None = None) -> None:
 
 
 def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> TypeIs[T]:
-    """Assert that value is not None.
-
-    Raises:
-        AssertionFailure: If value is None
-    """
+    """Assert that value is not None."""
     if value is None:
         message = msg or "value is None"
         raise AssertionFailure(
@@ -160,11 +135,7 @@ def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> TypeIs[
 
 
 def assert_is(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual is expected (identity check).
-
-    Raises:
-        AssertionFailure: If actual is not expected
-    """
+    """Assert that actual is expected (identity check)."""
     if actual is not expected:
         message = msg or f"{actual!r} is not {expected!r}"
         raise AssertionFailure(
@@ -176,11 +147,7 @@ def assert_is(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_is_not(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual is not expected (identity check).
-
-    Raises:
-        AssertionFailure: If actual is expected
-    """
+    """Assert that actual is not expected (identity check)."""
     if actual is expected:
         message = msg or f"{actual!r} is {expected!r}"
         raise AssertionFailure(
@@ -192,11 +159,7 @@ def assert_is_not(actual: Any, expected: Any, *, msg: str | None = None) -> None
 
 
 def assert_lt(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual < expected.
-
-    Raises:
-        AssertionFailure: If actual >= expected
-    """
+    """Assert that actual < expected."""
     if not actual < expected:
         message = msg or f"{actual!r} >= {expected!r}"
         raise AssertionFailure(
@@ -208,11 +171,7 @@ def assert_lt(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_gt(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual > expected.
-
-    Raises:
-        AssertionFailure: If actual <= expected
-    """
+    """Assert that actual > expected."""
     if not actual > expected:
         message = msg or f"{actual!r} <= {expected!r}"
         raise AssertionFailure(
@@ -224,11 +183,7 @@ def assert_gt(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_le(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual <= expected.
-
-    Raises:
-        AssertionFailure: If actual > expected
-    """
+    """Assert that actual <= expected."""
     if not actual <= expected:
         message = msg or f"{actual!r} > {expected!r}"
         raise AssertionFailure(
@@ -240,11 +195,7 @@ def assert_le(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_ge(actual: Any, expected: Any, *, msg: str | None = None) -> None:
-    """Assert that actual >= expected.
-
-    Raises:
-        AssertionFailure: If actual < expected
-    """
+    """Assert that actual >= expected."""
     if not actual >= expected:
         message = msg or f"{actual!r} < {expected!r}"
         raise AssertionFailure(
@@ -256,11 +207,7 @@ def assert_ge(actual: Any, expected: Any, *, msg: str | None = None) -> None:
 
 
 def assert_in(member: Any, container: Any, *, msg: str | None = None) -> None:
-    """Assert that member in container.
-
-    Raises:
-        AssertionFailure: If member not in container
-    """
+    """Assert that member in container."""
     if member not in container:
         message = msg or f"{member!r} not found in {container!r}"
         raise AssertionFailure(
@@ -272,11 +219,7 @@ def assert_in(member: Any, container: Any, *, msg: str | None = None) -> None:
 
 
 def assert_not_in(member: Any, container: Any, *, msg: str | None = None) -> None:
-    """Assert that member not in container.
-
-    Raises:
-        AssertionFailure: If member in container
-    """
+    """Assert that member not in container."""
     if member in container:
         message = msg or f"{member!r} found in {container!r}"
         raise AssertionFailure(
@@ -290,11 +233,7 @@ def assert_not_in(member: Any, container: Any, *, msg: str | None = None) -> Non
 def assert_isinstance(
     obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None
 ) -> None:
-    """Assert that isinstance(obj, classinfo) is True.
-
-    Raises:
-        AssertionFailure: If isinstance(obj, classinfo) is False
-    """
+    """Assert that isinstance(obj, classinfo) is True."""
     if not isinstance(obj, classinfo):
         type_name = (
             classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
@@ -311,11 +250,7 @@ def assert_isinstance(
 def assert_not_isinstance(
     obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None
 ) -> None:
-    """Assert that isinstance(obj, classinfo) is False.
-
-    Raises:
-        AssertionFailure: If isinstance(obj, classinfo) is True
-    """
+    """Assert that isinstance(obj, classinfo) is False."""
     if isinstance(obj, classinfo):
         type_name = (
             classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
@@ -330,11 +265,7 @@ def assert_not_isinstance(
 
 
 def assert_len(obj: Any, expected_length: int, *, msg: str | None = None) -> None:
-    """Assert that len(obj) == expected_length.
-
-    Raises:
-        AssertionFailure: If len(obj) != expected_length
-    """
+    """Assert that len(obj) == expected_length."""
     actual_length = len(obj)
     if actual_length != expected_length:
         message = msg or f"Length {actual_length} != {expected_length}"
@@ -351,9 +282,6 @@ def fail(msg: str | None = None) -> None:
 
     Args:
         msg: Optional custom message
-
-    Raises:
-        AssertionFailure: Always raises
     """
     message = msg or "Assertion failed"
     raise AssertionFailure(message)

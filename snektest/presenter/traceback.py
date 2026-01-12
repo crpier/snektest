@@ -30,13 +30,11 @@ def render_traceback(
         filename = frame.f_code.co_filename
         name = frame.f_code.co_name
 
-        # Skip snektest internal frames (like cli.py)
         if not filename.startswith(snektest_path):
             console.print(
                 f'  File "[cyan]{filename}[/cyan]", line {lineno}, in [yellow]{name}[/yellow]'
             )
 
-            # Read and print the code line with syntax highlighting
             try:
                 with pathlib.Path(filename).open(encoding="utf-8") as f:
                     lines = f.readlines()
@@ -58,7 +56,6 @@ def render_traceback(
     if not show_exception_line:
         return
 
-    # Print the exception line
     exc_name = exc_type.__name__
     exc_msg = str(exc_value)
     console.print(f"[red bold]{exc_name}[/red bold]: {exc_msg}")

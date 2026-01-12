@@ -127,7 +127,7 @@ def test_multi_param_async_test() -> None:
     )
 
     result = run_test_subprocess(test_file)
-    assert_eq(result["passed"], 4)  # 2 * 2 = 4 combinations
+    assert_eq(result["passed"], 4)
     assert_eq(result["failed"], 0)
 
 

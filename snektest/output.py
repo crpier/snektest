@@ -74,7 +74,6 @@ class StdinProxy:
         return self._original_stdin.name
 
     def __getattr__(self, name: str) -> object:
-        # Delegate unknown attributes to original stdin
         return getattr(self._original_stdin, name)
 
 

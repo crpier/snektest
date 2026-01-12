@@ -14,7 +14,6 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
 
     console.print(f"[red]E       {exc.args[0]}[/red]")
 
-    # Handle different types with custom diff rendering
     if isinstance(actual, list) and isinstance(expected, list):
         # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("list[Any]", actual)
@@ -32,8 +31,6 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
     ):
         render_multiline_string_diff(console, actual, expected)
     else:
-        # For simple values (ints, floats, small strings, etc.) the message line above is
-        # already sufficient and avoids redundant output.
         return
 
 

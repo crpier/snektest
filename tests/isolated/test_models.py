@@ -79,7 +79,6 @@ def test_filter_item_nonexistent_path() -> None:
 def test_filter_item_non_python_file() -> None:
     """Test FilterItem raises error for non-Python file."""
     with TemporaryDirectory() as tmpdir:
-        # Create a non-Python file
         test_file = Path(tmpdir) / "test_file.txt"
         _ = test_file.write_text("content")
 
@@ -94,7 +93,6 @@ def test_filter_item_non_python_file() -> None:
 def test_filter_item_file_not_starting_with_test() -> None:
     """Test FilterItem raises error for Python file not starting with test_."""
     with TemporaryDirectory() as tmpdir:
-        # Create a Python file that doesn't start with test_
         test_file = Path(tmpdir) / "myfile.py"
         _ = test_file.write_text("# python code")
 
@@ -141,7 +139,6 @@ def test_filter_item_repr() -> None:
     filter_item = FilterItem("tests/isolated/test_basic.py::test_func[params]")
     repr_str = repr(filter_item)
 
-    # Check that repr contains the key parts
     assert_eq("FilterItem" in repr_str, True)
     assert_eq("test_basic.py" in repr_str, True)
     assert_eq("test_func" in repr_str, True)

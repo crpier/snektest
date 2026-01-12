@@ -24,11 +24,7 @@ def load_tests_from_file(
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    """Load and queue tests from a single Python file.
-
-    Raises:
-        CollectionError: If file could not be loaded
-    """
+    """Load and queue tests from a single Python file."""
     module_name = ".".join(file_path.with_suffix("").parts)
     if module_name in modules:
         module = modules[module_name]

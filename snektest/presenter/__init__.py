@@ -10,7 +10,6 @@ from snektest.models import (
 from snektest.presenter.errors import print_failures as _print_failures
 from snektest.presenter.summary import print_summary as _print_summary
 
-# Initialize console
 console = Console()
 
 

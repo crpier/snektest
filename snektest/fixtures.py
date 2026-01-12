@@ -34,11 +34,7 @@ def is_session_fixture(fixture_code: CodeType) -> bool:
 
 
 def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
-    """Load a session-scoped fixture, creating it on first use and reusing thereafter.
-
-    Raises:
-        UnreachableError: Error that theoretically can't be reached.
-    """
+    """Load a session-scoped fixture, creating it on first use and reusing thereafter."""
     fixture_code = get_code_from_generator(fixture_gen)
     try:
         gen, result = _SESSION_FIXTURES[fixture_code]
@@ -73,11 +69,7 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
 def load_function_fixture[R](
     fixture_gen: AsyncGenerator[R] | Generator[R],
 ) -> Coroutine[R] | R:
-    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value.
-
-    Raises:
-        UnreachableError: Error that theoretically can't be reached
-    """
+    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value."""
     _FUNCTION_FIXTURES.append(fixture_gen)
     if isasyncgen(fixture_gen):
         return anext(fixture_gen)

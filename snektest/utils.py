@@ -35,7 +35,6 @@ def get_code_from_generator(
     generator: AsyncGenerator[Any] | Generator[Any],
 ) -> CodeType:
     """Get the code object from a generator."""
-    # ty seems to properly type this
     return generator.ag_code if isasyncgen(generator) else generator.gi_code  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
 
 
@@ -46,6 +45,5 @@ def get_func_name_from_generator(
     return (
         generator.ag_code.co_name
         if isasyncgen(generator)
-        # ty seems to properly type this
         else generator.gi_code.co_name  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
     )

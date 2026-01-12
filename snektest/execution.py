@@ -32,12 +32,7 @@ from snektest.utils import get_test_function_params
 async def teardown_fixture(
     fixture_name: str, generator: object
 ) -> TeardownFailure | None:
-    """Teardown a single fixture and return failure if it occurs.
-
-    Raises:
-        BadRequestError: If the fixture function had more than one `yield`
-        UnreachableError: Error that theoretically can't be reached
-    """
+    """Teardown a single fixture and return failure if it occurs."""
     try:
         if isasyncgen(generator):
             await anext(generator)
@@ -67,11 +62,7 @@ async def execute_test(
     *,
     capture_output: bool = True,
 ) -> TestResult:
-    """Execute a single test function with fixtures and output capture.
-
-    Raises:
-        UnreachableError: Error that theoretically can't be reached
-    """
+    """Execute a single test function with fixtures and output capture."""
     with maybe_capture_output(capture_output) as (output_buffer, captured_warnings):
         param_values = ()
         if name.params_part:
@@ -109,7 +100,6 @@ async def execute_test(
                 traceback=traceback,
             )
 
-    # Teardown function fixtures and track failures
     with maybe_capture_output(capture_output) as (
         fixture_teardown_buffer,
         _,
@@ -278,7 +268,6 @@ async def run_tests(
         ):
             pdb_triggered = True
 
-        # Determine if we should show session teardown output
         (
             has_test_failures,
             has_fixture_teardown_failures,

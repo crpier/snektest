@@ -102,7 +102,6 @@ async def _run_tests_with_producer_thread(
         )
     finally:
         producer_thread.join()
-        # Re-raise any exception that occurred during collection
         if collection_exception:
             raise collection_exception[0]
 

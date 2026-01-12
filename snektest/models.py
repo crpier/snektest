@@ -129,7 +129,6 @@ class Param[T]:
 
         For tests with no parameters, returns {"": ()} to ensure the test runs once.
         """
-        # Handle the no-params case explicitly
         if not params:
             return {"": ()}
 

@@ -32,7 +32,6 @@ from snektest.utils import (
 )
 
 
-# ===== Test utils.py functions =====
 @test()
 def test_mark_test_function_basic() -> None:
     """Test that mark_test_function properly marks a function."""
@@ -77,12 +76,15 @@ def test_get_test_function_params_single_param_list() -> None:
     mark_test_function(dummy_func, params)
 
     result = get_test_function_params(dummy_func)
-    assert_eq(len(result), 2)
-    assert_in("1", result)
-    assert_in("2", result)
+    assert_eq(
+        result,
+        {
+            "1": (params[0][0],),
+            "2": (params[0][1],),
+        },
+    )
 
 
-# ===== Test Param.to_dict =====
 @test()
 def test_param_to_dict_empty() -> None:
     """Test Param.to_dict with no params."""
@@ -96,11 +98,13 @@ def test_param_to_dict_single_list() -> None:
     params = ([Param(value=1, name="one"), Param(value=2, name="two")],)
     result = Param.to_dict(params)
 
-    assert_eq(len(result), 2)
-    assert_in("one", result)
-    assert_in("two", result)
-    assert_eq(result["one"][0].value, 1)
-    assert_eq(result["two"][0].value, 2)
+    assert_eq(
+        result,
+        {
+            "one": (params[0][0],),
+            "two": (params[0][1],),
+        },
+    )
 
 
 @test()
@@ -112,18 +116,17 @@ def test_param_to_dict_multiple_lists() -> None:
     )
     result = Param.to_dict(params)
 
-    assert_eq(len(result), 4)
-    assert_in("a, X", result)
-    assert_in("a, Y", result)
-    assert_in("b, X", result)
-    assert_in("b, Y", result)
+    assert_eq(
+        result,
+        {
+            "a, X": (params[0][0], params[1][0]),
+            "a, Y": (params[0][0], params[1][1]),
+            "b, X": (params[0][1], params[1][0]),
+            "b, Y": (params[0][1], params[1][1]),
+        },
+    )
 
-    # Verify the actual values
-    assert_eq(result["a, X"][0].value, 1)
-    assert_eq(result["a, X"][1].value, "x")
 
-
-# ===== Test TestName =====
 @test()
 def test_testname_str_no_params() -> None:
     """Test TestName string representation without params."""
@@ -144,7 +147,6 @@ def test_testname_str_with_params() -> None:
     assert_eq(str(name), "tests/test_foo.py::test_bar[x=1, y=2]")
 
 
-# ===== Test assertion functions =====
 @test()
 def test_assert_eq_passes() -> None:
     """Test assert_eq with equal values."""

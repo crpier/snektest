@@ -35,7 +35,6 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
         Dict with keys: passed, failed, fixture_teardown_failed,
                        session_teardown_failed, returncode
     """
-    # Run snektest with special flag to output JSON results
     cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
 
     result = subprocess.run(
@@ -43,13 +42,11 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
         check=False,
         capture_output=True,
         text=True,
-        timeout=0.5,  # Hardcoded 0.5 second timeout
+        timeout=0.5,
     )
 
-    # Parse JSON output from snektest
-    # The output may contain Rich formatting before the JSON, so find the JSON part
     lines = result.stdout.strip().split("\n")
-    json_line = lines[-1]  # JSON should be the last line
+    json_line = lines[-1]
     results = json.loads(json_line)
     results["returncode"] = result.returncode
     return results

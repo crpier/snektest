@@ -110,7 +110,7 @@ async def test_mixed_failures_and_errors() -> None:
 
             @test()
             def test_error_3() -> None:
-                1 / 0  # ZeroDivisionError
+                1 / 0
 
             @test()
             def test_passing() -> None:

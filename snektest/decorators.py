@@ -129,9 +129,6 @@ def test_hypothesis(
 
     Strategies are positional and fill function arguments from left to right.
 
-    Raises:
-        ValueError: If no strategies are provided.
-
     Notes:
     - Hypothesis cannot directly run async functions; for `async def` tests we run
       the Hypothesis engine in a worker thread and schedule the async test body
