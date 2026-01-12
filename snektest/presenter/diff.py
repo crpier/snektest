@@ -43,53 +43,62 @@ def render_simple_diff(
     console.print(f"[red]E       {actual!r} {operator} {expected!r}[/red]")
 
 
-def render_list_diff(console: Console, actual: list[Any], expected: list[Any]) -> None:  # noqa: C901
+def _first_diff_index(actual: list[Any], expected: list[Any]) -> int | None:
+    for index, (actual_item, expected_item) in enumerate(
+        zip(actual, expected, strict=False)
+    ):
+        if actual_item != expected_item:
+            return index
+    return None
+
+
+def _length_mismatch_message(actual_len: int, expected_len: int) -> str | None:
+    if actual_len == expected_len:
+        return None
+    if actual_len > expected_len:
+        return (
+            f"[red]E       Left contains {actual_len - expected_len} more items[/red]"
+        )
+    return f"[red]E       Right contains {expected_len - actual_len} more items[/red]"
+
+
+def _print_ndiff(
+    console: Console, expected_lines: list[str], actual_lines: list[str]
+) -> None:
+    style_by_prefix: dict[str, str] = {
+        "- ": "red",
+        "+ ": "green",
+        "? ": "dim red",
+        "  ": "red",
+    }
+
+    for line in difflib.ndiff(expected_lines, actual_lines):
+        prefix = line[:2]
+        style = style_by_prefix.get(prefix)
+        if style is None:
+            continue
+        console.print(f"[{style}]E       {line}[/{style}]")
+
+
+def render_list_diff(console: Console, actual: list[Any], expected: list[Any]) -> None:
     """Render a pytest-like diff for lists."""
     console.print()
 
-    # Find first difference
-    diff_idx = None
-    for i, (a, e) in enumerate(zip(actual, expected, strict=False)):
-        if a != e:
-            diff_idx = i
-            break
-
-    # Show index-level diff if items differ
+    diff_idx = _first_diff_index(actual, expected)
     if diff_idx is not None:
         console.print(
             f"[red]E       At index {diff_idx} diff: {actual[diff_idx]!r} != {expected[diff_idx]!r}[/red]"
         )
-    elif len(actual) != len(expected):
-        # Length mismatch
-        if len(actual) > len(expected):
-            console.print(
-                f"[red]E       Left contains {len(actual) - len(expected)} more items[/red]"
-            )
-        else:
-            console.print(
-                f"[red]E       Right contains {len(expected) - len(actual)} more items[/red]"
-            )
+    else:
+        msg = _length_mismatch_message(len(actual), len(expected))
+        if msg is not None:
+            console.print(msg)
 
-    # Show full diff with +/- markers
     console.print("[red]E       [/red]")
 
     expected_lines = pprint.pformat(expected, width=80).splitlines()
     actual_lines = pprint.pformat(actual, width=80).splitlines()
-
-    diff = list(difflib.ndiff(expected_lines, actual_lines))
-
-    for line in diff:
-        match line[:2]:
-            case "- ":
-                console.print(f"[red]E       {line}[/red]")
-            case "+ ":
-                console.print(f"[green]E       {line}[/green]")
-            case "? ":
-                console.print(f"[dim red]E       {line}[/dim red]")
-            case "  ":
-                console.print(f"[red]E       {line}[/red]")
-            case _:
-                ...
+    _print_ndiff(console, expected_lines, actual_lines)
 
 
 def render_dict_diff(

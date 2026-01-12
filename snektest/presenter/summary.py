@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from rich.console import Console
 
 from snektest.models import (
@@ -7,6 +11,15 @@ from snektest.models import (
     TeardownFailure,
     TestResult,
 )
+
+
+@dataclass(frozen=True)
+class RunCounts:
+    passed: int
+    failed: int
+    errors: int
+    fixture_teardown_failed: int
+    session_teardown_failed: int
 
 
 def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
@@ -69,34 +82,31 @@ def _print_session_teardown_failures(
         )
 
 
-def _build_status_text(  # noqa: PLR0913
-    *,
-    passed_count: int,
-    failed_count: int,
-    error_count: int,
-    fixture_teardown_count: int,
-    session_teardown_count: int,
-    total_duration: float,
-) -> tuple[str, str]:
-    """Build status text and set its color."""
-    has_failures = (
-        failed_count > 0
-        or error_count > 0
-        or fixture_teardown_count > 0
-        or session_teardown_count > 0
+def _has_failures(counts: RunCounts) -> bool:
+    return (
+        counts.failed > 0
+        or counts.errors > 0
+        or counts.fixture_teardown_failed > 0
+        or counts.session_teardown_failed > 0
     )
-    status_color = "red" if has_failures else "green"
+
+
+def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str, str]:
+    """Build status text and set its color."""
+    status_color = "red" if _has_failures(counts) else "green"
     status_text = f"[bold {status_color}]"
-    if failed_count > 0:
-        status_text += f"{failed_count} failed, "
-    if error_count > 0:
-        status_text += f"{error_count} error, "
-    if fixture_teardown_count > 0:
-        status_text += f"{fixture_teardown_count} fixture teardown failed, "
-    if session_teardown_count > 0:
-        status_text += f"{session_teardown_count} session fixture teardown failed, "
+    if counts.failed > 0:
+        status_text += f"{counts.failed} failed, "
+    if counts.errors > 0:
+        status_text += f"{counts.errors} error, "
+    if counts.fixture_teardown_failed > 0:
+        status_text += f"{counts.fixture_teardown_failed} fixture teardown failed, "
+    if counts.session_teardown_failed > 0:
+        status_text += (
+            f"{counts.session_teardown_failed} session fixture teardown failed, "
+        )
     status_text += (
-        f"{passed_count} passed in {total_duration:.2f}s[/bold {status_color}]"
+        f"{counts.passed} passed in {total_duration:.2f}s[/bold {status_color}]"
     )
     return status_text, status_color
 
@@ -111,23 +121,29 @@ def print_summary(
     if session_teardown_failures is None:
         session_teardown_failures = []
 
-    passed_count = sum(1 for _ in test_results if isinstance(_.result, PassedResult))
-    failed_count = sum(1 for _ in test_results if isinstance(_.result, FailedResult))
-    error_count = sum(1 for _ in test_results if isinstance(_.result, ErrorResult))
-    fixture_teardown_count = sum(
+    passed = sum(
+        1 for result in test_results if isinstance(result.result, PassedResult)
+    )
+    failed = sum(
+        1 for result in test_results if isinstance(result.result, FailedResult)
+    )
+    errors = sum(1 for result in test_results if isinstance(result.result, ErrorResult))
+    fixture_teardown_failed = sum(
         len(result.fixture_teardown_failures) for result in test_results
     )
-    session_teardown_count = len(session_teardown_failures)
+    session_teardown_failed = len(session_teardown_failures)
+
+    counts = RunCounts(
+        passed=passed,
+        failed=failed,
+        errors=errors,
+        fixture_teardown_failed=fixture_teardown_failed,
+        session_teardown_failed=session_teardown_failed,
+    )
 
     _print_warnings(console, test_results)
 
-    has_failures = (
-        failed_count > 0
-        or error_count > 0
-        or fixture_teardown_count > 0
-        or session_teardown_count > 0
-    )
-    if has_failures:
+    if _has_failures(counts):
         console.rule("[wheat1]SUMMARY", style="wheat1")
         _print_test_failures(console, test_results)
         _print_test_errors(console, test_results)
@@ -136,11 +152,7 @@ def print_summary(
         console.print()
 
     status_text, status_color = _build_status_text(
-        passed_count=passed_count,
-        failed_count=failed_count,
-        error_count=error_count,
-        fixture_teardown_count=fixture_teardown_count,
-        session_teardown_count=session_teardown_count,
+        counts=counts,
         total_duration=total_duration,
     )
     console.rule(status_text, style=status_color)

@@ -61,7 +61,7 @@ def test_pdb_stops_on_failure() -> None:
         > {test_file}(8)test_failure()
         -> assert_eq(value, 2)
         (Pdb) 1
-        (Pdb) 
+        (Pdb)\u0020
         =================================== FAILURES ===================================
 
         ─────────────── {test_file}::test_failure ───────────────
@@ -129,7 +129,7 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
         > {test_file}(7)fix()
         -> raise RuntimeError("fixture teardown failed")
         (Pdb) 'fixture value'
-        (Pdb) 
+        (Pdb)\u0020
         =================================== FAILURES ===================================
 
         ───── {test_file}::test_fix - Fixture teardown: fix ─────
