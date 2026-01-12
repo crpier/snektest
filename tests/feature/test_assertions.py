@@ -8,7 +8,7 @@ from snektest import (
     fail,
     test,
 )
-from snektest.models import AssertionFailure
+from snektest.models import AssertionFailure, BadRequestError
 
 
 @test()
@@ -214,6 +214,13 @@ def test_assert_raises_custom_message() -> None:
             pass
 
     assert_eq(str(exc_info.exception), "Custom error message")
+
+
+@test()
+def test_assert_raises_exception_property_requires_exit() -> None:
+    ctx = assert_raises(ValueError)
+    with assert_raises(BadRequestError):
+        _ = ctx.exception
 
 
 @test()

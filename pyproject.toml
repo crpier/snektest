@@ -31,6 +31,17 @@ packages = ["snektest"]
 [tool.hatch.build.targets.wheel.force-include]
 "snektest/py.typed" = "snektest/py.typed"
 
+[tool.coverage.run]
+parallel = true
+source = ["snektest"]
+omit = [
+    "tests/*",
+    "testutils/*",
+]
+
+[tool.coverage.report]
+fail_under = 100
+
 ### Formatting and static checking tools ###
 [tool.ruff]
 line-length = 88

@@ -59,8 +59,8 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
             elif isgenerator(gen):
                 result = next(gen)
             _SESSION_FIXTURES[fixture_code] = (gen, result)
-    except IndexError:
-        msg = f"Function {fixture_code.__qualname__} was not registered as a session fixture. This shouldn't be possible!"
+    except KeyError:
+        msg = f"Function {fixture_code.co_qualname} was not registered as a session fixture. This shouldn't be possible!"
         raise UnreachableError(msg) from None
     else:
         return result  # pyright: ignore[reportReturnType]
@@ -69,11 +69,12 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
 def load_function_fixture[R](
     fixture_gen: AsyncGenerator[R] | Generator[R],
 ) -> Coroutine[R] | R:
-    """Load a function-scoped fixture by appending it to the fixtures list and yielding its value."""
-    _FUNCTION_FIXTURES.append(fixture_gen)
+    """Load a function-scoped fixture by registering and yielding its value."""
     if isasyncgen(fixture_gen):
+        _FUNCTION_FIXTURES.append(fixture_gen)
         return anext(fixture_gen)
     if isgenerator(fixture_gen):
+        _FUNCTION_FIXTURES.append(fixture_gen)
         return next(fixture_gen)
     msg = "Fixture must be a generator or async generator"
     raise UnreachableError(msg)
