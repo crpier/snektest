@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import pdb  # noqa: T100
 import sys
 import time
@@ -250,7 +249,6 @@ def _maybe_debug_session_teardown(
 async def run_tests(
     queue: TestsQueue,
     *,
-    logger: logging.Logger,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
@@ -261,7 +259,6 @@ async def run_tests(
     try:
         while True:
             name, func = await queue.get()
-            logger.info("Processing item %s", name)
             test_result = await execute_test(name, func, capture_output=capture_output)
             test_results.append(test_result)
             print_test_result(test_result)

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
 from pathlib import Path
@@ -24,8 +23,6 @@ def load_tests_from_file(
     filter_item: FilterItem,
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
-    *,
-    logger: logging.Logger,
 ) -> None:
     """Load and queue tests from a single Python file.
 
@@ -36,7 +33,6 @@ def load_tests_from_file(
     if module_name in modules:
         module = modules[module_name]
     else:
-        logger.info("Will import module: %s", module_name)
         spec = spec_from_file_location(module_name, file_path)
         if not spec or not spec.loader:
             msg = f"Could not load spec from {file_path}"
@@ -60,25 +56,18 @@ def load_tests_from_file(
             test_name = TestName(
                 file_path=file_path, func_name=func.__name__, params_part=param_names
             )
-            logger.info("Producing test named %s", test_name)
             _ = loop.call_soon_threadsafe(queue.put_nowait, (test_name, func))
 
 
-def generate_file_list(
-    filter_item: FilterItem, *, logger: logging.Logger
-) -> list[PyFilePath]:
+def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
     """Generate a list of valid file paths for given filter item."""
 
-    def path_is_runnable(
-        file_path: Path, *, logger: logging.Logger
-    ) -> TypeGuard[PyFilePath]:
+    def path_is_runnable(file_path: Path) -> TypeGuard[PyFilePath]:
         if not file_path.name.startswith(TEST_FILE_PREFIX):
-            logger.debug("Skipping non-test python file %s", file_path)
             return False
         try:
             file_path = validate_PyFilePath(file_path)
         except ValidationError:
-            logger.debug("Skipping non-python file %s", file_path)
             return False
         return True
 
@@ -91,7 +80,7 @@ def generate_file_list(
     else:
         paths = [filter_item.file_path]
 
-    return [path for path in paths if path_is_runnable(path, logger=logger)]
+    return [path for path in paths if path_is_runnable(path)]
 
 
 def load_tests_from_filters(
@@ -99,7 +88,6 @@ def load_tests_from_filters(
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
     *,
-    logger: logging.Logger,
     exception_holder: list[BaseException] | None = None,
 ) -> None:
     """Load tests from all filter items and populate the queue.
@@ -108,27 +96,21 @@ def load_tests_from_filters(
         filter_items: List of filter items to load tests from
         queue: Queue to populate with tests
         loop: Event loop for thread-safe queue operations
-        logger: Logger instance
         exception_holder: Optional list to store exception if one occurs during collection
     """
-    logger.info("Test collector started")
     try:
         for filter_item in filter_items:
-            file_paths = generate_file_list(filter_item, logger=logger)
-            if len(file_paths) == 0:
-                logger.info("Filter item %s had no runnable files", filter_item)
+            file_paths = generate_file_list(filter_item)
             for file_path in file_paths:
                 load_tests_from_file(
                     file_path=file_path,
                     filter_item=filter_item,
                     queue=queue,
                     loop=loop,
-                    logger=logger,
                 )
     except BaseException as e:
         # Store exception to be re-raised in main thread
         if exception_holder is not None:
             exception_holder.append(e)
-        logger.exception("Exception during test collection")
     finally:
         _ = loop.call_soon_threadsafe(queue.shutdown)

@@ -11,9 +11,8 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
     """Pretty-print an AssertionFailure using Rich, styled like pytest."""
     actual = exc.actual
     expected = exc.expected
-    operator = exc.operator or "=="
 
-    console.print(f"[red]E       AssertionError[/red]: {exc.args[0]}")
+    console.print(f"[red]E       {exc.args[0]}[/red]")
 
     # Handle different types with custom diff rendering
     if isinstance(actual, list) and isinstance(expected, list):
@@ -33,14 +32,9 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
     ):
         render_multiline_string_diff(console, actual, expected)
     else:
-        render_simple_diff(console, actual, expected, operator)
-
-
-def render_simple_diff(
-    console: Console, actual: Any, expected: Any, operator: str
-) -> None:
-    """Render a simple diff for basic types."""
-    console.print(f"[red]E       {actual!r} {operator} {expected!r}[/red]")
+        # For simple values (ints, floats, small strings, etc.) the message line above is
+        # already sufficient and avoids redundant output.
+        return
 
 
 def _first_diff_index(actual: list[Any], expected: list[Any]) -> int | None:

@@ -12,6 +12,8 @@ def render_traceback(
     exc_type: type[BaseException],
     exc_value: BaseException,
     traceback: object,
+    *,
+    show_exception_line: bool = True,
 ) -> None:
     """Render a traceback without a box, using Rich for syntax highlighting."""
     console.print("[bold]Traceback[/bold] [dim](most recent call last):[/dim]")
@@ -52,6 +54,9 @@ def render_traceback(
                 pass
 
         tb = tb.tb_next
+
+    if not show_exception_line:
+        return
 
     # Print the exception line
     exc_name = exc_type.__name__

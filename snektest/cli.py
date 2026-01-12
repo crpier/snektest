@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import sys
 import threading
 from dataclasses import dataclass
@@ -38,14 +37,12 @@ class TestRunSummary:
 
 @dataclass(frozen=True)
 class CliOptions:
-    logging_level: int = logging.WARNING
     capture_output: bool = True
     json_output: bool = False
     pdb_on_failure: bool = False
 
 
 def parse_cli_args(argv: list[str]) -> tuple[list[str], CliOptions] | int:
-    logging_level = logging.WARNING
     capture_output = True
     json_output = False
     pdb_on_failure = False
@@ -54,10 +51,6 @@ def parse_cli_args(argv: list[str]) -> tuple[list[str], CliOptions] | int:
     for command in argv:
         if command.startswith("-"):
             match command:
-                case "-v":
-                    logging_level = logging.INFO
-                case "-vv":
-                    logging_level = logging.DEBUG
                 case "-s":
                     capture_output = False
                 case "--json-output":
@@ -74,7 +67,6 @@ def parse_cli_args(argv: list[str]) -> tuple[list[str], CliOptions] | int:
         potential_filter.append(".")
 
     options = CliOptions(
-        logging_level=logging_level,
         capture_output=capture_output,
         json_output=json_output,
         pdb_on_failure=pdb_on_failure,
@@ -85,7 +77,6 @@ def parse_cli_args(argv: list[str]) -> tuple[list[str], CliOptions] | int:
 async def _run_tests_with_producer_thread(
     filter_items: list[FilterItem],
     *,
-    logger: logging.Logger,
     capture_output: bool,
     pdb_on_failure: bool,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
@@ -98,7 +89,6 @@ async def _run_tests_with_producer_thread(
             "filter_items": filter_items,
             "queue": queue,
             "loop": asyncio.get_running_loop(),
-            "logger": logger,
             "exception_holder": collection_exception,
         },
     )
@@ -107,7 +97,6 @@ async def _run_tests_with_producer_thread(
     try:
         test_results, session_teardown_failures = await run_tests(
             queue=queue,
-            logger=logger,
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
         )
@@ -148,11 +137,8 @@ async def run_tests_programmatic(
     Returns:
         TestRunSummary with test results and counts
     """
-    logger = logging.getLogger("snektest")
-
     test_results, session_teardown_failures = await _run_tests_with_producer_thread(
         filter_items,
-        logger=logger,
         capture_output=capture_output,
         pdb_on_failure=pdb_on_failure,
     )
@@ -178,15 +164,12 @@ async def run_script() -> int:
         return parsed
 
     potential_filter, options = parsed
-    logging.basicConfig(level=options.logging_level)
-    logger = logging.getLogger("snektest")
 
     try:
         filter_items = [FilterItem(item) for item in potential_filter]
     except ArgsError as e:
         print_error(str(e))
         return 2
-    logger.info("Filters=%s", filter_items)
 
     try:
         summary = await run_tests_programmatic(
@@ -195,7 +178,6 @@ async def run_script() -> int:
             pdb_on_failure=options.pdb_on_failure,
         )
     except asyncio.CancelledError:
-        logger.info("Execution stopped")
         return 2
 
     if options.json_output:

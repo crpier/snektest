@@ -52,14 +52,23 @@ def _print_result_details(
     console: Console,
     *,
     result: TestResult,
-    exc_type: type[BaseException],
-    exc_value: BaseException,
-    traceback: object,
+    outcome: FailedResult | ErrorResult,
 ) -> None:
-    render_traceback(console, exc_type, exc_value, traceback)
+    exc_type = outcome.exc_type
+    exc_value = outcome.exc_value
+    traceback = outcome.traceback
 
     if isinstance(exc_value, AssertionFailure):
+        render_traceback(
+            console,
+            exc_type,
+            exc_value,
+            traceback,
+            show_exception_line=False,
+        )
         render_assertion_failure(console, exc_value)
+    else:
+        render_traceback(console, exc_type, exc_value, traceback)
 
     _print_optional_output(
         console,
@@ -81,9 +90,7 @@ def _print_test_failures(console: Console, failures: list[TestResult]) -> None:
         _print_result_details(
             console,
             result=result,
-            exc_type=failing_result.exc_type,
-            exc_value=failing_result.exc_value,
-            traceback=failing_result.traceback,
+            outcome=failing_result,
         )
 
 
@@ -95,9 +102,7 @@ def _print_test_errors(console: Console, errors: list[TestResult]) -> None:
         _print_result_details(
             console,
             result=result,
-            exc_type=error_result.exc_type,
-            exc_value=error_result.exc_value,
-            traceback=error_result.traceback,
+            outcome=error_result,
         )
 
 

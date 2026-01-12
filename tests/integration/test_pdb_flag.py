@@ -68,9 +68,7 @@ def test_pdb_stops_on_failure() -> None:
         Traceback (most recent call last):
           File "{test_file}", line 8, in test_failure
         {padded_line}
-        AssertionFailure: 1 != 2
-        E       AssertionError: 1 != 2
-        E       1 == 2
+        E       1 != 2
         ─────────────────────────────────── SUMMARY ────────────────────────────────────
         FAILED {test_file}::test_failure - 1 != 2
 
