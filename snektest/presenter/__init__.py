@@ -26,21 +26,27 @@ def print_test_result(result: TestResult) -> None:
     match result.result:
         case PassedResult():
             console.print(
-                f"[green]OK[/green] ({result.duration:.2f}s)",
+                f"OK ({result.duration:.2f}s)",
                 highlight=False,
                 no_wrap=True,
+                style="green",
+                markup=False,
             )
         case FailedResult():
             console.print(
-                f"[red]FAIL[/red] ({result.duration:.2f}s)",
+                f"FAIL ({result.duration:.2f}s)",
                 highlight=False,
                 no_wrap=True,
+                style="red",
+                markup=False,
             )
         case ErrorResult():
             console.print(
-                f"[dark_orange]ERROR[/dark_orange] ({result.duration:.2f}s)",
+                f"ERROR ({result.duration:.2f}s)",
                 highlight=False,
                 no_wrap=True,
+                style="dark_orange",
+                markup=False,
             )
 
 

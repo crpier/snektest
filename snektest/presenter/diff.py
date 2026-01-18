@@ -18,7 +18,7 @@ def render_assertion_failure(
     actual = exc.actual
     expected = exc.expected
 
-    console.print(f"[red]E       {exc.args[0]}[/red]")
+    console.print(f"E       {exc.args[0]}", style="red", markup=False)
 
     if isinstance(actual, list) and isinstance(expected, list):
         # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
@@ -58,10 +58,8 @@ def _length_mismatch_message(actual_len: int, expected_len: int) -> str | None:
     if actual_len == expected_len:
         return None
     if actual_len > expected_len:
-        return (
-            f"[red]E       Left contains {actual_len - expected_len} more items[/red]"
-        )
-    return f"[red]E       Right contains {expected_len - actual_len} more items[/red]"
+        return f"E       Left contains {actual_len - expected_len} more items"
+    return f"E       Right contains {expected_len - actual_len} more items"
 
 
 def _print_ndiff(
@@ -83,7 +81,7 @@ def _print_ndiff(
         style = style_by_prefix.get(prefix)
         if style is None:
             continue
-        console.print(f"[{style}]E       {line}[/{style}]")
+        console.print(f"E       {line}", style=style, markup=False)
 
 
 def render_list_diff(
@@ -99,14 +97,16 @@ def render_list_diff(
     diff_idx = _first_diff_index(actual, expected)
     if diff_idx is not None:
         console.print(
-            f"[red]E       At index {diff_idx} diff: {actual[diff_idx]!r} != {expected[diff_idx]!r}[/red]"
+            f"E       At index {diff_idx} diff: {actual[diff_idx]!r} != {expected[diff_idx]!r}",
+            style="red",
+            markup=False,
         )
     else:
         msg = _length_mismatch_message(len(actual), len(expected))
         if msg is not None:
-            console.print(msg)
+            console.print(msg, style="red", markup=False)
 
-    console.print("[red]E       [/red]")
+    console.print("E       ", style="red", markup=False)
 
     expected_lines = pprint.pformat(expected, width=80).splitlines()
     actual_lines = pprint.pformat(actual, width=80).splitlines()
@@ -131,13 +131,13 @@ def render_dict_diff(
     for line in diff:
         match line[:2]:
             case "- ":
-                console.print(f"[red]E       {line}[/red]")
+                console.print(f"E       {line}", style="red", markup=False)
             case "+ ":
-                console.print(f"[green]E       {line}[/green]")
+                console.print(f"E       {line}", style="green", markup=False)
             case "? ":
-                console.print(f"[yellow]E       {line}[/yellow]")
+                console.print(f"E       {line}", style="yellow", markup=False)
             case "  ":
-                console.print(f"[red]E       {line}[/red]")
+                console.print(f"E       {line}", style="red", markup=False)
             case _:
                 ...
 
@@ -157,10 +157,10 @@ def render_multiline_string_diff(
     for line in diff_lines:
         match line[:2]:
             case "+ ":
-                console.print(f"[green]E       {line}[/green]")
+                console.print(f"E       {line}", style="green", markup=False)
             case "- ":
-                console.print(f"[red]E       {line}[/red]")
+                console.print(f"E       {line}", style="red", markup=False)
             case "? ":
-                console.print(f"[yellow]E       {line}[/yellow]")
+                console.print(f"E       {line}", style="yellow", markup=False)
             case _:
-                console.print(f"E       {line}")
+                console.print(f"E       {line}", markup=False)

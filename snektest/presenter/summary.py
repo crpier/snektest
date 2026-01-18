@@ -27,9 +27,9 @@ def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
     all_warnings = [w for result in test_results for w in result.warnings]
     if all_warnings:
         console.print()
-        console.rule("[bold yellow]WARNINGS", style="yellow")
+        console.rule("WARNINGS", style="bold yellow")
         for warning in all_warnings:
-            console.print(f"[yellow]{warning}[/yellow]", markup=False)
+            console.print(warning, markup=False, style="yellow")
         console.print()
 
 
@@ -94,7 +94,7 @@ def _has_failures(counts: RunCounts) -> bool:
 def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str, str]:
     """Build status text and set its color."""
     status_color = "red" if _has_failures(counts) else "green"
-    status_text = f"[bold {status_color}]"
+    status_text = ""
     if counts.failed > 0:
         status_text += f"{counts.failed} failed, "
     if counts.errors > 0:
@@ -105,10 +105,8 @@ def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str
         status_text += (
             f"{counts.session_teardown_failed} session fixture teardown failed, "
         )
-    status_text += (
-        f"{counts.passed} passed in {total_duration:.2f}s[/bold {status_color}]"
-    )
-    return status_text, status_color
+    status_text += f"{counts.passed} passed in {total_duration:.2f}s"
+    return status_text, f"bold {status_color}"
 
 
 def print_summary(
@@ -144,15 +142,15 @@ def print_summary(
     _print_warnings(console, test_results)
 
     if _has_failures(counts):
-        console.rule("[wheat1]SUMMARY", style="wheat1")
+        console.rule("SUMMARY", style="wheat1")
         _print_test_failures(console, test_results)
         _print_test_errors(console, test_results)
         _print_fixture_teardown_failures(console, test_results)
         _print_session_teardown_failures(console, session_teardown_failures)
         console.print()
 
-    status_text, status_color = _build_status_text(
+    status_text, status_style = _build_status_text(
         counts=counts,
         total_duration=total_duration,
     )
-    console.rule(status_text, style=status_color)
+    console.rule(status_text, style=status_style)

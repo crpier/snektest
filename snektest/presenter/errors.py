@@ -44,7 +44,7 @@ def _print_optional_output(console: Console, *, title: str, output: str | None) 
     if not output:
         return
     console.print()
-    console.print(f"[yellow]{title}[/yellow]")
+    console.print(title, style="yellow", markup=False)
     console.print(output, markup=False, highlight=False)
 
 
@@ -84,7 +84,7 @@ def _print_result_details(
 
 def _print_test_failures(console: Console, failures: list[TestResult]) -> None:
     for result in failures:
-        console.rule(f"[bold red]{result.name}", style="red")
+        console.rule(f"{result.name}", style="bold red")
         failing_result = cast("FailedResult", result.result)
 
         _print_result_details(
@@ -96,7 +96,7 @@ def _print_test_failures(console: Console, failures: list[TestResult]) -> None:
 
 def _print_test_errors(console: Console, errors: list[TestResult]) -> None:
     for result in errors:
-        console.rule(f"[bold dark_orange]{result.name}", style="dark_orange")
+        console.rule(f"{result.name}", style="bold dark_orange")
         error_result = cast("ErrorResult", result.result)
 
         _print_result_details(
@@ -112,8 +112,8 @@ def _print_fixture_teardown_failures(
     for result in fixture_teardown_failures:
         for teardown_failure in result.fixture_teardown_failures:
             console.rule(
-                f"[bold red]{result.name} - Fixture teardown: {teardown_failure.fixture_name}",
-                style="red",
+                f"{result.name} - Fixture teardown: {teardown_failure.fixture_name}",
+                style="bold red",
             )
             render_traceback(
                 console,
@@ -134,8 +134,8 @@ def _print_session_teardown_failures(
 ) -> None:
     for teardown_failure in session_teardown_failures:
         console.rule(
-            f"[bold red]Session fixture teardown: {teardown_failure.fixture_name}",
-            style="red",
+            f"Session fixture teardown: {teardown_failure.fixture_name}",
+            style="bold red",
         )
         render_traceback(
             console,
@@ -166,7 +166,7 @@ def print_failures(
         return
 
     console.print()
-    console.rule("[bold orange3]FAILURES", style="orange3", characters="=")
+    console.rule("FAILURES", style="bold orange3", characters="=")
     console.print()
 
     _print_test_failures(console, groups.failures)
@@ -177,7 +177,7 @@ def print_failures(
     if session_teardown_output and (groups.failures or groups.errors):
         console.print()
         console.rule(
-            "[bold yellow]Output from session fixture teardowns",
-            style="yellow",
+            "Output from session fixture teardowns",
+            style="bold yellow",
         )
         console.print(session_teardown_output, markup=False, highlight=False)
