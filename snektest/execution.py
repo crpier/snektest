@@ -6,12 +6,14 @@ from collections.abc import Callable
 from inspect import isasyncgen, iscoroutine, isgenerator
 from pathlib import Path
 from types import TracebackType
+from typing import cast
 
 from snektest.annotations import Coroutine
 from snektest.collection import TestsQueue
 from snektest.fixtures import (
     get_active_function_fixtures,
     get_registered_session_fixtures,
+    reset_session_fixtures,
 )
 from snektest.models import (
     AssertionFailure,
@@ -26,11 +28,16 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.presenter import print_failures, print_summary, print_test_result
-from snektest.utils import get_test_function_params
+from snektest.utils import get_test_function_markers, get_test_function_params
 
 
 async def teardown_fixture(
-    fixture_name: str, generator: object
+    fixture_name: str,
+    generator: object,
+    *,
+    exc_info_provider: Callable[
+        [], tuple[object | None, object | None, TracebackType | None]
+    ] = sys.exc_info,
 ) -> TeardownFailure | None:
     """Teardown a single fixture and return failure if it occurs."""
     try:
@@ -41,14 +48,14 @@ async def teardown_fixture(
     except StopAsyncIteration, StopIteration:
         return None
     except Exception:
-        exc_type, exc_value, traceback = sys.exc_info()
+        exc_type, exc_value, traceback = exc_info_provider()
         if exc_type is None or exc_value is None or traceback is None:
             msg = "Invalid exception info gathered during teardown. This shouldn't be possible!"
             raise UnreachableError(msg) from None
         return TeardownFailure(
             fixture_name=fixture_name,
-            exc_type=exc_type,
-            exc_value=exc_value,
+            exc_type=cast("type[BaseException]", exc_type),
+            exc_value=cast("BaseException", exc_value),
             traceback=traceback,
         )
     else:
@@ -61,6 +68,9 @@ async def execute_test(
     func: Callable[..., Coroutine[None] | None],
     *,
     capture_output: bool = True,
+    exc_info_provider: Callable[
+        [], tuple[object | None, object | None, TracebackType | None]
+    ] = sys.exc_info,
 ) -> TestResult:
     """Execute a single test function with fixtures and output capture."""
     with maybe_capture_output(capture_output) as (output_buffer, captured_warnings):
@@ -79,24 +89,24 @@ async def execute_test(
             result = PassedResult()
         except AssertionFailure:
             duration = time.monotonic() - test_start
-            exc_type, exc_value, traceback = sys.exc_info()
+            exc_type, exc_value, traceback = exc_info_provider()
             if exc_type is None or exc_value is None or traceback is None:
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
             result = FailedResult(
-                exc_type=exc_type,
-                exc_value=exc_value,
+                exc_type=cast("type[BaseException]", exc_type),
+                exc_value=cast("BaseException", exc_value),
                 traceback=traceback,
             )
         except Exception:
             duration = time.monotonic() - test_start
-            exc_type, exc_value, traceback = sys.exc_info()
+            exc_type, exc_value, traceback = exc_info_provider()
             if exc_type is None or exc_value is None or traceback is None:
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
             result = ErrorResult(
-                exc_type=exc_type,
-                exc_value=exc_value,
+                exc_type=cast("type[BaseException]", exc_type),
+                exc_value=cast("BaseException", exc_value),
                 traceback=traceback,
             )
 
@@ -116,6 +126,7 @@ async def execute_test(
         name=name,
         duration=duration,
         result=result,
+        markers=get_test_function_markers(func),
         captured_output=output_buffer,
         fixture_teardown_failures=fixture_teardown_failures,
         fixture_teardown_output=fixture_teardown_output_value,
@@ -161,13 +172,22 @@ def has_any_failures(
     )
 
 
-def _resolve_path(path: Path | None) -> Path | None:
+def _resolve_path(
+    path: Path | None,
+    *,
+    resolver: Callable[[Path], Path] = Path.resolve,
+) -> Path | None:
     if path is None:
         return None
     try:
-        return path.resolve()
+        resolved = resolver(path)
     except FileNotFoundError:
         return path
+    if resolved is path:
+        return resolved
+    if str(resolved):
+        return resolved
+    return resolved
 
 
 def _trim_traceback(
@@ -185,13 +205,18 @@ def _trim_traceback(
         new_traceback = TracebackType(
             new_traceback, frame.tb_frame, frame.tb_lasti, frame.tb_lineno
         )
-    return new_traceback or traceback
+    if new_traceback is None:
+        return traceback
+    return new_traceback
 
 
 def _traceback_for_file(
-    traceback: TracebackType, *, preferred_file: Path | None
+    traceback: TracebackType,
+    *,
+    preferred_file: Path | None,
+    resolver: Callable[[Path], Path] = Path.resolve,
 ) -> TracebackType:
-    preferred = _resolve_path(preferred_file)
+    preferred = _resolve_path(preferred_file, resolver=resolver)
     if preferred is None:
         return traceback
 
@@ -199,7 +224,7 @@ def _traceback_for_file(
     current = traceback
     while current is not None:
         frame_path = Path(current.tb_frame.f_code.co_filename)
-        resolved = _resolve_path(frame_path)
+        resolved = _resolve_path(frame_path, resolver=resolver)
         if resolved == preferred:
             selected = current
         current = current.tb_next
@@ -208,31 +233,43 @@ def _traceback_for_file(
     return _trim_traceback(traceback, stop_at=selected)
 
 
-def _maybe_debug_test_result(test_result: TestResult, *, pdb_on_failure: bool) -> bool:
+def _maybe_debug_test_result(
+    test_result: TestResult,
+    *,
+    pdb_on_failure: bool,
+    post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
+    resolver: Callable[[Path], Path] = Path.resolve,
+) -> bool:
     if not pdb_on_failure:
         return False
     if isinstance(test_result.result, (FailedResult, ErrorResult)):
         traceback = _traceback_for_file(
-            test_result.result.traceback, preferred_file=test_result.name.file_path
+            test_result.result.traceback,
+            preferred_file=test_result.name.file_path,
+            resolver=resolver,
         )
-        pdb.post_mortem(traceback)
+        post_mortem(traceback)
         return True
     if test_result.fixture_teardown_failures:
         traceback = _traceback_for_file(
             test_result.fixture_teardown_failures[0].traceback,
             preferred_file=test_result.name.file_path,
+            resolver=resolver,
         )
-        pdb.post_mortem(traceback)
+        post_mortem(traceback)
         return True
     return False
 
 
 def _maybe_debug_session_teardown(
-    session_teardown_failures: list[TeardownFailure], *, pdb_on_failure: bool
+    session_teardown_failures: list[TeardownFailure],
+    *,
+    pdb_on_failure: bool,
+    post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
 ) -> bool:
     if not pdb_on_failure or not session_teardown_failures:
         return False
-    pdb.post_mortem(session_teardown_failures[0].traceback)
+    post_mortem(session_teardown_failures[0].traceback)
     return True
 
 
@@ -241,6 +278,8 @@ async def run_tests(
     *,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
+    post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
+    resolver: Callable[[Path], Path] = Path.resolve,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     """Run all tests from the queue and handle session fixture teardown."""
     total_duration = time.monotonic()
@@ -253,7 +292,10 @@ async def run_tests(
             test_results.append(test_result)
             print_test_result(test_result)
             if not pdb_triggered and _maybe_debug_test_result(
-                test_result, pdb_on_failure=pdb_on_failure
+                test_result,
+                pdb_on_failure=pdb_on_failure,
+                post_mortem=post_mortem,
+                resolver=resolver,
             ):
                 pdb_triggered = True
                 break
@@ -264,7 +306,9 @@ async def run_tests(
             capture_output=capture_output
         )
         if not pdb_triggered and _maybe_debug_session_teardown(
-            session_teardown_failures, pdb_on_failure=pdb_on_failure
+            session_teardown_failures,
+            pdb_on_failure=pdb_on_failure,
+            post_mortem=post_mortem,
         ):
             pdb_triggered = True
 
@@ -292,4 +336,5 @@ async def run_tests(
             session_teardown_failures=session_teardown_failures,
             total_duration=time.monotonic() - total_duration,
         )
+        reset_session_fixtures()
     return test_results, session_teardown_failures

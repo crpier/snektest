@@ -28,6 +28,11 @@ def get_registered_session_fixtures() -> dict[
     return _SESSION_FIXTURES
 
 
+def reset_session_fixtures() -> None:
+    """Clear cached session fixtures for a fresh test run."""
+    _SESSION_FIXTURES.clear()
+
+
 def is_session_fixture(fixture_code: CodeType) -> bool:
     """Check if a fixture code object is registered as a session fixture."""
     return fixture_code in _SESSION_FIXTURES
@@ -49,7 +54,7 @@ def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
                         raise UnreachableError(msg)
                     result = await anext(gen)
 
-                    async def async_wrapper() -> R:  # noqa: RUF029
+                    async def async_wrapper() -> R:
                         return result
 
                     _SESSION_FIXTURES[fixture_code] = (gen, async_wrapper())

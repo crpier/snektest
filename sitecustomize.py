@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Auto-start coverage in subprocesses.
 
 When `COVERAGE_PROCESS_START` is set (e.g. to `pyproject.toml`), Coverage.py can
@@ -7,13 +9,14 @@ that validate snektest via subprocesses.
 See: https://coverage.readthedocs.io/en/latest/subprocess.html
 """
 
-from __future__ import annotations
+try:
+    import coverage
+except ModuleNotFoundError:
+    coverage = None
 
 
 def _maybe_start_coverage() -> None:
-    try:
-        import coverage
-    except ModuleNotFoundError:
+    if coverage is None:
         return
 
     _ = coverage.process_startup()

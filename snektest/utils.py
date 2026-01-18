@@ -9,14 +9,18 @@ TEST_ATTR_NAME = "__is_snektest__test__"
 TEST_ATTR_VALUE = object()
 
 PARAMS_ATTR_NAME = "__snektest_params__"
+MARKERS_ATTR_NAME = "__snektest_markers__"
 
 
 def mark_test_function(
-    func: Callable[..., Any], params: tuple[list[Param[Any]], ...]
+    func: Callable[..., Any],
+    params: tuple[list[Param[Any]], ...],
+    markers: tuple[str, ...],
 ) -> None:
     """Mark a function as a test and store its parameters."""
     setattr(func, TEST_ATTR_NAME, TEST_ATTR_VALUE)
     setattr(func, PARAMS_ATTR_NAME, Param.to_dict(params))
+    setattr(func, MARKERS_ATTR_NAME, markers)
 
 
 def is_test_function(func: Callable[..., Any]) -> bool:
@@ -29,6 +33,11 @@ def get_test_function_params(
 ) -> dict[str, tuple[Param[Any], ...]]:
     """Get the parameters dict for a test function."""
     return getattr(func, PARAMS_ATTR_NAME)
+
+
+def get_test_function_markers(func: Callable[..., Any]) -> tuple[str, ...]:
+    """Get the markers tuple for a test function."""
+    return getattr(func, MARKERS_ATTR_NAME, ())
 
 
 def get_code_from_generator(

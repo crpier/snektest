@@ -1,5 +1,6 @@
 import difflib
 import pprint
+from collections.abc import Callable
 from typing import Any, cast
 
 from rich.console import Console
@@ -7,7 +8,12 @@ from rich.console import Console
 from snektest.models import AssertionFailure
 
 
-def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
+def render_assertion_failure(
+    console: Console,
+    exc: AssertionFailure,
+    *,
+    ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
+) -> None:
     """Pretty-print an AssertionFailure using Rich, styled like pytest."""
     actual = exc.actual
     expected = exc.expected
@@ -18,18 +24,23 @@ def render_assertion_failure(console: Console, exc: AssertionFailure) -> None:
         # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("list[Any]", actual)
         expected = cast("list[Any]", expected)
-        render_list_diff(console, actual, expected)
+        render_list_diff(console, actual, expected, ndiff_func=ndiff_func)
     elif isinstance(actual, dict) and isinstance(expected, dict):
         # I'm just casting dict[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("dict[Any, Any]", actual)
         expected = cast("dict[Any, Any]", expected)
-        render_dict_diff(console, actual, expected)
+        render_dict_diff(console, actual, expected, ndiff_func=ndiff_func)
     elif (
         isinstance(actual, str)
         and isinstance(expected, str)
         and ("\n" in actual or "\n" in expected)
     ):
-        render_multiline_string_diff(console, actual, expected)
+        render_multiline_string_diff(
+            console,
+            actual,
+            expected,
+            ndiff_func=ndiff_func,
+        )
     else:
         return
 
@@ -54,7 +65,11 @@ def _length_mismatch_message(actual_len: int, expected_len: int) -> str | None:
 
 
 def _print_ndiff(
-    console: Console, expected_lines: list[str], actual_lines: list[str]
+    console: Console,
+    expected_lines: list[str],
+    actual_lines: list[str],
+    *,
+    ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
 ) -> None:
     style_by_prefix: dict[str, str] = {
         "- ": "red",
@@ -63,7 +78,7 @@ def _print_ndiff(
         "  ": "red",
     }
 
-    for line in difflib.ndiff(expected_lines, actual_lines):
+    for line in ndiff_func(expected_lines, actual_lines):
         prefix = line[:2]
         style = style_by_prefix.get(prefix)
         if style is None:
@@ -71,7 +86,13 @@ def _print_ndiff(
         console.print(f"[{style}]E       {line}[/{style}]")
 
 
-def render_list_diff(console: Console, actual: list[Any], expected: list[Any]) -> None:
+def render_list_diff(
+    console: Console,
+    actual: list[Any],
+    expected: list[Any],
+    *,
+    ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
+) -> None:
     """Render a pytest-like diff for lists."""
     console.print()
 
@@ -89,11 +110,15 @@ def render_list_diff(console: Console, actual: list[Any], expected: list[Any]) -
 
     expected_lines = pprint.pformat(expected, width=80).splitlines()
     actual_lines = pprint.pformat(actual, width=80).splitlines()
-    _print_ndiff(console, expected_lines, actual_lines)
+    _print_ndiff(console, expected_lines, actual_lines, ndiff_func=ndiff_func)
 
 
 def render_dict_diff(
-    console: Console, actual: dict[Any, Any], expected: dict[Any, Any]
+    console: Console,
+    actual: dict[Any, Any],
+    expected: dict[Any, Any],
+    *,
+    ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
 ) -> None:
     """Render a pytest-like diff for dicts."""
     console.print()
@@ -101,7 +126,7 @@ def render_dict_diff(
     expected_lines = pprint.pformat(expected, width=80).splitlines()
     actual_lines = pprint.pformat(actual, width=80).splitlines()
 
-    diff = difflib.ndiff(expected_lines, actual_lines)
+    diff = ndiff_func(expected_lines, actual_lines)
 
     for line in diff:
         match line[:2]:
@@ -117,11 +142,17 @@ def render_dict_diff(
                 ...
 
 
-def render_multiline_string_diff(console: Console, actual: str, expected: str) -> None:
+def render_multiline_string_diff(
+    console: Console,
+    actual: str,
+    expected: str,
+    *,
+    ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
+) -> None:
     """Colored diff output for multiline strings using difflib."""
     console.print()
 
-    diff_lines = difflib.ndiff(expected.splitlines(), actual.splitlines())
+    diff_lines = ndiff_func(expected.splitlines(), actual.splitlines())
 
     for line in diff_lines:
         match line[:2]:

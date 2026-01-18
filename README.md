@@ -168,12 +168,31 @@ snektest tests/test_myfeature.py
 # Run specific test
 snektest tests/test_myfeature.py::test_something
 
+# Run tests with a marker
+snektest --mark needs-s3
+
 # Drop into post-mortem debugging on first failure
 snektest --pdb
 ```
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
+
+## Marking Tests
+
+Use the `mark` argument on `@test()` to attach marker metadata for filtering.
+
+```python
+from snektest import Marker, test
+
+@test(mark="needs-s3")
+def test_integration() -> None:
+    pass
+
+@test(mark=(Marker.FAST, "unit"))
+def test_unit() -> None:
+    pass
+```
 
 ## Property-Based Testing with Hypothesis
 

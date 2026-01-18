@@ -39,7 +39,7 @@ def test_mark_test_function_basic() -> None:
     def dummy_func() -> None:
         pass
 
-    mark_test_function(dummy_func, ())
+    mark_test_function(dummy_func, (), ())
     assert_true(is_test_function(dummy_func))
 
 
@@ -60,7 +60,7 @@ def test_get_test_function_params_no_params() -> None:
     def dummy_func() -> None:
         pass
 
-    mark_test_function(dummy_func, ())
+    mark_test_function(dummy_func, (), ())
     result = get_test_function_params(dummy_func)
     assert_eq(result, {"": ()})
 
@@ -73,7 +73,7 @@ def test_get_test_function_params_single_param_list() -> None:
         pass
 
     params = ([Param(value=1, name="1"), Param(value=2, name="2")],)
-    mark_test_function(dummy_func, params)
+    mark_test_function(dummy_func, params, ())
 
     result = get_test_function_params(dummy_func)
     assert_eq(

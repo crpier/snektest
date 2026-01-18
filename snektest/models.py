@@ -173,6 +173,7 @@ class TestResult:
     name: TestName
     duration: float
     result: PassedResult | FailedResult | ErrorResult
+    markers: tuple[str, ...]
     captured_output: StringIO
     fixture_teardown_failures: list[TeardownFailure]
     fixture_teardown_output: str | None

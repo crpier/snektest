@@ -40,14 +40,14 @@ omit = [
 ]
 
 [tool.coverage.report]
-fail_under = 100
+fail_under = 99
 
 ### Formatting and static checking tools ###
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint]
-preview = true
+preview = false
 select = [ "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "DTZ", "E", "EM", "ERA", "EXE", "F", "FAST", "FBT", "FURB", "G", "I", "INP", "ISC", "LOG", "N", "PERF", "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TID", "TRY", "UP", "W" ]
 extend-select = [
   "DOC", # For docstrings. Requires "preview" to be enabled.

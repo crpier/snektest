@@ -1,9 +1,10 @@
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import Future
+from enum import Enum
 from functools import wraps
 from inspect import Parameter, Signature, iscoroutinefunction
-from typing import Any, Protocol, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
@@ -26,18 +27,75 @@ class SearchStrategy(Protocol[T_co]):
     def example(self) -> T_co: ...
 
 
+class Marker(Enum):
+    FAST = "fast"
+    MEDIUM = "medium"
+    SLOW = "slow"
+
+
+def _normalize_marker_entry(entry: object) -> str:
+    if isinstance(entry, Marker):
+        return entry.value
+    if isinstance(entry, str):
+        return entry
+    msg = "Markers must be strings or Marker values"
+    raise TypeError(msg)
+
+
+def _normalize_marker_sequence(
+    markers: list[object] | tuple[object, ...],
+) -> tuple[str, ...]:
+    return tuple(_normalize_marker_entry(entry) for entry in markers)
+
+
+def _normalize_markers(mark: object | None) -> tuple[str, ...]:
+    if mark is None:
+        return ()
+    if isinstance(mark, (Marker, str)):
+        return (_normalize_marker_entry(mark),)
+    if isinstance(mark, list):
+        return _normalize_marker_sequence(cast("list[object]", mark))
+    if isinstance(mark, tuple):
+        return _normalize_marker_sequence(cast("tuple[object, ...]", mark))
+    msg = "Markers must be a string, Marker, or list/tuple"
+    raise TypeError(msg)
+
+
+@overload
 def test(
     *params: list[Param[Any]],
+    mark: Marker | str | list[Marker | str] | tuple[Marker | str, ...] | None = None,
+) -> Callable[
+    [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
+    Callable[[*tuple[Any, ...]], Coroutine[None] | None],
+]: ...
+
+
+@overload
+def test(
+    *params: list[Param[Any]],
+    mark: object | None = None,
+) -> Callable[
+    [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
+    Callable[[*tuple[Any, ...]], Coroutine[None] | None],
+]: ...
+
+
+def test(
+    *params: list[Param[Any]],
+    mark: object | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
 ]:
     """Mark a function as a test function."""
 
+    markers = _normalize_markers(mark)
+
     def decorator(
         test_func: Callable[[*tuple[Any, ...]], Coroutine[None] | None],
     ) -> Callable[[*tuple[Any, ...]], Coroutine[None] | None]:
-        mark_test_function(test_func, params)
+        mark_test_function(test_func, params, markers)
         return test_func
 
     return decorator
@@ -165,7 +223,7 @@ def test_hypothesis(
 
                 await asyncio.to_thread(run_hypothesis)
 
-            mark_test_function(async_wrapper, ())
+            mark_test_function(async_wrapper, (), ())
             return async_wrapper
 
         @wraps(test_func)
@@ -175,7 +233,7 @@ def test_hypothesis(
 
             _run_hypothesis(sync_wrapper, strategies_tuple, run_one_example)
 
-        mark_test_function(sync_wrapper, ())
+        mark_test_function(sync_wrapper, (), ())
         return sync_wrapper
 
     return decorator

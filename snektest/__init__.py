@@ -20,6 +20,7 @@ from snektest.assertions import (
     fail,
 )
 from snektest.decorators import (
+    Marker,
     load_fixture,
     session_fixture,
     test,
@@ -30,6 +31,7 @@ from snektest.models import Scope as Scope
 from snektest.models import UnreachableError as UnreachableError
 
 __all__ = [
+    "Marker",
     "Param",
     "Scope",
     "UnreachableError",

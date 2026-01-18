@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 import warnings
+from collections.abc import Callable
 from typing import Any, cast
-from unittest.mock import patch
 
 from snektest import assert_eq, assert_in, test
 from snektest.output import StdinProxy, capture_output, maybe_capture_output
@@ -73,9 +73,9 @@ def test_stdin_proxy_covers_proxy_methods_and_properties() -> None:
     def disable() -> None:
         calls.append("disabled")
 
-    proxy = StdinProxy(cast(Any, DummyStdin()), disable)
+    proxy = StdinProxy(cast("Any", DummyStdin()), disable)
 
-    assert_eq(getattr(proxy, "some_attr"), "x")
+    assert_eq(proxy.some_attr, "x")
     assert_eq(proxy.read(), "data")
     assert_eq(proxy.readline(), "line\n")
     assert_eq(proxy.readlines(), ["a\n", "b\n"])
@@ -95,43 +95,72 @@ def test_stdin_proxy_covers_proxy_methods_and_properties() -> None:
     assert_eq(len(calls) >= 1, True)
 
 
+def _set_breakpoint_hooks(hook: Callable[..., Any]) -> Callable[[], None]:
+    original_hook = sys.__breakpointhook__
+    sys.__breakpointhook__ = hook
+    sys.breakpointhook = hook
+
+    def restore() -> None:
+        sys.__breakpointhook__ = original_hook
+        sys.breakpointhook = original_hook
+
+    return restore
+
+
 @test()
-def test_breakpoint_paths_custom_hook_and_inline_message() -> None:
+def test_breakpoint_custom_hook() -> None:
     called: list[str] = []
 
     def custom_hook(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
         called.append("custom")
 
-    with patch.object(sys, "breakpointhook", custom_hook):
+    sys.breakpointhook = custom_hook
+    try:
         with capture_output():
             breakpoint()
+    finally:
+        sys.breakpointhook = sys.__breakpointhook__
 
     assert_eq(called, ["custom"])
+
+
+@test()
+def test_breakpoint_args_path() -> None:
+    called: list[str] = []
 
     def dummy_hook(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
         called.append("args")
 
-    with (
-        patch.object(sys, "__breakpointhook__", dummy_hook),
-        patch.object(sys, "breakpointhook", dummy_hook),
-    ):
+    restore = _set_breakpoint_hooks(dummy_hook)
+    try:
         with capture_output():
             breakpoint(1)
+    finally:
+        restore()
 
     assert_in("args", called)
 
-    called.clear()
 
-    with (
-        patch.object(sys, "__breakpointhook__", dummy_hook),
-        patch.object(sys, "breakpointhook", dummy_hook),
-        patch("snektest.output.inspect.currentframe", return_value=None),
-    ):
-        with capture_output():
+@test()
+def test_breakpoint_missing_frame_path() -> None:
+    def dummy_hook(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def frame_provider() -> Any:
+        return None
+
+    restore = _set_breakpoint_hooks(dummy_hook)
+    try:
+        with capture_output(frame_provider=frame_provider):
             breakpoint()
+    finally:
+        restore()
 
+
+@test()
+def test_breakpoint_inline_pdb_paths() -> None:
     seen: list[str] = []
 
     class DummyPdb:
@@ -147,29 +176,36 @@ def test_breakpoint_paths_custom_hook_and_inline_message() -> None:
     def noop_hook(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
 
-    with (
-        patch.object(sys, "__breakpointhook__", noop_hook),
-        patch.object(sys, "breakpointhook", noop_hook),
-        patch("snektest.output.pdb.Pdb", DummyPdb),
-    ):
-        with capture_output():
-            # Exercise settrace wrapper + disable-capture idempotency.
+    restore = _set_breakpoint_hooks(noop_hook)
+    try:
+        with capture_output(pdb_factory=DummyPdb):
             sys.settrace(None)
             sys.settrace(None)
-
-            # Exercise inline-Pdb path and header printing.
             breakpoint(header="HEADER", commands=["c"])
+    finally:
+        restore()
 
     assert_eq(seen, ["HEADER"])
 
-    # Exercise extra kwargs branch (must be separate capture context because the
-    # breakpointhook wrapper restores sys.breakpointhook after one call).
-    seen.clear()
 
-    with (
-        patch.object(sys, "__breakpointhook__", noop_hook),
-        patch.object(sys, "breakpointhook", noop_hook),
-        patch("snektest.output.pdb.Pdb", DummyPdb),
-    ):
-        with capture_output():
+@test()
+def test_breakpoint_extra_kwargs_path() -> None:
+    class DummyPdb:
+        def __init__(self, **kwargs: Any) -> None:
+            _ = kwargs
+
+        def message(self, msg: str) -> None:
+            _ = msg
+
+        def set_trace(self, frame: Any, commands: Any = None) -> None:
+            _ = (frame, commands)
+
+    def noop_hook(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    restore = _set_breakpoint_hooks(noop_hook)
+    try:
+        with capture_output(pdb_factory=DummyPdb):
             breakpoint(foo="bar")
+    finally:
+        restore()

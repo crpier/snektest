@@ -1,4 +1,5 @@
 import pathlib
+from collections.abc import Callable
 from types import TracebackType
 
 from rich.console import Console
@@ -7,13 +8,14 @@ from rich.syntax import Syntax
 import snektest
 
 
-def render_traceback(
+def render_traceback(  # noqa: PLR0913
     console: Console,
     exc_type: type[BaseException],
     exc_value: BaseException,
     traceback: object,
     *,
     show_exception_line: bool = True,
+    open_path: Callable[[str], list[str]] | None = None,
 ) -> None:
     """Render a traceback without a box, using Rich for syntax highlighting."""
     console.print("[bold]Traceback[/bold] [dim](most recent call last):[/dim]")
@@ -36,18 +38,21 @@ def render_traceback(
             )
 
             try:
-                with pathlib.Path(filename).open(encoding="utf-8") as f:
-                    lines = f.readlines()
-                    if 0 <= lineno - 1 < len(lines):
-                        code_line = lines[lineno - 1].rstrip()
-                        syntax = Syntax(
-                            code_line,
-                            "python",
-                            theme="ansi_dark",
-                            line_numbers=False,
-                            padding=(0, 0, 0, 4),
-                        )
-                        console.print(syntax)
+                if open_path is None:
+                    with pathlib.Path(filename).open(encoding="utf-8") as f:
+                        lines = f.readlines()
+                else:
+                    lines = open_path(filename)
+                if 0 <= lineno - 1 < len(lines):
+                    code_line = lines[lineno - 1].rstrip()
+                    syntax = Syntax(
+                        code_line,
+                        "python",
+                        theme="ansi_dark",
+                        line_numbers=False,
+                        padding=(0, 0, 0, 4),
+                    )
+                    console.print(syntax)
             except (OSError, IndexError):
                 pass
 

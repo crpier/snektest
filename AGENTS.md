@@ -6,6 +6,9 @@ snektest is a Python testing framework with first class support for async and st
 
 ## Development Commands
 
+### Guidelines for writing tests
+- Do not use monkeypatching or mocking.
+
 ### Running Tests
 ```bash
 # Run all tests
@@ -30,6 +33,15 @@ uv run pyright
 # Lint/format
 uv run ruff check
 uv run ruff format --check
+```
+
+## Fixing linting issues
+If possible let `ruff` fix issues automatically.
+
+```bash
+# Apply all automated fixes and format
+uv run ruff check --fix .
+uv run ruff format .
 ```
 
 ### Package Management

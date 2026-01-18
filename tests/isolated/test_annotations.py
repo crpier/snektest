@@ -18,4 +18,4 @@ def test_pyfilepath_json_schema_includes_format_and_string_type() -> None:
 @test()
 def test_validate_pyfilepath_rejects_non_file() -> None:
     with assert_raises(ValidationError):
-        TypeAdapter(PyFilePath).validate_python(Path("."))
+        TypeAdapter(PyFilePath).validate_python(Path())

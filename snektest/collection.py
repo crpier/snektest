@@ -1,16 +1,22 @@
 import asyncio
+from collections.abc import Callable
+from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
 from pathlib import Path
 from sys import modules
 from types import FunctionType
-from typing import TypeGuard
+from typing import TypeGuard, cast
 
 from pydantic import ValidationError
 
 from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.models import CollectionError, FilterItem, TestName
-from snektest.utils import get_test_function_params, is_test_function
+from snektest.utils import (
+    get_test_function_markers,
+    get_test_function_params,
+    is_test_function,
+)
 
 TEST_FILE_PREFIX = "test_"
 
@@ -18,31 +24,41 @@ FuncTestEntry = tuple[TestName, FunctionType]
 TestsQueue = asyncio.Queue[FuncTestEntry]
 
 
-def load_tests_from_file(
+def load_tests_from_file(  # noqa: PLR0913
     file_path: PyFilePath,
     filter_item: FilterItem,
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
+    *,
+    mark: str | None = None,
+    spec_loader: Callable[..., object] = spec_from_file_location,
 ) -> None:
     """Load and queue tests from a single Python file."""
     module_name = ".".join(file_path.with_suffix("").parts)
     if module_name in modules:
         module = modules[module_name]
     else:
-        spec = spec_from_file_location(module_name, file_path)
-        if not spec or not spec.loader:
+        spec = spec_loader(module_name, file_path)
+        spec_value = cast("ModuleSpec", spec)
+        loader = getattr(spec_value, "loader", None)
+        if loader is None:
             msg = f"Could not load spec from {file_path}"
             raise CollectionError(msg)
 
-        module = module_from_spec(spec)
+        module = module_from_spec(spec_value)
         modules[module_name] = module
-        spec.loader.exec_module(module)
+        loader.exec_module(module)
 
     runnable_functions = [func for _, func in getmembers(module, isfunction)]
     runnable_functions = filter(is_test_function, runnable_functions)
     if filter_item.function_name:
         runnable_functions = filter(
             lambda func: func.__name__ == filter_item.function_name, runnable_functions
+        )
+
+    if mark is not None:
+        runnable_functions = filter(
+            lambda func: mark in get_test_function_markers(func), runnable_functions
         )
 
     for func in runnable_functions:
@@ -84,6 +100,7 @@ def load_tests_from_filters(
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
     *,
+    mark: str | None = None,
     exception_holder: list[BaseException] | None = None,
 ) -> None:
     """Load tests from all filter items and populate the queue.
@@ -103,9 +120,9 @@ def load_tests_from_filters(
                     filter_item=filter_item,
                     queue=queue,
                     loop=loop,
+                    mark=mark,
                 )
     except BaseException as e:
-        # Store exception to be re-raised in main thread
         if exception_holder is not None:
             exception_holder.append(e)
     finally:

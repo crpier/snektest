@@ -57,7 +57,8 @@ async def test_test_hypothesis_async_schedule_and_on_done_errors() -> None:
 
     @wrapper
     async def run_raises(_x: int) -> None:
-        raise RuntimeError("boom")
+        msg = "boom"
+        raise RuntimeError(msg)
 
     res2 = run_raises()
     assert res2 is not None

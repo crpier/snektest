@@ -122,6 +122,7 @@ def _maybe_run_inline_pdb_breakpoint(
     caller_frame: Any,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    pdb_factory: Callable[..., Any] = pdb.Pdb,
 ) -> Any:
     if system_breakpointhook is not sys.__breakpointhook__:
         return system_breakpointhook(*args, **kwargs)
@@ -136,7 +137,7 @@ def _maybe_run_inline_pdb_breakpoint(
     if set(kwargs) - {"header", "commands"}:
         return system_breakpointhook(*args, **kwargs)
 
-    debugger: pdb.Pdb = pdb.Pdb(
+    debugger: pdb.Pdb = pdb_factory(
         mode="inline",
         backend="monitoring",
         colorize=True,
@@ -150,12 +151,14 @@ def _make_breakpointhook_wrapper(
     *,
     system_breakpointhook: Any,
     disable_capture: Callable[[], None],
+    frame_provider: Callable[[], Any] = inspect.currentframe,
+    pdb_factory: Callable[..., Any] = pdb.Pdb,
 ) -> Callable[..., Any]:
     def breakpointhook_wrapper(*args: Any, **kwargs: Any) -> Any:
         disable_capture()
         sys.breakpointhook = system_breakpointhook
 
-        frame = inspect.currentframe()
+        frame = frame_provider()
         caller_frame = frame.f_back if frame else None
 
         return _maybe_run_inline_pdb_breakpoint(
@@ -163,6 +166,7 @@ def _make_breakpointhook_wrapper(
             caller_frame=caller_frame,
             args=args,
             kwargs=kwargs,
+            pdb_factory=pdb_factory,
         )
 
     return breakpointhook_wrapper
@@ -199,7 +203,11 @@ def _restore_system_state(system: _OriginalSysState) -> None:
 
 
 @contextmanager
-def capture_output() -> Generator[tuple[StringIO, list[str]]]:
+def capture_output(
+    *,
+    frame_provider: Callable[[], Any] = inspect.currentframe,
+    pdb_factory: Callable[..., Any] = pdb.Pdb,
+) -> Generator[tuple[StringIO, list[str]]]:
     """Context manager to capture stdout, stderr, and warnings.
 
     If stdin is read from (e.g., by pdb/breakpoint), output capture is
@@ -227,6 +235,8 @@ def capture_output() -> Generator[tuple[StringIO, list[str]]]:
     breakpointhook_wrapper = _make_breakpointhook_wrapper(
         system_breakpointhook=original_sys.breakpointhook,
         disable_capture=disable_capture,
+        frame_provider=frame_provider,
+        pdb_factory=pdb_factory,
     )
 
     _install_capture(

@@ -1,7 +1,7 @@
 """Tests for assertion error formatting and diff presentation."""
 # TODO: all these tests should assert that the entire output matches the expected output
 
-from unittest.mock import patch
+from typing import Any
 
 from rich.console import Console
 
@@ -63,19 +63,21 @@ def test_multiline_string_diff_formatting() -> None:
 def test_render_assertion_failure_defensive_paths() -> None:
     console = Console(record=True)
 
-    # Force list diff's ndiff printer to see an unknown prefix.
-    with patch("snektest.presenter.diff.difflib.ndiff", return_value=["xx"]):
-        render_assertion_failure(
-            console,
-            AssertionFailure("msg", actual=[1], expected=[2]),
-        )
+    def ndiff_stub(*args: Any, **kwargs: Any) -> list[str]:
+        _ = (args, kwargs)
+        return ["xx"]
 
-    # Force dict diff's match default branch.
-    with patch("snektest.presenter.diff.difflib.ndiff", return_value=["xx"]):
-        render_assertion_failure(
-            console,
-            AssertionFailure("msg", actual={"a": 1}, expected={"a": 2}),
-        )
+    render_assertion_failure(
+        console,
+        AssertionFailure("msg", actual=[1], expected=[2]),
+        ndiff_func=ndiff_stub,
+    )
+
+    render_assertion_failure(
+        console,
+        AssertionFailure("msg", actual={"a": 1}, expected={"a": 2}),
+        ndiff_func=ndiff_stub,
+    )
 
 
 @test()
@@ -100,26 +102,26 @@ def test_render_assertion_failure_rich_diff_paths() -> None:
 
     long_list = list(range(60))
 
-    # Dict diff: cover all match arms and the default branch.
-    with patch(
-        "snektest.presenter.diff.difflib.ndiff",
-        return_value=["- x", "+ y", "? z", "  w", "xx"],
-    ):
-        render_assertion_failure(
-            console,
-            AssertionFailure(
-                "msg",
-                actual={"a": long_list, "b": 2},
-                expected={"a": long_list, "b": 3},
-            ),
-        )
+    def ndiff_full(*args: Any, **kwargs: Any) -> list[str]:
+        _ = (args, kwargs)
+        return ["- x", "+ y", "? z", "  w", "xx"]
 
-    # Multiline string diff: cover +, -, ?, and default.
-    with patch(
-        "snektest.presenter.diff.difflib.ndiff",
-        return_value=["+ a", "- b", "? c", "  d"],
-    ):
-        render_assertion_failure(
-            console,
-            AssertionFailure("msg", actual="hallo\nworld", expected="hello\nworld"),
-        )
+    render_assertion_failure(
+        console,
+        AssertionFailure(
+            "msg",
+            actual={"a": long_list, "b": 2},
+            expected={"a": long_list, "b": 3},
+        ),
+        ndiff_func=ndiff_full,
+    )
+
+    def ndiff_multiline(*args: Any, **kwargs: Any) -> list[str]:
+        _ = (args, kwargs)
+        return ["+ a", "- b", "? c", "  d"]
+
+    render_assertion_failure(
+        console,
+        AssertionFailure("msg", actual="hallo\nworld", expected="hello\nworld"),
+        ndiff_func=ndiff_multiline,
+    )

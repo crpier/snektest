@@ -3,7 +3,6 @@ from __future__ import annotations
 from io import StringIO
 from pathlib import Path
 from types import TracebackType
-from unittest.mock import patch
 
 from rich.console import Console
 
@@ -23,7 +22,7 @@ from snektest.presenter.traceback import render_traceback
 def _traceback_from_exception(exc: BaseException) -> TracebackType:
     try:
         raise exc
-    except type(exc) as e:  # noqa: BLE001
+    except type(exc) as e:
         tb = e.__traceback__
         assert tb is not None
         return tb
@@ -40,6 +39,7 @@ def test_print_failures_includes_captured_and_fixture_teardown_output() -> None:
         result=FailedResult(
             exc_type=RuntimeError, exc_value=RuntimeError("boom"), traceback=tb
         ),
+        markers=(),
         captured_output=StringIO("captured"),
         fixture_teardown_failures=[],
         fixture_teardown_output="fixture-teardown-output",
@@ -51,6 +51,12 @@ def test_print_failures_includes_captured_and_fixture_teardown_output() -> None:
         [failing],
         session_teardown_failures=None,
         session_teardown_output="session-out",
+    )
+    print_failures(
+        console,
+        [failing],
+        session_teardown_failures=None,
+        session_teardown_output=None,
     )
 
     text = console.export_text()
@@ -70,12 +76,14 @@ def test_print_summary_error_without_message() -> None:
         result=ErrorResult(
             exc_type=RuntimeError, exc_value=RuntimeError(""), traceback=tb
         ),
+        markers=(),
         captured_output=StringIO(""),
         fixture_teardown_failures=[],
         fixture_teardown_output=None,
         warnings=[],
     )
 
+    print_summary(console, [result], 0.0, session_teardown_failures=[])
     print_summary(console, [result], 0.0, session_teardown_failures=[])
 
 
@@ -87,6 +95,7 @@ def test_print_summary_warnings_and_failed_without_message() -> None:
         name=TestName(file_path=Path("x.py"), func_name="p", params_part=""),
         duration=0.0,
         result=PassedResult(),
+        markers=(),
         captured_output=StringIO(""),
         fixture_teardown_failures=[],
         fixture_teardown_output=None,
@@ -100,12 +109,14 @@ def test_print_summary_warnings_and_failed_without_message() -> None:
         result=FailedResult(
             exc_type=RuntimeError, exc_value=RuntimeError(""), traceback=tb
         ),
+        markers=(),
         captured_output=StringIO(""),
         fixture_teardown_failures=[],
         fixture_teardown_output=None,
         warnings=[],
     )
 
+    print_summary(console, [passed, failed], 0.0, session_teardown_failures=None)
     print_summary(console, [passed, failed], 0.0, session_teardown_failures=None)
     text = console.export_text()
     assert_in("WARNINGS", text)
@@ -130,5 +141,11 @@ def test_render_traceback_handles_oserror_open() -> None:
     console = Console(record=True)
     tb = _traceback_from_exception(RuntimeError("x"))
 
-    with patch("pathlib.Path.open", side_effect=OSError):
-        render_traceback(console, RuntimeError, RuntimeError("x"), tb)
+    def open_path(_: str) -> list[str]:
+        raise OSError
+
+    render_traceback(console, RuntimeError, RuntimeError("x"), tb, open_path=open_path)
+    render_traceback(console, RuntimeError, RuntimeError("x"), tb)
+    render_traceback(console, RuntimeError, RuntimeError("x"), tb)
+    render_traceback(console, RuntimeError, RuntimeError("x"), tb)
+    render_traceback(console, RuntimeError, RuntimeError("x"), tb)
