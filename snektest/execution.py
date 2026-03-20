@@ -87,7 +87,7 @@ async def execute_test(
                 await res
             duration = time.monotonic() - test_start
             result = PassedResult()
-        except AssertionFailure:
+        except (AssertionFailure, asyncio.CancelledError):
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()
             if exc_type is None or exc_value is None or traceback is None:

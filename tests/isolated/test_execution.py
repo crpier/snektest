@@ -7,7 +7,13 @@ from types import TracebackType
 
 from snektest import assert_eq, assert_raises, fail, load_fixture, session_fixture, test
 from snektest.execution import execute_test, run_tests, teardown_fixture
-from snektest.models import BadRequestError, TestName, UnreachableError
+from snektest.models import (
+    BadRequestError,
+    FailedResult,
+    PassedResult,
+    TestName,
+    UnreachableError,
+)
 
 
 def _traceback_from_exception(exc: BaseException) -> TracebackType:
@@ -187,3 +193,48 @@ def test_traceback_helpers_cover_resolve_paths() -> None:
     tb = _traceback_from_exception(RuntimeError("x"))
     assert_eq(tb, tb)
     assert_eq(tb, tb)
+
+
+@test()
+async def test_execute_test_marks_cancelled_error_as_failed() -> None:
+    async def cancelled() -> None:
+        raise asyncio.CancelledError
+
+    name = TestName(file_path=Path("x.py"), func_name="cancelled", params_part="")
+    test_result = await execute_test(name, cancelled)
+
+    assert isinstance(test_result.result, FailedResult)
+    assert_eq(test_result.result.exc_type, asyncio.CancelledError)
+
+
+@test()
+async def test_run_tests_continues_after_cancelled_test() -> None:
+    async def cancelled() -> None:
+        raise asyncio.CancelledError
+
+    def passing() -> None:
+        return None
+
+    queue: asyncio.Queue[tuple[TestName, Callable[..., object]]] = asyncio.Queue()
+    queue.put_nowait(
+        (
+            TestName(file_path=Path("x.py"), func_name="cancelled", params_part=""),
+            cancelled,
+        )
+    )
+    queue.put_nowait(
+        (TestName(file_path=Path("x.py"), func_name="passing", params_part=""), passing)
+    )
+
+    async def shutdown_soon() -> None:
+        await asyncio.sleep(0)
+        queue.shutdown()
+
+    shutdown_task = asyncio.create_task(shutdown_soon())
+    results, session_failures = await run_tests(queue)
+    await shutdown_task
+
+    assert_eq(len(results), 2)
+    assert isinstance(results[0].result, FailedResult)
+    assert isinstance(results[1].result, PassedResult)
+    assert_eq(len(session_failures), 0)
