@@ -7,23 +7,30 @@ from hypothesis import strategies as st
 
 from snektest import test
 from snektest.assertions import assert_in, assert_raises, assert_true
-from snektest.decorators import test_hypothesis
-from snektest.utils import is_test_function
+from snektest.decorators import Marker, test_hypothesis
+from snektest.utils import get_test_function_markers, is_test_function
 
 
 @test()
 def test_test_hypothesis_marks_function() -> None:
-    @test_hypothesis(st.integers())
+    @test_hypothesis(st.integers(), mark=Marker.FAST)
     def prop(x: int) -> None:
         _ = x
 
     assert_true(is_test_function(prop))
+    assert_true(get_test_function_markers(prop) == ("fast",))
 
 
 @test()
 def test_test_hypothesis_requires_strategies() -> None:
     with assert_raises(ValueError):
         _ = cast("Any", test_hypothesis)()
+
+
+@test()
+def test_test_hypothesis_rejects_string_markers() -> None:
+    with assert_raises(TypeError):
+        _ = test_hypothesis(st.just(0), mark="fast")  # pyright: ignore[reportArgumentType]
 
 
 @test()

@@ -11,10 +11,17 @@ from pathlib import Path
 from typing import cast
 
 from snektest import assert_eq, assert_raises, test
-from snektest.cli import main, main_inner, parse_cli_args, run_script
+from snektest.cli import (
+    main,
+    main_inner,
+    parse_cli_args,
+    run_script,
+    run_tests_programmatic,
+)
 from snektest.models import (
     BadRequestError,
     CollectionError,
+    FilterItem,
     PassedResult,
     TestName,
     TestResult,
@@ -74,6 +81,12 @@ async def test_run_script_returns_2_on_cancelled_error() -> None:
 
 
 @test()
+async def test_run_tests_programmatic_rejects_unknown_marker() -> None:
+    with assert_raises(BadRequestError):
+        _ = await run_tests_programmatic([FilterItem(".")], mark="needs-s3")
+
+
+@test()
 async def test_run_script_json_output_includes_markers() -> None:
     async def fake_run(*args: object, **kwargs: object) -> object:
         _ = (args, kwargs)
@@ -83,7 +96,7 @@ async def test_run_script_json_output_includes_markers() -> None:
             ),
             duration=0.0,
             result=PassedResult(),
-            markers=("needs-s3",),
+            markers=("fast",),
             captured_output=StringIO(""),
             fixture_teardown_failures=[],
             fixture_teardown_output=None,
@@ -110,7 +123,7 @@ async def test_run_script_json_output_includes_markers() -> None:
         )
     assert_eq(result, 0)
     payload = json.loads(buffer.getvalue())
-    assert_eq(payload["tests"][0]["markers"], ["needs-s3"])
+    assert_eq(payload["tests"][0]["markers"], ["fast"])
 
 
 @test()

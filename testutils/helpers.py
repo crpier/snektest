@@ -25,24 +25,35 @@ def create_test_file(
     return filepath
 
 
-def run_test_subprocess(test_file: Path) -> dict[str, Any]:
+def run_test_subprocess(
+    test_file: Path, *extra_args: str, timeout: float = 0.5
+) -> dict[str, Any]:
     """Run snektest subprocess on test file and return structured results.
 
     Args:
         test_file: Path to test file to run
+        extra_args: Additional CLI args to pass before the test file path
+        timeout: Subprocess timeout in seconds
 
     Returns:
         Dict with keys: passed, failed, fixture_teardown_failed,
                        session_teardown_failed, returncode
     """
-    cmd = [sys.executable, "-m", "snektest.cli", "--json-output", str(test_file)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "snektest.cli",
+        "--json-output",
+        *extra_args,
+        str(test_file),
+    ]
 
     result = subprocess.run(
         cmd,
         check=False,
         capture_output=True,
         text=True,
-        timeout=0.5,
+        timeout=timeout,
     )
 
     lines = result.stdout.strip().split("\n")

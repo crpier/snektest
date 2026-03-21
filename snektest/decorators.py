@@ -36,9 +36,7 @@ class Marker(Enum):
 def _normalize_marker_entry(entry: object) -> str:
     if isinstance(entry, Marker):
         return entry.value
-    if isinstance(entry, str):
-        return entry
-    msg = "Markers must be strings or Marker values"
+    msg = "Markers must be Marker values"
     raise TypeError(msg)
 
 
@@ -51,20 +49,20 @@ def _normalize_marker_sequence(
 def _normalize_markers(mark: object | None) -> tuple[str, ...]:
     if mark is None:
         return ()
-    if isinstance(mark, (Marker, str)):
+    if isinstance(mark, Marker):
         return (_normalize_marker_entry(mark),)
     if isinstance(mark, list):
         return _normalize_marker_sequence(cast("list[object]", mark))
     if isinstance(mark, tuple):
         return _normalize_marker_sequence(cast("tuple[object, ...]", mark))
-    msg = "Markers must be a string, Marker, or list/tuple"
+    msg = "Markers must be a Marker or list/tuple of Marker values"
     raise TypeError(msg)
 
 
 @overload
 def test(
     *params: list[Param[Any]],
-    mark: Marker | str | list[Marker | str] | tuple[Marker | str, ...] | None = None,
+    mark: Marker | list[Marker] | tuple[Marker, ...] | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
@@ -88,7 +86,7 @@ def test(
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
 ]:
-    """Mark a function as a test function."""
+    """Mark a function as a test function with optional built-in markers."""
 
     markers = _normalize_markers(mark)
 
@@ -179,6 +177,7 @@ def _run_async_example(
 
 def test_hypothesis(
     *strategies: SearchStrategy[Any],
+    mark: Marker | list[Marker] | tuple[Marker, ...] | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],
@@ -186,6 +185,7 @@ def test_hypothesis(
     """Mark a function as a property-based test using Hypothesis.
 
     Strategies are positional and fill function arguments from left to right.
+    Use `mark=` with `Marker` values to attach built-in snektest markers.
 
     Notes:
     - Hypothesis cannot directly run async functions; for `async def` tests we run
@@ -200,6 +200,7 @@ def test_hypothesis(
         raise ValueError(msg)
 
     strategies_tuple = tuple(strategies)
+    markers = _normalize_markers(mark)
 
     def decorator(
         test_func: Callable[..., Coroutine[None] | None],
@@ -223,7 +224,7 @@ def test_hypothesis(
 
                 await asyncio.to_thread(run_hypothesis)
 
-            mark_test_function(async_wrapper, (), ())
+            mark_test_function(async_wrapper, (), markers)
             return async_wrapper
 
         @wraps(test_func)
@@ -233,7 +234,7 @@ def test_hypothesis(
 
             _run_hypothesis(sync_wrapper, strategies_tuple, run_one_example)
 
-        mark_test_function(sync_wrapper, (), ())
+        mark_test_function(sync_wrapper, (), markers)
         return sync_wrapper
 
     return decorator

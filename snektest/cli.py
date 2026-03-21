@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from snektest.collection import TestsQueue, load_tests_from_filters
+from snektest.decorators import Marker
 from snektest.execution import run_tests
 from snektest.models import (
     ArgsError,
@@ -74,6 +75,18 @@ class CliOptions:
     mark: str | None = None
 
 
+VALID_MARKER_VALUES = {marker.value for marker in Marker}
+
+
+def _is_valid_mark_value(mark_value: str) -> bool:
+    return mark_value in VALID_MARKER_VALUES
+
+
+def _invalid_mark_message(mark_value: str) -> str:
+    allowed = ", ".join(sorted(VALID_MARKER_VALUES))
+    return f"Invalid --mark value: `{mark_value}`. Use one of: {allowed}"
+
+
 def _parse_mark_value(
     argv: list[str], index: int, mark: str | None
 ) -> tuple[str | None, int] | int:
@@ -86,6 +99,9 @@ def _parse_mark_value(
     mark_value = argv[index + 1]
     if mark_value.startswith("-"):
         print_error("Missing value for --mark")
+        return 2
+    if not _is_valid_mark_value(mark_value):
+        print_error(_invalid_mark_message(mark_value))
         return 2
     return mark_value, index + 1
 
@@ -198,6 +214,9 @@ async def run_tests_programmatic(
     Returns:
         TestRunSummary with test results and counts
     """
+    if mark is not None and not _is_valid_mark_value(mark):
+        raise BadRequestError(_invalid_mark_message(mark))
+
     test_results, session_teardown_failures = await _run_tests_with_producer_thread(
         filter_items,
         capture_output=capture_output,

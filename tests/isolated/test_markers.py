@@ -32,22 +32,26 @@ def test_markers_are_stored_on_test_function() -> None:
     def test_marked() -> None:
         pass
 
-    _apply_markers(test_marked, ("needs-s3", "fast"))
-    assert_eq(get_test_function_markers(test_marked), ("needs-s3", "fast"))
+    _apply_markers(test_marked, (Marker.FAST, Marker.SLOW))
+    assert_eq(get_test_function_markers(test_marked), ("fast", "slow"))
 
 
 @test()
 def test_markers_reject_invalid_value() -> None:
+    def marked() -> None:
+        pass
+
     with assert_raises(TypeError):
-        test(mark=["fast", 123])  # pyright: ignore[reportCallIssue]
-    assert_eq(1, 1)
-    assert_eq(1, 1)
+        _apply_markers(marked, ["fast", 123])
+    with assert_raises(TypeError):
+        _apply_markers(marked, "fast")
+    with assert_raises(TypeError):
+        _apply_markers(marked, [Marker.FAST, "slow"])
 
 
 @test()
 def test_marker_normalization_inputs() -> None:
     assert_eq(Marker.FAST.value, "fast")
-    assert_eq("custom", "custom")
     assert_eq(Marker.MEDIUM.value, "medium")
     assert_eq(Marker.SLOW.value, "slow")
 
@@ -65,9 +69,9 @@ async def test_load_tests_from_file_filters_on_marker() -> None:
         test_file = tmp_dir / "test_collection_markers.py"
         _ = test_file.write_text(
             """
-from snektest import test
+from snektest import Marker, test
 
-@test(mark="fast")
+@test(mark=Marker.FAST)
 def test_fast() -> None:
     pass
 
@@ -101,7 +105,7 @@ def test_unmarked() -> None:
             filter_item,
             queue_empty,
             loop,
-            mark="missing",
+            mark="medium",
         )
         queue_empty.shutdown()
         with assert_raises(asyncio.QueueShutDown):
@@ -136,6 +140,12 @@ def test_parse_cli_args_mark_rejects_option_value() -> None:
 
 
 @test()
+def test_parse_cli_args_mark_rejects_unknown_marker() -> None:
+    result = parse_cli_args(["--mark", "needs-s3"])
+    assert_eq(result, 2)
+
+
+@test()
 def test_json_output_includes_markers() -> None:
     test_result = TestResult(
         name=TestName(
@@ -143,7 +153,7 @@ def test_json_output_includes_markers() -> None:
         ),
         duration=0.5,
         result=PassedResult(),
-        markers=("needs-s3",),
+        markers=("fast",),
         captured_output=StringIO(""),
         fixture_teardown_failures=[],
         fixture_teardown_output=None,
@@ -161,5 +171,5 @@ def test_json_output_includes_markers() -> None:
     )
     output = json.dumps(build_json_summary(summary))
     parsed = json.loads(output)
-    assert_eq(parsed["tests"][0]["markers"], ["needs-s3"])
+    assert_eq(parsed["tests"][0]["markers"], ["fast"])
     assert_eq(parsed["tests"][0]["status"], "passed")

@@ -169,7 +169,7 @@ snektest tests/test_myfeature.py
 snektest tests/test_myfeature.py::test_something
 
 # Run tests with a marker
-snektest --mark needs-s3
+snektest --mark fast
 
 # Drop into post-mortem debugging on first failure
 snektest --pdb
@@ -180,19 +180,23 @@ failure or fixture error (setup/teardown), and stops executing further tests.
 
 ## Marking Tests
 
-Use the `mark` argument on `@test()` to attach marker metadata for filtering.
+Use the `mark` argument on `@test()` to attach built-in marker metadata for filtering.
+Only `Marker.FAST`, `Marker.MEDIUM`, and `Marker.SLOW` are supported, and
+markers must be passed as `Marker` enum values rather than strings.
 
 ```python
 from snektest import Marker, test
 
-@test(mark="needs-s3")
+@test(mark=Marker.SLOW)
 def test_integration() -> None:
     pass
 
-@test(mark=(Marker.FAST, "unit"))
+@test(mark=(Marker.FAST, Marker.MEDIUM))
 def test_unit() -> None:
     pass
 ```
+
+Use `--mark fast`, `--mark medium`, or `--mark slow` to run one marker group.
 
 ## Property-Based Testing with Hypothesis
 
@@ -204,10 +208,10 @@ Use the `@test_hypothesis()` decorator with Hypothesis strategies to automatical
 
 ```python
 from hypothesis import strategies as st
-from snektest import test_hypothesis
+from snektest import Marker, test_hypothesis
 from snektest.assertions import assert_ge
 
-@test_hypothesis(st.integers())
+@test_hypothesis(st.integers(), mark=Marker.FAST)
 async def test_absolute_value_is_non_negative(x: int) -> None:
     result = abs(x)
     assert_ge(result, 0)
