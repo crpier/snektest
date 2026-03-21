@@ -31,6 +31,8 @@ def test_test_hypothesis_requires_strategies() -> None:
 def test_test_hypothesis_rejects_string_markers() -> None:
     with assert_raises(TypeError):
         _ = test_hypothesis(st.just(0), mark="fast")  # pyright: ignore[reportArgumentType]
+    with assert_raises(TypeError):
+        _ = test_hypothesis(st.just(0), mark=(Marker.FAST,))  # pyright: ignore[reportArgumentType]
 
 
 @test()

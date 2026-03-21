@@ -32,8 +32,8 @@ def test_markers_are_stored_on_test_function() -> None:
     def test_marked() -> None:
         pass
 
-    _apply_markers(test_marked, (Marker.FAST, Marker.SLOW))
-    assert_eq(get_test_function_markers(test_marked), ("fast", "slow"))
+    _apply_markers(test_marked, Marker.FAST)
+    assert_eq(get_test_function_markers(test_marked), ("fast",))
 
 
 @test()
@@ -47,6 +47,10 @@ def test_markers_reject_invalid_value() -> None:
         _apply_markers(marked, "fast")
     with assert_raises(TypeError):
         _apply_markers(marked, [Marker.FAST, "slow"])
+    with assert_raises(TypeError):
+        _apply_markers(marked, (Marker.FAST, Marker.SLOW))
+    with assert_raises(TypeError):
+        _apply_markers(marked, [Marker.FAST])
 
 
 @test()

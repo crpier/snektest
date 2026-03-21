@@ -40,29 +40,19 @@ def _normalize_marker_entry(entry: object) -> str:
     raise TypeError(msg)
 
 
-def _normalize_marker_sequence(
-    markers: list[object] | tuple[object, ...],
-) -> tuple[str, ...]:
-    return tuple(_normalize_marker_entry(entry) for entry in markers)
-
-
 def _normalize_markers(mark: object | None) -> tuple[str, ...]:
     if mark is None:
         return ()
     if isinstance(mark, Marker):
         return (_normalize_marker_entry(mark),)
-    if isinstance(mark, list):
-        return _normalize_marker_sequence(cast("list[object]", mark))
-    if isinstance(mark, tuple):
-        return _normalize_marker_sequence(cast("tuple[object, ...]", mark))
-    msg = "Markers must be a Marker or list/tuple of Marker values"
+    msg = "Markers must be a single Marker value"
     raise TypeError(msg)
 
 
 @overload
 def test(
     *params: list[Param[Any]],
-    mark: Marker | list[Marker] | tuple[Marker, ...] | None = None,
+    mark: Marker | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
@@ -86,7 +76,7 @@ def test(
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
 ]:
-    """Mark a function as a test function with optional built-in markers."""
+    """Mark a function as a test function with an optional built-in marker."""
 
     markers = _normalize_markers(mark)
 
@@ -177,7 +167,7 @@ def _run_async_example(
 
 def test_hypothesis(
     *strategies: SearchStrategy[Any],
-    mark: Marker | list[Marker] | tuple[Marker, ...] | None = None,
+    mark: Marker | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],
@@ -185,7 +175,7 @@ def test_hypothesis(
     """Mark a function as a property-based test using Hypothesis.
 
     Strategies are positional and fill function arguments from left to right.
-    Use `mark=` with `Marker` values to attach built-in snektest markers.
+    Use `mark=` with a `Marker` value to attach a built-in snektest marker.
 
     Notes:
     - Hypothesis cannot directly run async functions; for `async def` tests we run

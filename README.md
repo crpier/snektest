@@ -182,7 +182,7 @@ failure or fixture error (setup/teardown), and stops executing further tests.
 
 Use the `mark` argument on `@test()` to attach built-in marker metadata for filtering.
 Only `Marker.FAST`, `Marker.MEDIUM`, and `Marker.SLOW` are supported, and
-markers must be passed as `Marker` enum values rather than strings.
+markers must be passed as a single `Marker` enum value rather than strings.
 
 ```python
 from snektest import Marker, test
@@ -191,7 +191,7 @@ from snektest import Marker, test
 def test_integration() -> None:
     pass
 
-@test(mark=(Marker.FAST, Marker.MEDIUM))
+@test(mark=Marker.FAST)
 def test_unit() -> None:
     pass
 ```
