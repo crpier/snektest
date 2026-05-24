@@ -5,7 +5,7 @@ import sys
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.assertions import assert_ne, fail
+from snektest.assertions import assert_in, assert_ne, assert_not_in, fail
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file
 
@@ -43,5 +43,7 @@ def test_import_error_does_not_hang() -> None:
             timeout=0.5,
         )
         assert_ne(result.returncode, 0)
+        assert_in("Collection error: Error during collection", result.stdout)
+        assert_not_in("0 passed", result.stdout)
     except subprocess.TimeoutExpired:
         fail("Test runner hung on import error")

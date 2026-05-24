@@ -273,17 +273,19 @@ def _maybe_debug_session_teardown(
     return True
 
 
-async def run_tests(
+async def run_tests(  # noqa: PLR0913
     queue: TestsQueue,
     *,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
+    collection_failed: Callable[[], bool] = lambda: False,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
     resolver: Callable[[Path], Path] = Path.resolve,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     """Run all tests from the queue and handle session fixture teardown."""
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
+    session_teardown_failures: list[TeardownFailure] = []
     pdb_triggered = False
     try:
         while True:
@@ -302,39 +304,42 @@ async def run_tests(
     except asyncio.QueueShutDown:
         pass
     finally:
-        session_teardown_failures, session_output = await teardown_session_fixtures(
-            capture_output=capture_output
-        )
-        if not pdb_triggered and _maybe_debug_session_teardown(
-            session_teardown_failures,
-            pdb_on_failure=pdb_on_failure,
-            post_mortem=post_mortem,
-        ):
-            pdb_triggered = True
+        if collection_failed():
+            reset_session_fixtures()
+        else:
+            session_teardown_failures, session_output = await teardown_session_fixtures(
+                capture_output=capture_output
+            )
+            if not pdb_triggered and _maybe_debug_session_teardown(
+                session_teardown_failures,
+                pdb_on_failure=pdb_on_failure,
+                post_mortem=post_mortem,
+            ):
+                pdb_triggered = True
 
-        (
-            has_test_failures,
-            has_fixture_teardown_failures,
-            has_session_teardown_failures,
-        ) = has_any_failures(test_results, session_teardown_failures)
+            (
+                has_test_failures,
+                has_fixture_teardown_failures,
+                has_session_teardown_failures,
+            ) = has_any_failures(test_results, session_teardown_failures)
 
-        session_output_for_display = None
-        if session_output and (
-            has_test_failures
-            or has_fixture_teardown_failures
-            or has_session_teardown_failures
-        ):
-            session_output_for_display = session_output
+            session_output_for_display = None
+            if session_output and (
+                has_test_failures
+                or has_fixture_teardown_failures
+                or has_session_teardown_failures
+            ):
+                session_output_for_display = session_output
 
-        print_failures(
-            test_results,
-            session_teardown_failures=session_teardown_failures,
-            session_teardown_output=session_output_for_display,
-        )
-        print_summary(
-            test_results,
-            session_teardown_failures=session_teardown_failures,
-            total_duration=time.monotonic() - total_duration,
-        )
-        reset_session_fixtures()
+            print_failures(
+                test_results,
+                session_teardown_failures=session_teardown_failures,
+                session_teardown_output=session_output_for_display,
+            )
+            print_summary(
+                test_results,
+                session_teardown_failures=session_teardown_failures,
+                total_duration=time.monotonic() - total_duration,
+            )
+            reset_session_fixtures()
     return test_results, session_teardown_failures

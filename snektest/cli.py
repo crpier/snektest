@@ -175,6 +175,7 @@ async def _run_tests_with_producer_thread(
             queue=queue,
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
+            collection_failed=lambda: bool(collection_exception),
         )
     finally:
         producer_thread.join()

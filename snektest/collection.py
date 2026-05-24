@@ -124,6 +124,11 @@ def load_tests_from_filters(
                 )
     except BaseException as e:
         if exception_holder is not None:
-            exception_holder.append(e)
+            if isinstance(e, CollectionError):
+                exception_holder.append(e)
+            else:
+                exception_holder.append(
+                    CollectionError(f"Error during collection: {e}")
+                )
     finally:
         _ = loop.call_soon_threadsafe(queue.shutdown)

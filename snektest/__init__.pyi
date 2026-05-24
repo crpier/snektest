@@ -58,7 +58,9 @@ __all__ = [
 ]
 
 @overload
-def test(*, mark: Marker | None = None) -> Callable[
+def test(
+    *, mark: Marker | None = None
+) -> Callable[
     [Callable[[], Coroutine[None] | None]], Callable[[], Coroutine[None] | None]
 ]: ...
 @overload
