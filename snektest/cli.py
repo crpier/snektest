@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import cast
 
 from snektest.collection import TestsQueue, load_tests_from_filters
-from snektest.decorators import Marker
 from snektest.execution import run_tests
 from snektest.models import (
     ArgsError,
@@ -75,7 +74,7 @@ class CliOptions:
     mark: str | None = None
 
 
-VALID_MARKER_VALUES = {marker.value for marker in Marker}
+VALID_MARKER_VALUES = {"fast", "medium", "slow"}
 
 
 def _is_valid_mark_value(mark_value: str) -> bool:

@@ -4,7 +4,6 @@ from textwrap import dedent
 
 from snektest import load_fixture, test
 from snektest.assertions import assert_eq
-from snektest.decorators import Marker
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file, run_test_subprocess
 
@@ -110,17 +109,17 @@ async def test_hypothesis_marked_test_filters_with_cli_mark() -> None:
             from hypothesis import Phase, settings
             from hypothesis import strategies as st
 
-            from snektest import Marker, assert_eq, test_hypothesis
+            from snektest import assert_eq, test_hypothesis
 
 
             @settings(max_examples=1, phases=[Phase.generate], database=None, deadline=None)
-            @test_hypothesis(st.just(0), mark=Marker.FAST)
+            @test_hypothesis(st.just(0), mark="fast")
             async def test_fast(x: int) -> None:
                 assert_eq(x, 0)
 
 
             @settings(max_examples=1, phases=[Phase.generate], database=None, deadline=None)
-            @test_hypothesis(st.just(0), mark=Marker.SLOW)
+            @test_hypothesis(st.just(0), mark="slow")
             def test_slow(x: int) -> None:
                 assert_eq(x, 0)
             """
@@ -128,10 +127,10 @@ async def test_hypothesis_marked_test_filters_with_cli_mark() -> None:
         name="test_hypothesis_mark_filter",
     )
 
-    payload = run_test_subprocess(test_file, "--mark", Marker.FAST.value)
+    payload = run_test_subprocess(test_file, "--mark", "fast")
     assert_eq(payload["passed"], 1)
     assert_eq(payload["failed"], 0)
     assert_eq(payload["errors"], 0)
     assert_eq(payload["tests"][0]["name"], f"{test_file}::test_fast")
-    assert_eq(payload["tests"][0]["markers"], [Marker.FAST.value])
+    assert_eq(payload["tests"][0]["markers"], ["fast"])
     assert_eq(payload["returncode"], 0)

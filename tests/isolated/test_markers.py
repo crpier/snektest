@@ -14,7 +14,6 @@ from snektest import assert_eq, assert_raises, test
 from snektest.annotations import PyFilePath
 from snektest.cli import TestRunSummary, build_json_summary, parse_cli_args
 from snektest.collection import TestsQueue, load_tests_from_file
-from snektest.decorators import Marker
 from snektest.models import FilterItem, PassedResult, TestName, TestResult
 from snektest.utils import get_test_function_markers
 
@@ -32,7 +31,7 @@ def test_markers_are_stored_on_test_function() -> None:
     def test_marked() -> None:
         pass
 
-    _apply_markers(test_marked, Marker.FAST)
+    _apply_markers(test_marked, "fast")
     assert_eq(get_test_function_markers(test_marked), ("fast",))
 
 
@@ -44,26 +43,29 @@ def test_markers_reject_invalid_value() -> None:
     with assert_raises(TypeError):
         _apply_markers(marked, ["fast", 123])
     with assert_raises(TypeError):
-        _apply_markers(marked, "fast")
+        _apply_markers(marked, "needs-s3")
     with assert_raises(TypeError):
-        _apply_markers(marked, [Marker.FAST, "slow"])
+        _apply_markers(marked, ("fast", "slow"))
     with assert_raises(TypeError):
-        _apply_markers(marked, (Marker.FAST, Marker.SLOW))
-    with assert_raises(TypeError):
-        _apply_markers(marked, [Marker.FAST])
+        _apply_markers(marked, ["fast"])
 
 
 @test()
 def test_marker_normalization_inputs() -> None:
-    assert_eq(Marker.FAST.value, "fast")
-    assert_eq(Marker.MEDIUM.value, "medium")
-    assert_eq(Marker.SLOW.value, "slow")
+    @test(mark="medium")
+    def test_marked() -> None:
+        pass
+
+    assert_eq(get_test_function_markers(test_marked), ("medium",))
 
 
 @test()
-def test_marker_enum_is_str() -> None:
-    assert_eq(str(Marker.FAST.value), "fast")
-    assert_eq(str(Marker.MEDIUM.value), "medium")
+def test_marker_literal_values() -> None:
+    @test(mark="slow")
+    def test_marked() -> None:
+        pass
+
+    assert_eq(get_test_function_markers(test_marked), ("slow",))
 
 
 @test()
@@ -73,9 +75,9 @@ async def test_load_tests_from_file_filters_on_marker() -> None:
         test_file = tmp_dir / "test_collection_markers.py"
         _ = test_file.write_text(
             """
-from snektest import Marker, test
+from snektest import test
 
-@test(mark=Marker.FAST)
+@test(mark="fast")
 def test_fast() -> None:
     pass
 

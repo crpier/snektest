@@ -1,10 +1,9 @@
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import Future
-from enum import Enum
 from functools import wraps
 from inspect import Parameter, Signature, iscoroutinefunction
-from typing import Any, Protocol, TypeVar, cast, overload
+from typing import Any, Literal, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
@@ -27,25 +26,30 @@ class SearchStrategy(Protocol[T_co]):
     def example(self) -> T_co: ...
 
 
-class Marker(Enum):
-    FAST = "fast"
-    MEDIUM = "medium"
-    SLOW = "slow"
+type Marker = Literal["fast", "medium", "slow"]
+"""Markers for test functions. Not really about the speed of the test,
+to how fast the, but rather how many resources it takes in
+`fast` - test runs completely in memory, without any IO, threads or subprocesses
+`medium` - uses local IO (no network) and threads
+`slow` - uses network IO, threads and subprocesses"""
+
+
+VALID_MARKERS: tuple[Marker, ...] = ("slow", "medium", "fast")
 
 
 def _normalize_marker_entry(entry: object) -> str:
-    if isinstance(entry, Marker):
-        return entry.value
-    msg = "Markers must be Marker values"
+    if entry in VALID_MARKERS:
+        return entry
+    msg = "Markers must be Marker literals"
     raise TypeError(msg)
 
 
 def _normalize_markers(mark: object | None) -> tuple[str, ...]:
     if mark is None:
         return ()
-    if isinstance(mark, Marker):
+    if mark in VALID_MARKERS:
         return (_normalize_marker_entry(mark),)
-    msg = "Markers must be a single Marker value"
+    msg = "Markers must be a single Marker literal"
     raise TypeError(msg)
 
 
@@ -175,7 +179,7 @@ def test_hypothesis(
     """Mark a function as a property-based test using Hypothesis.
 
     Strategies are positional and fill function arguments from left to right.
-    Use `mark=` with a `Marker` value to attach a built-in snektest marker.
+    Use `mark=` with a `Marker` literal to attach a built-in snektest marker.
 
     Notes:
     - Hypothesis cannot directly run async functions; for `async def` tests we run
