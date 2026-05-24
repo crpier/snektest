@@ -22,7 +22,7 @@ MarkerDecorator = Callable[[Any], Any]
 
 
 def _apply_markers(func: Callable[[], object | None], mark: object) -> None:
-    marker_decorator = cast("MarkerDecorator", test(mark=mark))  # pyright: ignore[reportCallIssue]
+    marker_decorator = cast("MarkerDecorator", test(mark=mark))
     marker_decorator(func)
 
 

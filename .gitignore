@@ -16,3 +16,6 @@ htmlcov/
 
 # Hypothesis-generated
 .hypothesis
+
+# Agents local files
+.opencode
