@@ -27,11 +27,18 @@ class SearchStrategy(Protocol[T_co]):
 
 
 type Marker = Literal["fast", "medium", "slow"]
-"""Markers for test functions. Not really about the speed of the test,
-to how fast the, but rather how many resources it takes in
-`fast` - test runs completely in memory, without any IO, threads or subprocesses
-`medium` - uses local IO (no network) and threads
-`slow` - uses network IO, threads and subprocesses"""
+"""Markers for test functions.
+
+Markers describe the resources a test may use,
+not how long it is expected to take.
+
+`fast` means the test runs entirely in memory,
+without IO, threads, or subprocesses.
+`medium` means the test may use local IO or threads,
+but not network IO or subprocesses.
+`slow` means the test may use network IO, subprocesses,
+or other expensive external resources.
+"""
 
 
 VALID_MARKERS: tuple[Marker, ...] = ("slow", "medium", "fast")

@@ -15,20 +15,20 @@ Create a `test_*.py` file:
 ```python
 from collections.abc import AsyncGenerator
 
-from snektest import test, load_fixture
+from snektest import load_fixture, test
 from snektest.assertions import assert_eq
 
 async def provide_number() -> AsyncGenerator[int, None]:
     yield 2
 
 @test()
-async def test_basic_math():
+async def test_basic_math() -> None:
     given_number = await load_fixture(provide_number())
     result = given_number * 2
     assert_eq(result, 4)
 
 @test()
-def test_strings():
+def test_strings() -> None:
     assert_eq("hello".upper(), "HELLO")
 ```
 
@@ -58,7 +58,7 @@ async def connection_pool() -> AsyncGenerator[dict[str, str], None]:
     pool["status"] = "disconnected"
 
 @test()
-async def test_connection():
+async def test_connection() -> None:
     pool = await load_fixture(connection_pool())
     assert_eq(pool["status"], "connected")
 ```
@@ -113,14 +113,14 @@ from snektest.assertions import assert_eq
 
 
 @test()
-def test_sync_operation():
+def test_sync_operation() -> None:
     time.sleep(0.1)
     result = "completed"
     assert_eq(result, "completed")
 
 
 @test()
-async def test_async_operation():
+async def test_async_operation() -> None:
     await asyncio.sleep(0.1)
     result = "completed"
     assert_eq(result, "completed")
@@ -139,7 +139,7 @@ from snektest.assertions import assert_eq
     Param(value="WORLD", name="uppercase"),
     Param(value="MiXeD", name="mixed"),
 ])
-def test_string_length(value: str):
+def test_string_length(value: str) -> None:
     assert_eq(len(value), 5)
 
 # Test with multiple parameter combinations (cartesian product)
@@ -147,14 +147,15 @@ def test_string_length(value: str):
     [Param(value="hello", name="hello"), Param(value="hi", name="hi")],
     [Param(value=" world", name="world"), Param(value=" there", name="there")],
 )
-def test_concatenation(greeting: str, target: str):
+def test_concatenation(greeting: str, target: str) -> None:
     result = greeting + target
     assert_eq(result[0], greeting[0])
 ```
 
-### Static type checking
+### Static Type Checking
 
-...
+Snektest's public decorators and helpers are typed so test parameters, fixtures,
+and Hypothesis strategies can be checked by tools such as pyright.
 
 ## Running Tests
 
@@ -171,6 +172,12 @@ snektest tests/test_myfeature.py::test_something
 # Run tests with a marker
 snektest --mark fast
 
+# Disable stdout/stderr capture
+snektest -s
+
+# Print machine-readable JSON summary
+snektest --json-output
+
 # Drop into post-mortem debugging on first failure
 snektest --pdb
 ```
@@ -181,17 +188,29 @@ failure or fixture error (setup/teardown), and stops executing further tests.
 ## Marking Tests
 
 Use the `mark` argument on `@test()` to attach built-in marker metadata for filtering.
-Only `Marker.FAST`, `Marker.MEDIUM`, and `Marker.SLOW` are supported, and
-markers must be passed as a single `Marker` enum value rather than strings.
+`Marker` is a type alias for the literal strings `"fast"`, `"medium"`, and
+`"slow"`. Markers must be passed as a single marker literal.
+
+Markers describe the resources a test may use, not how long it is expected to
+take:
+
+`fast` means the test runs entirely in memory, without IO, threads, or
+subprocesses.
+
+`medium` means the test may use local IO or threads, but not network IO or
+subprocesses.
+
+`slow` means the test may use network IO, subprocesses, or other expensive
+external resources.
 
 ```python
-from snektest import Marker, test
+from snektest import test
 
-@test(mark=Marker.SLOW)
+@test(mark="slow")
 def test_integration() -> None:
     pass
 
-@test(mark=Marker.FAST)
+@test(mark="fast")
 def test_unit() -> None:
     pass
 ```
@@ -208,10 +227,10 @@ Use the `@test_hypothesis()` decorator with Hypothesis strategies to automatical
 
 ```python
 from hypothesis import strategies as st
-from snektest import Marker, test_hypothesis
+from snektest import test_hypothesis
 from snektest.assertions import assert_ge
 
-@test_hypothesis(st.integers(), mark=Marker.FAST)
+@test_hypothesis(st.integers(), mark="fast")
 async def test_absolute_value_is_non_negative(x: int) -> None:
     result = abs(x)
     assert_ge(result, 0)
@@ -323,7 +342,7 @@ from snektest import test
 from snektest.assertions import assert_eq
 
 @test()
-def test_equality():
+def test_equality() -> None:
     assert_eq(2 + 2, 4)
     assert_eq("hello", "hello")
     assert_eq([1, 2, 3], [1, 2, 3])
@@ -336,7 +355,7 @@ from snektest import test
 from snektest.assertions import assert_ne
 
 @test()
-def test_inequality():
+def test_inequality() -> None:
     assert_ne(2 + 2, 5)
     assert_ne("hello", "world")
 ```
@@ -350,7 +369,7 @@ from snektest import test
 from snektest.assertions import assert_true
 
 @test()
-def test_true():
+def test_true() -> None:
     assert_true(5 > 3)
     assert_true(True)
 ```
@@ -362,7 +381,7 @@ from snektest import test
 from snektest.assertions import assert_false
 
 @test()
-def test_false():
+def test_false() -> None:
     assert_false(5 < 3)
     assert_false(False)
 ```
@@ -376,7 +395,7 @@ from snektest import test
 from snektest.assertions import assert_is_none
 
 @test()
-def test_none():
+def test_none() -> None:
     result = None
     assert_is_none(result)
 ```
@@ -388,7 +407,7 @@ from snektest import test
 from snektest.assertions import assert_is_not_none
 
 @test()
-def test_not_none():
+def test_not_none() -> None:
     result = "something"
     assert_is_not_none(result)
 ```
@@ -402,7 +421,7 @@ from snektest import test
 from snektest.assertions import assert_is
 
 @test()
-def test_identity():
+def test_identity() -> None:
     a = [1, 2, 3]
     b = a
     assert_is(a, b)
@@ -415,7 +434,7 @@ from snektest import test
 from snektest.assertions import assert_is_not
 
 @test()
-def test_not_identity():
+def test_not_identity() -> None:
     a = [1, 2, 3]
     b = [1, 2, 3]
     assert_is_not(a, b)
@@ -430,7 +449,7 @@ from snektest import test
 from snektest.assertions import assert_lt
 
 @test()
-def test_less_than():
+def test_less_than() -> None:
     assert_lt(3, 5)
     assert_lt("a", "b")
 ```
@@ -442,7 +461,7 @@ from snektest import test
 from snektest.assertions import assert_gt
 
 @test()
-def test_greater_than():
+def test_greater_than() -> None:
     assert_gt(5, 3)
     assert_gt("b", "a")
 ```
@@ -454,7 +473,7 @@ from snektest import test
 from snektest.assertions import assert_le
 
 @test()
-def test_less_or_equal():
+def test_less_or_equal() -> None:
     assert_le(3, 5)
     assert_le(5, 5)
 ```
@@ -466,7 +485,7 @@ from snektest import test
 from snektest.assertions import assert_ge
 
 @test()
-def test_greater_or_equal():
+def test_greater_or_equal() -> None:
     assert_ge(5, 3)
     assert_ge(5, 5)
 ```
@@ -480,7 +499,7 @@ from snektest import test
 from snektest.assertions import assert_in
 
 @test()
-def test_membership():
+def test_membership() -> None:
     assert_in(2, [1, 2, 3])
     assert_in("hello", "hello world")
     assert_in("key", {"key": "value"})
@@ -493,7 +512,7 @@ from snektest import test
 from snektest.assertions import assert_not_in
 
 @test()
-def test_not_membership():
+def test_not_membership() -> None:
     assert_not_in(5, [1, 2, 3])
     assert_not_in("foo", "hello world")
 ```
@@ -507,7 +526,7 @@ from snektest import test
 from snektest.assertions import assert_isinstance
 
 @test()
-def test_instance():
+def test_instance() -> None:
     assert_isinstance("hello", str)
     assert_isinstance(42, int)
     assert_isinstance([1, 2], list)
@@ -521,7 +540,7 @@ from snektest import test
 from snektest.assertions import assert_not_isinstance
 
 @test()
-def test_not_instance():
+def test_not_instance() -> None:
     assert_not_isinstance("hello", int)
     assert_not_isinstance(42, str)
 ```
@@ -535,7 +554,7 @@ from snektest import test
 from snektest.assertions import assert_len
 
 @test()
-def test_length():
+def test_length() -> None:
     assert_len([1, 2, 3], 3)
     assert_len("hello", 5)
     assert_len({"a": 1, "b": 2}, 2)
@@ -551,18 +570,18 @@ Use as a context manager to verify that a specific exception is raised:
 from snektest import test, assert_raises, assert_eq
 
 @test()
-def test_division_by_zero():
+def test_division_by_zero() -> None:
     with assert_raises(ZeroDivisionError):
         1 / 0
 
 @test()
-def test_multiple_exception_types():
+def test_multiple_exception_types() -> None:
     # Can accept multiple exception types
     with assert_raises(ValueError, TypeError):
         int("not a number")
 
 @test()
-def test_access_exception():
+def test_access_exception() -> None:
     # Access the caught exception via the exception property
     with assert_raises(ValueError) as exc_info:
         raise ValueError("custom message")
@@ -578,7 +597,7 @@ def test_access_exception():
 from snektest import test, fail
 
 @test()
-def test_unreachable():
+def test_unreachable() -> None:
     if False:
         pass
     else:
