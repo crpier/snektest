@@ -14,6 +14,7 @@ from snektest.models import (
     TestName,
     TestResult,
 )
+from snektest.presenter import print_test_result_to_console
 from snektest.presenter.errors import print_failures
 from snektest.presenter.summary import print_summary
 from snektest.presenter.traceback import render_traceback
@@ -63,6 +64,35 @@ def test_print_failures_includes_captured_and_fixture_teardown_output() -> None:
     assert_in("Captured output:", text)
     assert_in("Captured output from fixture teardowns:", text)
     assert_in("Output from session fixture teardowns", text)
+
+
+@test()
+def test_print_test_result_soft_wraps_long_names() -> None:
+    console = Console(record=True, width=40)
+    result = TestResult(
+        name=TestName(
+            file_path=Path("test_example_wrapping.py"),
+            func_name="test_with_really_long_name_that_wont_fit_in_a_single_line",
+            params_part="",
+        ),
+        duration=0.0,
+        result=PassedResult(),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_test_result_to_console(console, result)
+
+    text = console.export_text()
+    assert_in(
+        "test_with_really_long_name_that_wont_fit_in_a_single_line",
+        text,
+    )
+    assert_in("OK (0.00s)", text)
+    assert text.count("\n") == 1
 
 
 @test()

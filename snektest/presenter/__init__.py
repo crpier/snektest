@@ -18,36 +18,44 @@ def print_error(exc: str) -> None:
     console.print(exc, markup=False, style="red")
 
 
-def print_test_result(result: TestResult) -> None:
-    """Print the result of a single test."""
+def print_test_result_to_console(console: Console, result: TestResult) -> None:
     console.print(
-        f"{result.name!s} ... ", end="", markup=False, highlight=False, no_wrap=True
+        f"{result.name!s} ... ",
+        end="",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
     )
     match result.result:
         case PassedResult():
             console.print(
                 f"OK ({result.duration:.2f}s)",
                 highlight=False,
-                no_wrap=True,
                 style="green",
                 markup=False,
+                soft_wrap=True,
             )
         case FailedResult():
             console.print(
                 f"FAIL ({result.duration:.2f}s)",
                 highlight=False,
-                no_wrap=True,
                 style="red",
                 markup=False,
+                soft_wrap=True,
             )
         case ErrorResult():
             console.print(
                 f"ERROR ({result.duration:.2f}s)",
                 highlight=False,
-                no_wrap=True,
                 style="dark_orange",
                 markup=False,
+                soft_wrap=True,
             )
+
+
+def print_test_result(result: TestResult) -> None:
+    """Print the result of a single test."""
+    print_test_result_to_console(console, result)
 
 
 def print_failures(
@@ -84,4 +92,5 @@ __all__ = [
     "print_failures",
     "print_summary",
     "print_test_result",
+    "print_test_result_to_console",
 ]
