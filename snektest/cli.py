@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 import threading
+import traceback
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import cast
@@ -292,7 +293,8 @@ def main_inner(
         coroutine = run_script(argv)
         return async_runner(coroutine)
     except CollectionError as e:
-        print_error(f"Collection error: {e}")
+        formatted = "".join(traceback.format_exception(e)).rstrip()
+        print_error(f"Collection error:\n{formatted}")
         return 2
     except BadRequestError as e:
         print_error(f"Bad request error: {e}")

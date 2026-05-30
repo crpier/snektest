@@ -127,8 +127,8 @@ def load_tests_from_filters(
             if isinstance(e, CollectionError):
                 exception_holder.append(e)
             else:
-                exception_holder.append(
-                    CollectionError(f"Error during collection: {e}")
-                )
+                collection_error = CollectionError(f"Error during collection: {e}")
+                collection_error.__cause__ = e
+                exception_holder.append(collection_error)
     finally:
         _ = loop.call_soon_threadsafe(queue.shutdown)

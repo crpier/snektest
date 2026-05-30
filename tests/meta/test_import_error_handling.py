@@ -43,7 +43,16 @@ def test_import_error_does_not_hang() -> None:
             timeout=0.5,
         )
         assert_ne(result.returncode, 0)
-        assert_in("Collection error: Error during collection", result.stdout)
+        assert_in("Collection error:", result.stdout)
+        assert_in("Traceback (most recent call last):", result.stdout)
+        assert_in(
+            'raise RuntimeError("Intentional import error for testing")', result.stdout
+        )
+        assert_in("RuntimeError: Intentional import error for testing", result.stdout)
+        assert_in(
+            "snektest.models.CollectionError: Error during collection:",
+            result.stdout,
+        )
         assert_not_in("0 passed", result.stdout)
     except subprocess.TimeoutExpired:
         fail("Test runner hung on import error")
