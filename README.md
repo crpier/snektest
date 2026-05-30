@@ -180,6 +180,9 @@ snektest --json-output
 
 # Drop into post-mortem debugging on first failure
 snektest --pdb
+
+# Run with coverage.py
+coverage run -m snektest
 ```
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
