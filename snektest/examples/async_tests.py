@@ -11,7 +11,7 @@ async def fetch_username() -> str:
     return "ada"
 
 
-@test()
+@test(mark="fast")
 async def test_async_code() -> None:
     """Async tests can await application code directly."""
     username = await fetch_username()

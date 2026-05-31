@@ -117,7 +117,7 @@ Options:
   --examples        List bundled examples
   --example NAME    Print a bundled example
   --json-output     Print machine-readable JSON summary
-  --mark MARK       Run tests marked fast, medium, or slow
+  --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   --pdb             Drop into post-mortem debugger on first failure
 
 Example commands:

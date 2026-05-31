@@ -10,12 +10,12 @@ Snektest is a Python testing framework with first-class async and typing support
 
 ## Quick start
 
-Create a `test_*.py` file and decorate test functions with `@test()`:
+Create a `test_*.py` file and decorate test functions with `@test(mark=...)`. Mark every test with the resources it may use:
 
 ```python
 from snektest import assert_eq, test
 
-@test()
+@test(mark="fast")
 def test_addition() -> None:
     assert_eq(1 + 1, 2)
 ```
@@ -41,11 +41,15 @@ snektest example async
 ## Core patterns
 
 - Import assertions from `snektest`; prefer `assert_eq()` over bare `assert`.
-- Async tests are regular `async def` functions decorated with `@test()`.
-- Use `Param(value=..., name=...)` inside `@test([...])` for parameterization.
+- Mark every test. This is the recommended way to use snektest.
+- Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
+- Use `mark="medium"` for tests that use local IO or threads.
+- Use `mark="slow"` for tests that use network IO, subprocesses, or expensive external resources.
+- Async tests are regular `async def` functions decorated with `@test(mark=...)`.
+- Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
 - Use generator fixtures with `load_fixture(fixture())`.
 - Use `@session_fixture()` for fixture setup shared by the whole test run.
-- Filter runs with paths such as `snektest tests/test_math.py::test_addition`.
+- Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 
 ## Copyable examples
 
