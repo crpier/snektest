@@ -42,6 +42,7 @@ def test_parse_cli_args_defaults_to_dot() -> None:
 
     potential_filter, options = parsed
     assert_eq(potential_filter, ["."])
+    assert_eq(options.action, None)
     assert_eq(options.capture_output, True)
     assert_eq(options.json_output, False)
     assert_eq(options.pdb_on_failure, False)
@@ -59,6 +60,27 @@ def test_parse_cli_args_s_flag_disables_capture() -> None:
 
 
 @test()
+def test_parse_cli_args_agent_docs_action() -> None:
+    parsed = parse_cli_args(["--agent-docs"])
+    assert not isinstance(parsed, int)
+
+    potential_filter, options = parsed
+    assert_eq(potential_filter, [])
+    assert_eq(options.action, "agent_docs")
+
+
+@test()
+def test_parse_cli_args_example_command_action() -> None:
+    parsed = parse_cli_args(["example", "async"])
+    assert not isinstance(parsed, int)
+
+    potential_filter, options = parsed
+    assert_eq(potential_filter, [])
+    assert_eq(options.action, "show_example")
+    assert_eq(options.example_name, "async")
+
+
+@test()
 async def test_run_script_returns_2_on_args_error() -> None:
     result = await run_script(["does-not-exist"])
     assert_eq(result, 2)
@@ -67,6 +89,53 @@ async def test_run_script_returns_2_on_args_error() -> None:
 @test()
 async def test_run_script_returns_parse_cli_args_exit_code() -> None:
     result = await run_script(["--nope"])
+    assert_eq(result, 2)
+
+
+@test()
+async def test_run_script_prints_agent_docs() -> None:
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(["--llms"])
+
+    assert_eq(result, 0)
+    assert "snektest agent guide" in buffer.getvalue()
+
+
+@test()
+async def test_run_script_prints_help_with_agent_docs_option() -> None:
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(["--help"])
+
+    assert_eq(result, 0)
+    assert "--agent-docs" in buffer.getvalue()
+
+
+@test()
+async def test_run_script_lists_examples() -> None:
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(["--examples"])
+
+    assert_eq(result, 0)
+    assert "basic" in buffer.getvalue()
+    assert "async" in buffer.getvalue()
+
+
+@test()
+async def test_run_script_prints_named_example() -> None:
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(["--example", "fixtures"])
+
+    assert_eq(result, 0)
+    assert "@session_fixture()" in buffer.getvalue()
+
+
+@test()
+async def test_run_script_rejects_unknown_example() -> None:
+    result = await run_script(["--example", "missing"])
     assert_eq(result, 2)
 
 

@@ -178,6 +178,14 @@ snektest -s
 # Print machine-readable JSON summary
 snektest --json-output
 
+# Print AI-agent usage guide
+snektest --agent-docs
+python -m snektest --agent-docs
+
+# List or print bundled examples
+snektest --examples
+snektest --example async
+
 # Drop into post-mortem debugging on first failure
 snektest --pdb
 
