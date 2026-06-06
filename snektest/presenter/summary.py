@@ -22,6 +22,19 @@ class RunCounts:
     session_teardown_failed: int
 
 
+def _summarize_exception(exc_value: BaseException) -> str:
+    """Render exception values as single-line summary details.
+
+    Full multi-line exception messages are already shown in the failure details.
+    The summary keeps only the first line so repeated diagnostics do not swamp
+    the final count line.
+    """
+    first_line = str(exc_value).splitlines()[0] if str(exc_value) else ""
+    if not first_line:
+        return ""
+    return f"{type(exc_value).__name__}: {first_line}"
+
+
 def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
     """Print warnings from test results."""
     all_warnings = [w for result in test_results for w in result.warnings]
@@ -37,7 +50,7 @@ def _print_test_failures(console: Console, test_results: list[TestResult]) -> No
     """Print test failures."""
     for result in test_results:
         if (failed_result := result.result) and isinstance(failed_result, FailedResult):
-            error_msg = str(failed_result.exc_value)
+            error_msg = _summarize_exception(failed_result.exc_value)
             console.print("FAILED", style="red", end=" ")
             if error_msg:
                 console.print(f"{result.name} - {error_msg}", markup=False)
@@ -49,7 +62,7 @@ def _print_test_errors(console: Console, test_results: list[TestResult]) -> None
     """Print test errors (unexpected exceptions)."""
     for result in test_results:
         if (error_result := result.result) and isinstance(error_result, ErrorResult):
-            error_msg = str(error_result.exc_value)
+            error_msg = _summarize_exception(error_result.exc_value)
             console.print("ERROR", style="dark_orange", end=" ")
             if error_msg:
                 console.print(f"{result.name} - {error_msg}", markup=False)
@@ -64,8 +77,9 @@ def _print_fixture_teardown_failures(
     for result in test_results:
         for teardown_failure in result.fixture_teardown_failures:
             console.print("FIXTURE TEARDOWN FAILED", style="red", end=" ")
+            error_msg = _summarize_exception(teardown_failure.exc_value)
             console.print(
-                f"{result.name} - {teardown_failure.fixture_name}: {teardown_failure.exc_value}",
+                f"{result.name} - {teardown_failure.fixture_name}: {error_msg}",
                 markup=False,
             )
 
@@ -76,8 +90,9 @@ def _print_session_teardown_failures(
     """Print session teardown failures."""
     for teardown_failure in session_teardown_failures:
         console.print("SESSION FIXTURE TEARDOWN FAILED", style="red", end=" ")
+        error_msg = _summarize_exception(teardown_failure.exc_value)
         console.print(
-            f"{teardown_failure.fixture_name}: {teardown_failure.exc_value}",
+            f"{teardown_failure.fixture_name}: {error_msg}",
             markup=False,
         )
 
