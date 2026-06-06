@@ -37,7 +37,7 @@ def run_test_subprocess(
 
     Returns:
         Dict with keys: passed, failed, fixture_teardown_failed,
-                       session_teardown_failed, returncode
+                       session_teardown_failed, returncode, stdout, stderr
     """
     cmd = [
         sys.executable,
@@ -60,4 +60,6 @@ def run_test_subprocess(
     json_line = lines[-1]
     results = json.loads(json_line)
     results["returncode"] = result.returncode
+    results["stderr"] = result.stderr
+    results["stdout"] = result.stdout
     return results

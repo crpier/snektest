@@ -43,6 +43,58 @@ def test_async_session_fixture() -> None:
 
 
 @test()
+def test_async_session_fixture_reused_by_three_tests() -> None:
+    """Async session fixture setup is cached without reusing coroutine objects."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    events_file = tmp_dir / "events.txt"
+
+    test_file = create_test_file(
+        tmp_dir,
+        dedent(f"""
+            from collections.abc import AsyncGenerator
+            from pathlib import Path
+
+            from snektest import assert_eq, load_fixture, session_fixture, test
+
+            EVENTS_FILE = Path({str(events_file)!r})
+
+            def record(event: str) -> None:
+                existing = EVENTS_FILE.read_text() if EVENTS_FILE.exists() else ""
+                EVENTS_FILE.write_text(existing + event + "\\n")
+
+            @session_fixture()
+            async def fixture_for_session() -> AsyncGenerator[int]:
+                record("setup")
+                yield 10
+                record("teardown")
+
+            @test()
+            async def first() -> None:
+                session_fixture_result = await load_fixture(fixture_for_session())
+                assert_eq(session_fixture_result, 10)
+
+            @test()
+            async def second() -> None:
+                session_fixture_result = await load_fixture(fixture_for_session())
+                assert_eq(session_fixture_result, 10)
+
+            @test()
+            async def third() -> None:
+                session_fixture_result = await load_fixture(fixture_for_session())
+                assert_eq(session_fixture_result, 10)
+        """),
+    )
+
+    result = run_test_subprocess(test_file)
+    assert_eq(result["passed"], 3)
+    assert_eq(result["failed"], 0)
+    assert_eq(result["errors"], 0)
+    assert_eq(result["session_teardown_failed"], 0)
+    assert_eq(result["stderr"], "")
+    assert_eq(events_file.read_text().splitlines(), ["setup", "teardown"])
+
+
+@test()
 def test_async_function_fixture() -> None:
     """Test async function fixture works."""
     tmp_dir = load_fixture(tmp_dir_fixture())

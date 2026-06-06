@@ -1,7 +1,9 @@
-from collections.abc import AsyncGenerator, Generator
+import asyncio
+from collections.abc import AsyncGenerator, Awaitable, Generator
+from dataclasses import dataclass
 from inspect import isasyncgen, isgenerator
 from types import CodeType
-from typing import Any
+from typing import Any, cast
 
 from snektest.annotations import Coroutine
 from snektest.models import UnreachableError
@@ -11,6 +13,47 @@ _SESSION_FIXTURES: dict[
     CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
 ] = {}
 _FUNCTION_FIXTURES: list[AsyncGenerator[Any] | Generator[Any]] = []
+
+
+@dataclass(frozen=True)
+class _PendingAsyncSessionFixtureSetup:
+    """Shared async fixture setup while the first load is still pending."""
+
+    awaitable: Awaitable[Any]
+
+
+def _wrap_async_session_fixture_result[R](result: R) -> Coroutine[R]:
+    async def wrapper() -> R:
+        return result
+
+    return wrapper()
+
+
+def _create_async_session_fixture_setup[R](
+    fixture_code: CodeType,
+    gen: AsyncGenerator[R],
+) -> Coroutine[R]:
+    async def result_updater() -> R:
+        registered_gen, _ = _SESSION_FIXTURES[fixture_code]
+        if not isasyncgen(registered_gen):
+            msg = "This should not happen I think"
+            raise UnreachableError(msg)
+        result = await anext(registered_gen)
+        _SESSION_FIXTURES[fixture_code] = (registered_gen, result)
+        return result
+
+    awaitable: Awaitable[R]
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        awaitable = result_updater()
+    else:
+        awaitable = loop.create_task(result_updater())
+    _SESSION_FIXTURES[fixture_code] = (
+        gen,
+        _PendingAsyncSessionFixtureSetup(awaitable),
+    )
+    return cast("Coroutine[R]", awaitable)
 
 
 def register_session_fixture(
@@ -38,37 +81,33 @@ def is_session_fixture(fixture_code: CodeType) -> bool:
     return fixture_code in _SESSION_FIXTURES
 
 
-def load_session_fixture[R](fixture_gen: AsyncGenerator[R] | Generator[R]) -> R:
+def load_session_fixture[R](
+    fixture_gen: AsyncGenerator[R] | Generator[R],
+) -> Coroutine[R] | R:
     """Load a session-scoped fixture, creating it on first use and reusing thereafter."""
     fixture_code = get_code_from_generator(fixture_gen)
     try:
-        gen, result = _SESSION_FIXTURES[fixture_code]
-        if gen is None:
-            gen = fixture_gen
-            if isasyncgen(gen):
-
-                async def result_updater() -> R:
-                    gen, _ = _SESSION_FIXTURES[fixture_code]
-                    if not isasyncgen(gen):
-                        msg = "This should not happen I think"
-                        raise UnreachableError(msg)
-                    result = await anext(gen)
-
-                    async def async_wrapper() -> R:
-                        return result
-
-                    _SESSION_FIXTURES[fixture_code] = (gen, async_wrapper())
-                    return result
-
-                result = result_updater()
-            elif isgenerator(gen):
-                result = next(gen)
-            _SESSION_FIXTURES[fixture_code] = (gen, result)
+        gen, cached_result = _SESSION_FIXTURES[fixture_code]
     except KeyError:
         msg = f"Function {fixture_code.co_qualname} was not registered as a session fixture. This shouldn't be possible!"
         raise UnreachableError(msg) from None
-    else:
-        return result  # pyright: ignore[reportReturnType]
+
+    if gen is None:
+        gen = fixture_gen
+        if isasyncgen(gen):
+            return _create_async_session_fixture_setup(fixture_code, gen)
+        if isgenerator(gen):
+            cached_result = next(gen)
+            _SESSION_FIXTURES[fixture_code] = (gen, cached_result)
+            return cached_result
+        msg = "Fixture must be a generator or async generator"
+        raise UnreachableError(msg)
+
+    if isinstance(cached_result, _PendingAsyncSessionFixtureSetup):
+        return cast("Coroutine[R]", cached_result.awaitable)
+    if isasyncgen(gen):
+        return _wrap_async_session_fixture_result(cast("R", cached_result))
+    return cast("R", cached_result)
 
 
 def load_function_fixture[R](
