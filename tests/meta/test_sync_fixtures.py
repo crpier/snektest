@@ -16,11 +16,9 @@ def test_sync_session_fixture() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from collections.abc import Generator
-            from snektest import load_fixture, session_fixture, test, assert_eq
+            from snektest import SessionFixture, load_fixture, test, assert_eq
 
-            @session_fixture()
-            def fixture_for_session() -> Generator[int]:
+            def fixture_for_session() -> SessionFixture[int]:
                 print("session fixture started")
                 yield 10
                 print("session fixture ended")

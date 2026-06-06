@@ -1,11 +1,12 @@
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Generator
+from collections.abc import AsyncGenerator, Awaitable, Generator, Mapping
 from dataclasses import dataclass
 from inspect import isasyncgen, isgenerator
-from types import CodeType
-from typing import Any, cast
+from sys import modules
+from types import CodeType, FunctionType
+from typing import Any, cast, get_type_hints
 
-from snektest.annotations import Coroutine
+from snektest.annotations import AsyncSessionFixture, Coroutine, SessionFixture
 from snektest.models import UnreachableError
 from snektest.utils import get_code_from_generator, get_func_name_from_generator
 
@@ -13,6 +14,49 @@ _SESSION_FIXTURES: dict[
     CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
 ] = {}
 _FUNCTION_FIXTURES: list[AsyncGenerator[Any] | Generator[Any]] = []
+
+
+def _is_session_fixture_return_annotation(annotation: object) -> bool:
+    """Return whether an annotation marks a fixture as session-scoped."""
+    origin = getattr(annotation, "__origin__", annotation)
+    return origin in {SessionFixture, AsyncSessionFixture}
+
+
+def _is_session_fixture_function(function: FunctionType) -> bool:
+    """Return whether a function's return annotation marks a session fixture."""
+    try:
+        return_annotation = get_type_hints(function).get("return")
+    except Exception:
+        return False
+    return return_annotation is not None and _is_session_fixture_return_annotation(
+        return_annotation
+    )
+
+
+def register_session_fixture_from_namespace(
+    fixture_code: CodeType,
+    namespace: Mapping[str, object],
+) -> None:
+    """Register a matching session fixture function from a namespace."""
+    for value in namespace.values():
+        if not isinstance(value, FunctionType):
+            continue
+        if value.__code__ == fixture_code and _is_session_fixture_function(value):
+            register_session_fixture(fixture_code)
+            return
+
+
+def _register_session_fixtures_from_loaded_modules(fixture_code: CodeType) -> None:
+    """Register matching session fixture functions from already-loaded modules.
+
+    Generator objects expose their code object but not the function object that
+    created them. Searching loaded module globals lets `load_fixture` recover the
+    fixture function's return annotation without requiring a decorator.
+    """
+    for module in list(modules.values()):
+        register_session_fixture_from_namespace(fixture_code, vars(module))
+        if fixture_code in _SESSION_FIXTURES:
+            return
 
 
 @dataclass(frozen=True)
@@ -77,7 +121,9 @@ def reset_session_fixtures() -> None:
 
 
 def is_session_fixture(fixture_code: CodeType) -> bool:
-    """Check if a fixture code object is registered as a session fixture."""
+    """Check whether a fixture code object is session-scoped."""
+    if fixture_code not in _SESSION_FIXTURES:
+        _register_session_fixtures_from_loaded_modules(fixture_code)
     return fixture_code in _SESSION_FIXTURES
 
 

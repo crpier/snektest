@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from typing import Any, cast
 
-from snektest import assert_raises, load_fixture, session_fixture, test
+from snektest import AsyncSessionFixture, assert_raises, load_fixture, test
 from snektest.fixtures import (
     get_registered_session_fixtures,
     load_function_fixture,
@@ -29,8 +29,7 @@ def test_load_session_fixture_unregistered_raises() -> None:
 
 @test()
 async def test_session_fixture_asyncgen_unexpected_registry_state() -> None:
-    @session_fixture()
-    async def fx() -> AsyncGenerator[int]:
+    async def fx() -> AsyncSessionFixture[int]:
         yield 1
 
     awaitable = load_fixture(fx())

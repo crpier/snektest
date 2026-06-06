@@ -1,7 +1,13 @@
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import Callable
 from typing import Any, overload
 
-from snektest.annotations import Coroutine
+from snektest.annotations import (
+    AsyncFixture,
+    AsyncSessionFixture,
+    Coroutine,
+    Fixture,
+    SessionFixture,
+)
 from snektest.assertions import (
     assert_eq,
     assert_false,
@@ -28,9 +34,13 @@ from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
 
 __all__ = [
+    "AsyncFixture",
+    "AsyncSessionFixture",
+    "Fixture",
     "Marker",
     "Param",
     "Scope",
+    "SessionFixture",
     "UnreachableError",
     "assert_eq",
     "assert_false",
@@ -52,7 +62,6 @@ __all__ = [
     "assert_true",
     "fail",
     "load_fixture",
-    "session_fixture",
     "test",
     "test_hypothesis",
 ]
@@ -95,16 +104,13 @@ def test(
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
 ]: ...
-def session_fixture[T, R: AsyncGenerator[T] | Generator[T]]() -> Callable[  # pyright: ignore[reportGeneralTypeIssues]
-    [Callable[[], R]], Callable[[], R]
-]: ...
 @overload
 def load_fixture[R](
-    fixture_gen: Generator[R],
+    fixture_gen: Fixture[R] | SessionFixture[R],
 ) -> R: ...
 @overload
 def load_fixture[R](
-    fixture_gen: AsyncGenerator[R],
+    fixture_gen: AsyncFixture[R] | AsyncSessionFixture[R],
 ) -> Coroutine[R]: ...
 @overload
 def test_hypothesis[T1](

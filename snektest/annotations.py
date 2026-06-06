@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator, Generator
 from collections.abc import Coroutine as _Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +16,11 @@ from pydantic_core.core_schema import (
     with_info_after_validator_function,
 )
 
+type AsyncFixture[T] = AsyncGenerator[T]
+type AsyncSessionFixture[T] = AsyncGenerator[T]
 type Coroutine[T] = _Coroutine[None, None, T]
+type Fixture[T] = Generator[T, None, None]  # noqa: UP043
+type SessionFixture[T] = Generator[T, None, None]  # noqa: UP043
 
 
 @dataclass

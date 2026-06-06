@@ -5,7 +5,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from types import TracebackType
 
-from snektest import assert_eq, assert_raises, fail, load_fixture, session_fixture, test
+from snektest import SessionFixture, assert_eq, assert_raises, fail, load_fixture, test
 from snektest.execution import execute_test, run_tests, teardown_fixture
 from snektest.models import (
     BadRequestError,
@@ -150,8 +150,7 @@ async def test_debug_fixture_teardown_branch() -> None:
 
 @test()
 async def test_debug_session_teardown_branch_and_output() -> None:
-    @session_fixture()
-    def sess() -> Generator[int]:
+    def sess() -> SessionFixture[int]:
         yield 1
         msg = "boom"
         print("session-output")

@@ -1,3 +1,9 @@
+from snektest.annotations import (
+    AsyncFixture,
+    AsyncSessionFixture,
+    Fixture,
+    SessionFixture,
+)
 from snektest.assertions import (
     assert_eq,
     assert_false,
@@ -22,7 +28,6 @@ from snektest.assertions import (
 from snektest.decorators import (
     Marker,
     load_fixture,
-    session_fixture,
     test,
     test_hypothesis,
 )
@@ -31,9 +36,13 @@ from snektest.models import Scope as Scope
 from snektest.models import UnreachableError as UnreachableError
 
 __all__ = [
+    "AsyncFixture",
+    "AsyncSessionFixture",
+    "Fixture",
     "Marker",
     "Param",
     "Scope",
+    "SessionFixture",
     "UnreachableError",
     "assert_eq",
     "assert_false",
@@ -55,7 +64,6 @@ __all__ = [
     "assert_true",
     "fail",
     "load_fixture",
-    "session_fixture",
     "test",
     "test_hypothesis",
 ]

@@ -63,11 +63,11 @@ This project uses `uv` for dependency management. The project requires Python >=
 Two fixture scopes with generator-based setup/teardown:
 
 - **Function fixtures**: Created via `load_fixture()` directly in tests. Stored in `_FUNCTION_FIXTURES` list. Torn down after each test in reverse order.
-- **Session fixtures**: Decorated with `@session_fixture()`. Registered in `_SESSION_FIXTURES` dict keyed by code object. Created on first `load_fixture()` call, reused across tests, torn down after all tests complete.
+- **Session fixtures**: Annotated as `SessionFixture[T]` or `AsyncSessionFixture[T]`. Registered in `_SESSION_FIXTURES` dict keyed by code object when `load_fixture()` inspects the fixture return annotation. Created on first `load_fixture()` call, reused across tests, torn down after all tests complete.
 
 Both use generators/async generators with yield for setup/teardown:
 ```python
-async def my_fixture() -> AsyncGenerator[str]:
+async def my_fixture() -> AsyncFixture[str]:
     # setup
     yield "value"
     # teardown

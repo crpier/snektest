@@ -50,7 +50,7 @@ snektest example async
 - Use generator fixtures with `load_fixture(fixture())`.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
-- Use `@session_fixture()` for fixture setup shared by the whole test run.
+- Annotate shared fixtures as `SessionFixture[T]` or `AsyncSessionFixture[T]` for setup shared by the whole test run.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 
 ## Copyable examples

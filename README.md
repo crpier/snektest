@@ -52,12 +52,10 @@ snektest --mark fast
 Set up and tear down test dependencies with session-scoped fixtures:
 
 ```python
-from collections.abc import AsyncGenerator
-from snektest import test, session_fixture, load_fixture
+from snektest import AsyncSessionFixture, load_fixture, test
 from snektest.assertions import assert_eq
 
-@session_fixture()
-async def connection_pool() -> AsyncGenerator[dict[str, str], None]:
+async def connection_pool() -> AsyncSessionFixture[dict[str, str]]:
     # Setup: runs once for all tests
     pool = {"host": "localhost", "status": "connected"}
     yield pool
