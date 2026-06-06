@@ -22,13 +22,15 @@ async def config_fixture() -> AsyncGenerator[dict[str, str]]:
 
 @test(mark="fast")
 def test_function_fixture() -> None:
-    """Function fixtures are loaded and torn down for each test."""
+    """Function fixtures are loaded first and torn down for each test."""
     user = load_fixture(user_fixture())
+
     assert_eq(user["name"], "Ada")
 
 
 @test(mark="fast")
 async def test_session_fixture() -> None:
-    """Async session fixtures can be awaited from async tests."""
+    """Async session fixtures can be awaited at the start of async tests."""
     config = await load_fixture(config_fixture())
+
     assert_eq(config["environment"], "test")

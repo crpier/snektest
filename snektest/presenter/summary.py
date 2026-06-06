@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rich.console import Console
+from rich.text import Text
 
 from snektest.models import (
     ErrorResult,
@@ -20,6 +21,17 @@ class RunCounts:
     errors: int
     fixture_teardown_failed: int
     session_teardown_failed: int
+
+
+def _print_summary_entry(
+    console: Console,
+    *,
+    label: str,
+    style: str,
+    details: str,
+) -> None:
+    line = Text.assemble((label, style), " ", details)
+    console.print(line, markup=False, no_wrap=True, overflow="ellipsis")
 
 
 def _summarize_exception(exc_value: BaseException) -> str:
@@ -51,11 +63,13 @@ def _print_test_failures(console: Console, test_results: list[TestResult]) -> No
     for result in test_results:
         if (failed_result := result.result) and isinstance(failed_result, FailedResult):
             error_msg = _summarize_exception(failed_result.exc_value)
-            console.print("FAILED", style="red", end=" ")
-            if error_msg:
-                console.print(f"{result.name} - {error_msg}", markup=False)
-            else:
-                console.print(f"{result.name}", markup=False)
+            details = f"{result.name} - {error_msg}" if error_msg else f"{result.name}"
+            _print_summary_entry(
+                console,
+                label="FAILED",
+                style="red",
+                details=details,
+            )
 
 
 def _print_test_errors(console: Console, test_results: list[TestResult]) -> None:
@@ -63,11 +77,13 @@ def _print_test_errors(console: Console, test_results: list[TestResult]) -> None
     for result in test_results:
         if (error_result := result.result) and isinstance(error_result, ErrorResult):
             error_msg = _summarize_exception(error_result.exc_value)
-            console.print("ERROR", style="dark_orange", end=" ")
-            if error_msg:
-                console.print(f"{result.name} - {error_msg}", markup=False)
-            else:
-                console.print(f"{result.name}", markup=False)
+            details = f"{result.name} - {error_msg}" if error_msg else f"{result.name}"
+            _print_summary_entry(
+                console,
+                label="ERROR",
+                style="dark_orange",
+                details=details,
+            )
 
 
 def _print_fixture_teardown_failures(
@@ -76,11 +92,12 @@ def _print_fixture_teardown_failures(
     """Print fixture teardown failures."""
     for result in test_results:
         for teardown_failure in result.fixture_teardown_failures:
-            console.print("FIXTURE TEARDOWN FAILED", style="red", end=" ")
             error_msg = _summarize_exception(teardown_failure.exc_value)
-            console.print(
-                f"{result.name} - {teardown_failure.fixture_name}: {error_msg}",
-                markup=False,
+            _print_summary_entry(
+                console,
+                label="FIXTURE TEARDOWN FAILED",
+                style="red",
+                details=f"{result.name} - {teardown_failure.fixture_name}: {error_msg}",
             )
 
 
@@ -89,11 +106,12 @@ def _print_session_teardown_failures(
 ) -> None:
     """Print session teardown failures."""
     for teardown_failure in session_teardown_failures:
-        console.print("SESSION FIXTURE TEARDOWN FAILED", style="red", end=" ")
         error_msg = _summarize_exception(teardown_failure.exc_value)
-        console.print(
-            f"{teardown_failure.fixture_name}: {error_msg}",
-            markup=False,
+        _print_summary_entry(
+            console,
+            label="SESSION FIXTURE TEARDOWN FAILED",
+            style="red",
+            details=f"{teardown_failure.fixture_name}: {error_msg}",
         )
 
 

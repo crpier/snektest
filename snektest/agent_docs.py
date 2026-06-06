@@ -48,6 +48,8 @@ snektest example async
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`.
 - Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
 - Use generator fixtures with `load_fixture(fixture())`.
+- Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
+- Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
 - Use `@session_fixture()` for fixture setup shared by the whole test run.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 

@@ -24,6 +24,7 @@ async def provide_number() -> AsyncGenerator[int, None]:
 @test(mark="fast")
 async def test_basic_math() -> None:
     given_number = await load_fixture(provide_number())
+
     result = given_number * 2
     assert_eq(result, 4)
 
@@ -66,8 +67,14 @@ async def connection_pool() -> AsyncGenerator[dict[str, str], None]:
 @test(mark="fast")
 async def test_connection() -> None:
     pool = await load_fixture(connection_pool())
+
     assert_eq(pool["status"], "connected")
 ```
+
+Load fixtures at the beginning of each test, before actions or assertions. This
+keeps fixture setup unconditional, makes teardown ownership obvious, and avoids
+hiding fixture setup behind an earlier assertion failure or branch. Only load a
+fixture later in a test when delayed fixture loading is the behavior being tested.
 
 ### Rich Assertions
 

@@ -6,7 +6,7 @@ from types import TracebackType
 
 from rich.console import Console
 
-from snektest import assert_in, assert_not_in, test
+from snektest import assert_eq, assert_in, assert_not_in, test
 from snektest.models import (
     ErrorResult,
     FailedResult,
@@ -141,6 +141,36 @@ def test_print_summary_uses_one_line_exception_messages() -> None:
     text = console.export_text()
     assert_in("ERROR x.py::e - RuntimeError: first line", text)
     assert_not_in("second line", text)
+
+
+@test()
+def test_print_summary_truncates_long_exception_messages() -> None:
+    console = Console(record=True, width=80)
+    long_message = "x" * 200
+    tb = _traceback_from_exception(RuntimeError(long_message))
+    result = TestResult(
+        name=TestName(file_path=Path("x.py"), func_name="f", params_part=""),
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError,
+            exc_value=RuntimeError(long_message),
+            traceback=tb,
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_summary(console, [result], 0.0, session_teardown_failures=[])
+
+    failed_lines = [
+        line for line in console.export_text().splitlines() if line.startswith("FAILED")
+    ]
+    assert_eq(len(failed_lines), 1)
+    assert_in("…", failed_lines[0])
+    assert_not_in("x" * 100, failed_lines[0])
 
 
 @test()
