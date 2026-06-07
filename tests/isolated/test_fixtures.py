@@ -3,13 +3,20 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Any, cast
 
-from snektest import AsyncSessionFixture, assert_raises, load_fixture, test
+from snektest import (
+    AsyncSessionFixture,
+    SessionFixture,
+    assert_eq,
+    assert_raises,
+    load_fixture,
+    test,
+)
 from snektest.fixtures import (
     get_registered_session_fixtures,
     load_function_fixture,
     load_session_fixture,
 )
-from snektest.models import UnreachableError
+from snektest.models import FixtureError, UnreachableError
 
 
 @test()
@@ -25,6 +32,34 @@ def test_load_session_fixture_unregistered_raises() -> None:
 
     with assert_raises(UnreachableError):
         _ = load_session_fixture(gen())
+
+
+@test()
+def test_session_fixture_rejects_parameters() -> None:
+    def fx(value: int) -> SessionFixture[int]:
+        yield value
+
+    with assert_raises(FixtureError) as exc_info:
+        _ = load_fixture(fx(1))
+
+    assert_eq(
+        str(exc_info.exception),
+        "Session fixture test_session_fixture_rejects_parameters.<locals>.fx cannot accept parameters: value. Session fixtures are cached once per fixture function; use a function fixture for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.",
+    )
+
+
+@test()
+def test_async_session_fixture_rejects_optional_parameters() -> None:
+    async def fx(value: int = 1) -> AsyncSessionFixture[int]:
+        yield value
+
+    with assert_raises(FixtureError) as exc_info:
+        _ = load_fixture(fx())
+
+    assert_eq(
+        str(exc_info.exception),
+        "Session fixture test_async_session_fixture_rejects_optional_parameters.<locals>.fx cannot accept parameters: value. Session fixtures are cached once per fixture function; use a function fixture for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.",
+    )
 
 
 @test()

@@ -13,12 +13,10 @@ uv add snektest
 Create a `test_*.py` file. The recommended style is to mark every test with the resources it may use:
 
 ```python
-from collections.abc import AsyncGenerator
-
-from snektest import load_fixture, test
+from snektest import AsyncFixture, load_fixture, test
 from snektest.assertions import assert_eq
 
-async def provide_number() -> AsyncGenerator[int, None]:
+async def provide_number() -> AsyncFixture[int]:
     yield 2
 
 @test(mark="fast")
@@ -47,7 +45,15 @@ snektest --mark fast
 
 ## Features
 
-### Session Fixtures
+### Fixtures
+
+Annotate regular function fixtures as `Fixture[T]` or `AsyncFixture[T]`.
+Annotate shared session fixtures as `SessionFixture[T]` or
+`AsyncSessionFixture[T]`; snektest detects these return annotations when
+`load_fixture()` is called, with no fixture decorator required. Session fixtures
+must not accept parameters because they are cached once per fixture function. Use
+a function fixture for parameter-dependent setup, or have a zero-argument session
+fixture return a factory/cache.
 
 Set up and tear down test dependencies with session-scoped fixtures:
 
@@ -208,6 +214,11 @@ snektest --pdb
 coverage run -m snektest
 ```
 
+Human-readable summary lines are compact: exception details keep only the first
+line and long lines may be truncated with an ellipsis. Full failure details and
+tracebacks are printed earlier in the output. Use `--json-output` for a
+machine-readable summary.
+
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
 
@@ -361,6 +372,11 @@ async def test_addition_specific_cases(values: tuple[int, int, int]) -> None:
 ## Assertions Reference
 
 All assertion functions accept an optional `msg` keyword argument for custom error messages.
+
+Assertion argument order is intentional. Pass the observed/computed value first
+and the expected/reference value second, following the parameter names in each
+signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
+`assert_isinstance(obj, classinfo)`, and `assert_len(obj, expected_length)`.
 
 ### Equality and Inequality
 

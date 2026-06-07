@@ -62,8 +62,8 @@ This project uses `uv` for dependency management. The project requires Python >=
 
 Two fixture scopes with generator-based setup/teardown:
 
-- **Function fixtures**: Created via `load_fixture()` directly in tests. Stored in `_FUNCTION_FIXTURES` list. Torn down after each test in reverse order.
-- **Session fixtures**: Annotated as `SessionFixture[T]` or `AsyncSessionFixture[T]`. Registered in `_SESSION_FIXTURES` dict keyed by code object when `load_fixture()` inspects the fixture return annotation. Created on first `load_fixture()` call, reused across tests, torn down after all tests complete.
+- **Function fixtures**: Created via `load_fixture()` directly in tests. Annotate as `Fixture[T]` or `AsyncFixture[T]` for typed function scope. Stored in `_FUNCTION_FIXTURES` list. Torn down after each test in reverse order.
+- **Session fixtures**: Annotated as `SessionFixture[T]` or `AsyncSessionFixture[T]`, with no fixture decorator required. Registered in `_SESSION_FIXTURES` dict keyed by code object when `load_fixture()` inspects the fixture return annotation. Created on first `load_fixture()` call, reused across tests, torn down after all tests complete. Session fixtures must not accept parameters; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
 
 Both use generators/async generators with yield for setup/teardown:
 ```python
@@ -77,9 +77,20 @@ async def my_fixture() -> AsyncFixture[str]:
 
 Tests can accept multiple parameter sets via `@test(param_list1, param_list2)`. The `Param.to_dict()` creates all combinations using `itertools.product`, keyed by param names. Each combination becomes a separate test execution.
 
+### Summary Output
+
+Console summary lines intentionally keep exception details compact: only the first
+exception message line is shown and long lines may be ellipsized. Use the full
+failure details or `--json-output` for exact diagnostics.
+
 ### Assertions
 
-Custom assertion system with rich error reporting. Use `assert_eq()` from `snektest.assertions` rather than bare `assert`. Raises `AssertionFailure` with actual/expected values for better error messages.
+Custom assertion system with rich error reporting. Use `assert_eq()` from
+`snektest.assertions` rather than bare `assert`. Assertion helper argument order
+is intentional: pass the observed/computed value first and the expected/reference
+value second, following parameter names like `actual`, `expected`, `member`, and
+`container`. Raises `AssertionFailure` with actual/expected values for better
+error messages.
 
 ### Type Checking Configuration
 

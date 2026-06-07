@@ -41,6 +41,35 @@ def test_sync_session_fixture() -> None:
 
 
 @test()
+def test_sync_session_fixture_rejects_parameters() -> None:
+    """Sync session fixtures must be zero-argument."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+
+    test_file = create_test_file(
+        tmp_dir,
+        dedent("""
+            from snektest import SessionFixture, load_fixture, test
+
+            def fixture_for_session(value: int) -> SessionFixture[int]:
+                yield value
+
+            @test()
+            def test_with_session_fixture() -> None:
+                _ = load_fixture(fixture_for_session(10))
+        """),
+    )
+
+    result = run_test_subprocess(test_file)
+    assert_eq(result["passed"], 0)
+    assert_eq(result["errors"], 1)
+    assert_eq(
+        "Session fixture fixture_for_session cannot accept parameters"
+        in result["stdout"],
+        True,
+    )
+
+
+@test()
 def test_sync_function_fixture() -> None:
     """Test sync function fixture works."""
     tmp_dir = load_fixture(tmp_dir_fixture())

@@ -20,6 +20,10 @@ class BadRequestError(BaseException):
     """When user didn't write test code correctly"""
 
 
+class FixtureError(Exception):
+    """When a fixture is defined or used incorrectly."""
+
+
 class AssertionFailure(AssertionError):  # noqa: N818
     def __init__(
         self,
@@ -35,7 +39,9 @@ class AssertionFailure(AssertionError):  # noqa: N818
         self.operator = operator
 
 
-SnektestError = CollectionError | ArgsError | UnreachableError | AssertionFailure
+SnektestError = (
+    CollectionError | ArgsError | UnreachableError | AssertionFailure | FixtureError
+)
 
 
 class FilterItem:

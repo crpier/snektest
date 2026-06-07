@@ -1,13 +1,15 @@
+"""Fixture registration, caching, setup, and teardown state."""
+
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Generator, Mapping
 from dataclasses import dataclass
-from inspect import isasyncgen, isgenerator
+from inspect import isasyncgen, isgenerator, signature
 from sys import modules
 from types import CodeType, FunctionType
 from typing import Any, cast, get_type_hints
 
 from snektest.annotations import AsyncSessionFixture, Coroutine, SessionFixture
-from snektest.models import UnreachableError
+from snektest.models import FixtureError, UnreachableError
 from snektest.utils import get_code_from_generator, get_func_name_from_generator
 
 _SESSION_FIXTURES: dict[
@@ -33,6 +35,20 @@ def _is_session_fixture_function(function: FunctionType) -> bool:
     )
 
 
+def _ensure_session_fixture_has_no_parameters(function: FunctionType) -> None:
+    """Protect session fixture caching from call-argument-dependent values."""
+    parameters = signature(function).parameters
+    if not parameters:
+        return
+
+    parameter_names = ", ".join(parameters)
+    msg = (
+        f"Session fixture {function.__qualname__} cannot accept parameters: {parameter_names}. "
+        "Session fixtures are cached once per fixture function; use a function fixture for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture."
+    )
+    raise FixtureError(msg)
+
+
 def register_session_fixture_from_namespace(
     fixture_code: CodeType,
     namespace: Mapping[str, object],
@@ -42,6 +58,7 @@ def register_session_fixture_from_namespace(
         if not isinstance(value, FunctionType):
             continue
         if value.__code__ == fixture_code and _is_session_fixture_function(value):
+            _ensure_session_fixture_has_no_parameters(value)
             register_session_fixture(fixture_code)
             return
 

@@ -41,6 +41,9 @@ snektest example async
 ## Core patterns
 
 - Import assertions from `snektest`; prefer `assert_eq()` over bare `assert`.
+- Assertion argument order is intentional: pass the observed/computed value
+  first and the expected/reference value second, following names like `actual`,
+  `expected`, `member`, and `container`.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -48,9 +51,12 @@ snektest example async
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`.
 - Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
 - Use generator fixtures with `load_fixture(fixture())`.
+- Annotate function fixtures as `Fixture[T]` or `AsyncFixture[T]`.
+- Annotate shared fixtures as `SessionFixture[T]` or `AsyncSessionFixture[T]`; snektest detects these return annotations when `load_fixture()` is called, with no fixture decorator required.
+- Session fixtures must be zero-argument; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
-- Annotate shared fixtures as `SessionFixture[T]` or `AsyncSessionFixture[T]` for setup shared by the whole test run.
+- Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 
 ## Copyable examples
