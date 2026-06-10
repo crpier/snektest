@@ -216,8 +216,8 @@ coverage run -m snektest
 
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
-tracebacks are printed earlier in the output. Use `--json-output` for a
-machine-readable summary.
+tracebacks are printed earlier in the output. Use `--json-output` for a pure
+machine-readable summary with per-test exception messages.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.

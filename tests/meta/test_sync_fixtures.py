@@ -64,7 +64,7 @@ def test_sync_session_fixture_rejects_parameters() -> None:
     assert_eq(result["errors"], 1)
     assert_eq(
         "Session fixture fixture_for_session cannot accept parameters"
-        in result["stdout"],
+        in result["tests"][0]["exception"]["message"],
         True,
     )
 
