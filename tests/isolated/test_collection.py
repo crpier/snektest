@@ -77,10 +77,22 @@ def test_other() -> None:
             loop,
             mark=None,
         )
-        name, _func = await asyncio.wait_for(queue.get(), timeout=1)
-        assert_eq(name.func_name, "test_other")
+        test_case = await asyncio.wait_for(queue.get(), timeout=1)
+        assert_eq(test_case.name.func_name, "test_other")
 
         queue2: TestsQueue = TestsQueue()
+        load_tests_from_file(
+            file_path,
+            FilterItem(f"{test_file}::test_param[one]"),
+            queue2,
+            loop,
+            mark=None,
+        )
+        parametrized_case = await asyncio.wait_for(queue2.get(), timeout=1)
+        assert_eq(parametrized_case.name.params_part, "one")
+        assert_eq(parametrized_case.param_values, (1,))
+
+        queue2 = TestsQueue()
         load_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_param[does not match]"),

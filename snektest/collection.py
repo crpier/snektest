@@ -1,3 +1,5 @@
+"""Test discovery and collection into executable test cases."""
+
 import asyncio
 from collections.abc import Callable
 from importlib.machinery import ModuleSpec
@@ -5,13 +7,12 @@ from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
 from pathlib import Path
 from sys import modules
-from types import FunctionType
 from typing import TypeGuard, cast
 
 from pydantic import ValidationError
 
 from snektest.annotations import PyFilePath, validate_PyFilePath
-from snektest.models import CollectionError, FilterItem, TestName
+from snektest.models import CollectionError, FilterItem, TestCase, TestName
 from snektest.utils import (
     get_test_function_markers,
     get_test_function_params,
@@ -20,8 +21,7 @@ from snektest.utils import (
 
 TEST_FILE_PREFIX = "test_"
 
-FuncTestEntry = tuple[TestName, FunctionType]
-TestsQueue = asyncio.Queue[FuncTestEntry]
+TestsQueue = asyncio.Queue[TestCase]
 
 
 def load_tests_from_file(  # noqa: PLR0913
@@ -62,13 +62,20 @@ def load_tests_from_file(  # noqa: PLR0913
         )
 
     for func in runnable_functions:
-        for param_names in get_test_function_params(func):
+        markers = get_test_function_markers(func)
+        for param_names, params in get_test_function_params(func).items():
             if filter_item.params and filter_item.params != param_names:
                 continue
             test_name = TestName(
                 file_path=file_path, func_name=func.__name__, params_part=param_names
             )
-            _ = loop.call_soon_threadsafe(queue.put_nowait, (test_name, func))
+            test_case = TestCase(
+                function=func,
+                markers=markers,
+                name=test_name,
+                param_values=tuple(param.value for param in params),
+            )
+            _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
 
 
 def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:

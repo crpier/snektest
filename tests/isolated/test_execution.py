@@ -11,6 +11,8 @@ from snektest.models import (
     BadRequestError,
     FailedResult,
     PassedResult,
+    TestCase,
+    TestFunction,
     TestName,
     UnreachableError,
 )
@@ -25,14 +27,29 @@ def _traceback_from_exception(exc: BaseException) -> TracebackType:
         return tb
 
 
+def _test_case(
+    name: TestName,
+    function: TestFunction,
+    *,
+    markers: tuple[str, ...] = (),
+    param_values: tuple[object, ...] = (),
+) -> TestCase:
+    return TestCase(
+        function=function,
+        markers=markers,
+        name=name,
+        param_values=param_values,
+    )
+
+
 async def _run_queue(
-    entries: list[tuple[TestName, Callable[..., object]]],
+    entries: list[TestCase],
     *,
     pdb_on_failure: bool = False,
     post_mortem: Callable[[TracebackType], None] | None = None,
     resolver: Callable[[Path], Path] | None = None,
 ) -> None:
-    queue: asyncio.Queue[tuple[TestName, Callable[..., object]]] = asyncio.Queue()
+    queue: asyncio.Queue[TestCase] = asyncio.Queue()
     for entry in entries:
         queue.put_nowait(entry)
 
@@ -92,14 +109,18 @@ async def test_sys_exc_info_defensive_branches_raise_unreachable() -> None:
         fail("boom")
 
     with assert_raises(UnreachableError):
-        _ = await execute_test(name, fail_assertion, exc_info_provider=missing_exc_info)
+        _ = await execute_test(
+            _test_case(name, fail_assertion), exc_info_provider=missing_exc_info
+        )
 
     def raise_error() -> None:
         msg = "boom"
         raise RuntimeError(msg)
 
     with assert_raises(UnreachableError):
-        _ = await execute_test(name, raise_error, exc_info_provider=missing_exc_info)
+        _ = await execute_test(
+            _test_case(name, raise_error), exc_info_provider=missing_exc_info
+        )
 
 
 @test()
@@ -119,7 +140,7 @@ async def test_debug_paths_cover_resolve_and_selected_none() -> None:
         return None
 
     await _run_queue(
-        [(name, failing)],
+        [_test_case(name, failing)],
         pdb_on_failure=True,
         post_mortem=debug_noop_post_mortem,
         resolver=failing_resolver,
@@ -142,7 +163,7 @@ async def test_debug_fixture_teardown_branch() -> None:
         return None
 
     await _run_queue(
-        [(name, test_body)],
+        [_test_case(name, test_body)],
         pdb_on_failure=True,
         post_mortem=fixture_noop_post_mortem,
     )
@@ -165,7 +186,7 @@ async def test_debug_session_teardown_branch_and_output() -> None:
         return None
 
     await _run_queue(
-        [(name, test_body)],
+        [_test_case(name, test_body)],
         pdb_on_failure=True,
         post_mortem=session_noop_post_mortem,
     )
@@ -200,7 +221,7 @@ async def test_execute_test_marks_cancelled_error_as_failed() -> None:
         raise asyncio.CancelledError
 
     name = TestName(file_path=Path("x.py"), func_name="cancelled", params_part="")
-    test_result = await execute_test(name, cancelled)
+    test_result = await execute_test(_test_case(name, cancelled))
 
     assert isinstance(test_result.result, FailedResult)
     assert_eq(test_result.result.exc_type, asyncio.CancelledError)
@@ -214,15 +235,18 @@ async def test_run_tests_continues_after_cancelled_test() -> None:
     def passing() -> None:
         return None
 
-    queue: asyncio.Queue[tuple[TestName, Callable[..., object]]] = asyncio.Queue()
+    queue: asyncio.Queue[TestCase] = asyncio.Queue()
     queue.put_nowait(
-        (
+        _test_case(
             TestName(file_path=Path("x.py"), func_name="cancelled", params_part=""),
             cancelled,
         )
     )
     queue.put_nowait(
-        (TestName(file_path=Path("x.py"), func_name="passing", params_part=""), passing)
+        _test_case(
+            TestName(file_path=Path("x.py"), func_name="passing", params_part=""),
+            passing,
+        )
     )
 
     async def shutdown_soon() -> None:

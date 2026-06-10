@@ -1,3 +1,5 @@
+"""Test execution, fixture teardown, debugging, and run orchestration."""
+
 import asyncio
 import pdb  # noqa: T100
 import sys
@@ -8,7 +10,6 @@ from pathlib import Path
 from types import TracebackType
 from typing import cast
 
-from snektest.annotations import Coroutine
 from snektest.collection import TestsQueue
 from snektest.fixtures import (
     get_active_function_fixtures,
@@ -22,13 +23,12 @@ from snektest.models import (
     FailedResult,
     PassedResult,
     TeardownFailure,
-    TestName,
+    TestCase,
     TestResult,
     UnreachableError,
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
-from snektest.utils import get_test_function_markers, get_test_function_params
 
 
 async def teardown_fixture(
@@ -64,25 +64,18 @@ async def teardown_fixture(
 
 
 async def execute_test(
-    name: TestName,
-    func: Callable[..., Coroutine[None] | None],
+    test_case: TestCase,
     *,
     capture_output: bool = True,
     exc_info_provider: Callable[
         [], tuple[object | None, object | None, TracebackType | None]
     ] = sys.exc_info,
 ) -> TestResult:
-    """Execute a single test function with fixtures and output capture."""
+    """Execute a collected test case with fixtures and output capture."""
     with maybe_capture_output(capture_output) as (output_buffer, captured_warnings):
-        param_values = ()
-        if name.params_part:
-            param_values = [
-                param.value
-                for param in get_test_function_params(func)[name.params_part]
-            ]
         test_start = time.monotonic()
         try:
-            res = func(*param_values)
+            res = test_case.call()
             if iscoroutine(res):
                 await res
             duration = time.monotonic() - test_start
@@ -123,10 +116,10 @@ async def execute_test(
     fixture_teardown_output_value = fixture_teardown_buffer.getvalue() or None
 
     return TestResult(
-        name=name,
+        name=test_case.name,
         duration=duration,
         result=result,
-        markers=get_test_function_markers(func),
+        markers=test_case.markers,
         captured_output=output_buffer,
         fixture_teardown_failures=fixture_teardown_failures,
         fixture_teardown_output=fixture_teardown_output_value,
@@ -293,8 +286,8 @@ async def run_tests(  # noqa: PLR0913
     pdb_triggered = False
     try:
         while True:
-            name, func = await queue.get()
-            test_result = await execute_test(name, func, capture_output=capture_output)
+            test_case = await queue.get()
+            test_result = await execute_test(test_case, capture_output=capture_output)
             test_results.append(test_result)
             reporter.test_finished(test_result)
             if not pdb_triggered and _maybe_debug_test_result(

@@ -1,3 +1,6 @@
+"""Domain models for collected tests, results, filters, and framework errors."""
+
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from io import StringIO
@@ -5,6 +8,8 @@ from itertools import product
 from pathlib import Path
 from types import TracebackType
 from typing import Any
+
+from snektest.annotations import Coroutine
 
 
 class CollectionError(BaseException): ...
@@ -120,6 +125,28 @@ class TestName:
 
 
 class PassedResult: ...
+
+
+type TestFunction = Callable[..., Coroutine[None] | None]
+
+
+@dataclass(frozen=True)
+class TestCase:
+    """Collected test case with decorator metadata resolved once.
+
+    Collection owns discovery and parameter expansion. Execution only needs this
+    interface: call the prepared test and attach its already-resolved metadata to
+    the result.
+    """
+
+    function: TestFunction
+    markers: tuple[str, ...]
+    name: TestName
+    param_values: tuple[object, ...] = ()
+
+    def call(self) -> Coroutine[None] | None:
+        """Run the underlying test function with its collected parameter values."""
+        return self.function(*self.param_values)
 
 
 @dataclass

@@ -101,8 +101,9 @@ def test_unmarked() -> None:
             loop,
             mark="fast",
         )
-        name, _func = await asyncio.wait_for(queue.get(), timeout=1)
-        assert_eq(name.func_name, "test_fast")
+        test_case = await asyncio.wait_for(queue.get(), timeout=1)
+        assert_eq(test_case.name.func_name, "test_fast")
+        assert_eq(test_case.markers, ("fast",))
         queue.shutdown()
 
         queue_empty: TestsQueue = TestsQueue()
