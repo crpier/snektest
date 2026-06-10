@@ -5,6 +5,7 @@ import contextlib
 import json
 import runpy
 import sys
+import tempfile
 from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
@@ -156,6 +157,50 @@ async def test_run_tests_programmatic_rejects_unknown_marker() -> None:
 
 
 @test()
+async def test_run_script_json_output_is_machine_readable() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_json_output.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_one() -> None:
+    pass
+""".lstrip()
+        )
+
+        buffer = StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = await run_script(["--json-output", str(test_file)])
+
+    assert_eq(result, 0)
+    assert_eq(json.loads(buffer.getvalue())["passed"], 1)
+
+
+@test()
+async def test_run_tests_programmatic_does_not_print() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_programmatic_output.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_one() -> None:
+    pass
+""".lstrip()
+        )
+
+        buffer = StringIO()
+        with contextlib.redirect_stdout(buffer):
+            summary = await run_tests_programmatic([FilterItem(str(test_file))])
+
+    assert_eq(summary.passed, 1)
+    assert_eq(buffer.getvalue(), "")
+
+
+@test()
 async def test_run_script_json_output_includes_markers() -> None:
     async def fake_run(*args: object, **kwargs: object) -> object:
         _ = (args, kwargs)
@@ -180,6 +225,7 @@ async def test_run_script_json_output_includes_markers() -> None:
                 "errors": 0,
                 "fixture_teardown_failed": 0,
                 "session_teardown_failed": 0,
+                "session_teardown_failures": [],
                 "test_results": [test_result],
             },
         )()

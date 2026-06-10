@@ -27,7 +27,7 @@ from snektest.models import (
     UnreachableError,
 )
 from snektest.output import maybe_capture_output
-from snektest.presenter import print_failures, print_summary, print_test_result
+from snektest.reporting import ConsoleRunReporter, RunReporter
 from snektest.utils import get_test_function_markers, get_test_function_params
 
 
@@ -280,9 +280,13 @@ async def run_tests(  # noqa: PLR0913
     pdb_on_failure: bool = False,
     collection_failed: Callable[[], bool] = lambda: False,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
+    reporter: RunReporter | None = None,
     resolver: Callable[[Path], Path] = Path.resolve,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
-    """Run all tests from the queue and handle session fixture teardown."""
+    """Run all tests from the queue and report progress through a small seam."""
+    if reporter is None:
+        reporter = ConsoleRunReporter()
+
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
     session_teardown_failures: list[TeardownFailure] = []
@@ -292,7 +296,7 @@ async def run_tests(  # noqa: PLR0913
             name, func = await queue.get()
             test_result = await execute_test(name, func, capture_output=capture_output)
             test_results.append(test_result)
-            print_test_result(test_result)
+            reporter.test_finished(test_result)
             if not pdb_triggered and _maybe_debug_test_result(
                 test_result,
                 pdb_on_failure=pdb_on_failure,
@@ -331,14 +335,10 @@ async def run_tests(  # noqa: PLR0913
             ):
                 session_output_for_display = session_output
 
-            print_failures(
-                test_results,
+            reporter.run_finished(
+                test_results=test_results,
                 session_teardown_failures=session_teardown_failures,
                 session_teardown_output=session_output_for_display,
-            )
-            print_summary(
-                test_results,
-                session_teardown_failures=session_teardown_failures,
                 total_duration=time.monotonic() - total_duration,
             )
             reset_session_fixtures()

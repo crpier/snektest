@@ -27,6 +27,7 @@ from snektest.models import (
     UnreachableError,
 )
 from snektest.presenter import print_error
+from snektest.reporting import ConsoleRunReporter, NullRunReporter, RunReporter
 
 
 def _json_result_status(result: TestResult) -> str:
@@ -39,6 +40,37 @@ def _json_result_status(result: TestResult) -> str:
             return "error"
 
 
+def _json_exception(
+    exc_type: type[BaseException], exc_value: BaseException
+) -> dict[str, str]:
+    return {"type": exc_type.__name__, "message": str(exc_value)}
+
+
+def _json_test_entry(result: TestResult) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "name": str(result.name),
+        "duration": result.duration,
+        "markers": list(result.markers),
+        "status": _json_result_status(result),
+    }
+    match result.result:
+        case FailedResult(exc_type=exc_type, exc_value=exc_value):
+            entry["exception"] = _json_exception(exc_type, exc_value)
+        case ErrorResult(exc_type=exc_type, exc_value=exc_value):
+            entry["exception"] = _json_exception(exc_type, exc_value)
+        case PassedResult():
+            pass
+    if result.fixture_teardown_failures:
+        entry["fixture_teardown_failures"] = [
+            {
+                "fixture_name": failure.fixture_name,
+                "exception": _json_exception(failure.exc_type, failure.exc_value),
+            }
+            for failure in result.fixture_teardown_failures
+        ]
+    return entry
+
+
 def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
     return {
         "passed": summary.passed,
@@ -46,15 +78,14 @@ def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
         "errors": summary.errors,
         "fixture_teardown_failed": summary.fixture_teardown_failed,
         "session_teardown_failed": summary.session_teardown_failed,
-        "tests": [
+        "session_teardown_failures": [
             {
-                "name": str(result.name),
-                "duration": result.duration,
-                "markers": list(result.markers),
-                "status": _json_result_status(result),
+                "fixture_name": failure.fixture_name,
+                "exception": _json_exception(failure.exc_type, failure.exc_value),
             }
-            for result in summary.test_results
+            for failure in summary.session_teardown_failures
         ],
+        "tests": [_json_test_entry(result) for result in summary.test_results],
     }
 
 
@@ -304,6 +335,7 @@ async def _run_tests_with_producer_thread(
     capture_output: bool,
     pdb_on_failure: bool,
     mark: str | None = None,
+    reporter: RunReporter | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     queue = TestsQueue()
     collection_exception: list[BaseException] = []
@@ -327,6 +359,7 @@ async def _run_tests_with_producer_thread(
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
             collection_failed=lambda: bool(collection_exception),
+            reporter=reporter,
         )
     finally:
         producer_thread.join()
@@ -352,15 +385,17 @@ async def run_tests_programmatic(
     capture_output: bool = True,
     pdb_on_failure: bool = False,
     mark: str | None = None,
+    reporter: RunReporter | None = None,
 ) -> TestRunSummary:
     """Run tests and return structured results instead of printing.
 
     This is the programmatic API for testing snektest itself.
-    Returns structured data instead of just printing and exiting.
+    Returns structured data instead of printing by default.
 
     Args:
         filter_items: List of filter items to run tests from
         capture_output: Whether to capture test output
+        reporter: Optional progress reporter. Defaults to no presentation side effects.
 
     Returns:
         TestRunSummary with test results and counts
@@ -373,6 +408,7 @@ async def run_tests_programmatic(
         capture_output=capture_output,
         pdb_on_failure=pdb_on_failure,
         mark=mark,
+        reporter=reporter or NullRunReporter(),
     )
 
     return TestRunSummary(
@@ -412,6 +448,7 @@ async def run_script(
         return 2
 
     runner = run_tests_programmatic_fn or run_tests_programmatic
+    reporter = NullRunReporter() if options.json_output else ConsoleRunReporter()
     try:
         summary = cast(
             "TestRunSummary",
@@ -420,6 +457,7 @@ async def run_script(
                 capture_output=options.capture_output,
                 pdb_on_failure=options.pdb_on_failure,
                 mark=options.mark,
+                reporter=reporter,
             ),
         )
     except asyncio.CancelledError:
