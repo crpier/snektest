@@ -8,13 +8,25 @@ A type-safe, async-native Python testing framework.
 uv add snektest
 ```
 
+## Type checking is part of the contract
+
+snektest expects your test code to pass a strict static type checker (such as
+pyright) before tests run — typically continuously, via your editor's language
+server. The API is designed around this: signatures are exact, and snektest
+does not re-validate at runtime what a type checker already rejects. If you
+skip type checking, misuse that a checker would flag — such as applying
+`@test` without parentheses — can fail silently at runtime.
+
+Runtime validation is reserved for what static checkers cannot see: CLI
+input, file paths, and fixture protocol rules (for example, session fixtures
+must not accept parameters).
+
 ## Quick Start
 
 Create a `test_*.py` file. The recommended style is to mark every test with the resources it may use:
 
 ```python
-from snektest import AsyncFixture, load_fixture, test
-from snektest.assertions import assert_eq
+from snektest import AsyncFixture, assert_eq, load_fixture, test
 
 async def provide_number() -> AsyncFixture[int]:
     yield 2
@@ -58,8 +70,7 @@ fixture return a factory/cache.
 Set up and tear down test dependencies with session-scoped fixtures:
 
 ```python
-from snektest import AsyncSessionFixture, load_fixture, test
-from snektest.assertions import assert_eq
+from snektest import AsyncSessionFixture, assert_eq, load_fixture, test
 
 async def connection_pool() -> AsyncSessionFixture[dict[str, str]]:
     # Setup: runs once for all tests
@@ -94,7 +105,7 @@ def test_show_dict_diff() -> None:
 ```
 
 ```text
-E       AssertionError: {'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}
+E       {'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}
 
 E       - {'age': 30, 'name': 'bob'}
 E       ?                      ^^^
@@ -113,8 +124,7 @@ def test_show_in_assertion() -> None:
 ```
 
 ```text
-E       AssertionError: 'qux' not found in ['foo', 'bar', 'baz']
-E       'qux' in ['foo', 'bar', 'baz']
+E       'qux' not found in ['foo', 'bar', 'baz']
 ```
 
 ### Async Support
@@ -125,8 +135,7 @@ Write async tests as naturally as sync ones:
 import asyncio
 import time
 
-from snektest import test
-from snektest.assertions import assert_eq
+from snektest import assert_eq, test
 
 
 @test(mark="fast")
@@ -148,8 +157,7 @@ async def test_async_operation() -> None:
 Run the same test with different inputs:
 
 ```python
-from snektest import test, Param
-from snektest.assertions import assert_eq
+from snektest import Param, assert_eq, test
 
 @test(
     [
@@ -222,6 +230,22 @@ machine-readable summary with per-test exception messages.
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
 
+## Execution Model
+
+Tests run sequentially — one at a time, in collection order — on a single
+asyncio event loop shared by the entire run. An async test is awaited to
+completion before the next test starts, so tests never interleave with each
+other; a background task a test starts but does not await can, however, keep
+running on the shared loop while later tests execute.
+
+Test collection runs in a background thread while tests execute, so a test
+module may be imported while tests from earlier modules are already running.
+Avoid import-time side effects in test modules.
+
+Teardown is last-in-first-out: function fixtures are torn down after each test
+in reverse loading order, and session fixtures are torn down after all tests
+finish in reverse registration order.
+
 ## Marking Tests
 
 Use the `mark` argument on `@test()` to attach built-in marker metadata for filtering. Marking tests is the recommended way to use snektest: every test should declare whether it is `"fast"`, `"medium"`, or `"slow"`.
@@ -264,8 +288,7 @@ Use the `@test_hypothesis(..., mark=...)` decorator with Hypothesis strategies t
 
 ```python
 from hypothesis import strategies as st
-from snektest import test_hypothesis
-from snektest.assertions import assert_ge
+from snektest import assert_ge, test_hypothesis
 
 @test_hypothesis(st.integers(), mark="fast")
 async def test_absolute_value_is_non_negative(x: int) -> None:
@@ -279,8 +302,7 @@ Pass multiple strategies for functions with multiple parameters:
 
 ```python
 from hypothesis import strategies as st
-from snektest import test_hypothesis
-from snektest.assertions import assert_eq
+from snektest import assert_eq, test_hypothesis
 
 @test_hypothesis(st.text(), st.text(), mark="fast")
 async def test_string_concatenation_length(s1: str, s2: str) -> None:
@@ -295,8 +317,7 @@ Property-based tests work seamlessly with async functions. Snektest automaticall
 ```python
 import asyncio
 from hypothesis import strategies as st
-from snektest import test_hypothesis
-from snektest.assertions import assert_eq, assert_true
+from snektest import assert_eq, assert_true, test_hypothesis
 
 @test_hypothesis(st.integers(min_value=0, max_value=100), mark="fast")
 async def test_async_computation(n: int) -> None:
@@ -312,9 +333,8 @@ async def test_async_computation(n: int) -> None:
 Use Hypothesis's `@settings()` decorator to configure test behavior. Apply it above or below `@test_hypothesis()`:
 
 ```python
-from hypothesis import Phase, settings, strategies as st
-from snektest import test_hypothesis
-from snektest.assertions import assert_isinstance
+from hypothesis import settings, strategies as st
+from snektest import assert_isinstance, test_hypothesis
 
 @settings(max_examples=500, deadline=None)
 @test_hypothesis(st.lists(st.integers()), mark="fast")
@@ -348,8 +368,7 @@ You can mix property-based tests with traditional example-based tests in the sam
 
 ```python
 from hypothesis import strategies as st
-from snektest import test, test_hypothesis, Param
-from snektest.assertions import assert_eq
+from snektest import Param, assert_eq, test, test_hypothesis
 
 # Property-based test
 @test_hypothesis(st.integers(), st.integers(), mark="fast")
@@ -371,239 +390,33 @@ async def test_addition_specific_cases(values: tuple[int, int, int]) -> None:
 
 ## Assertions Reference
 
-All assertion functions accept an optional `msg` keyword argument for custom error messages.
+All assertion functions are importable from `snektest` and accept an optional
+`msg` keyword argument for custom error messages.
 
 Assertion argument order is intentional. Pass the observed/computed value first
 and the expected/reference value second, following the parameter names in each
 signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 `assert_isinstance(obj, classinfo)`, and `assert_len(obj, expected_length)`.
 
-### Equality and Inequality
+### Value and Comparison Assertions
 
-**`assert_eq(actual, expected, *, msg=None)`** - Assert that `actual == expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_eq
-
-@test(mark="fast")
-def test_equality() -> None:
-    assert_eq(2 + 2, 4)
-    assert_eq("hello", "hello")
-    assert_eq([1, 2, 3], [1, 2, 3])
-```
-
-**`assert_ne(actual, expected, *, msg=None)`** - Assert that `actual != expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_ne
-
-@test(mark="fast")
-def test_inequality() -> None:
-    assert_ne(2 + 2, 5)
-    assert_ne("hello", "world")
-```
-
-### Boolean Values
-
-**`assert_true(value, *, msg=None)`** - Assert that `value is True`
-
-```python
-from snektest import test
-from snektest.assertions import assert_true
-
-@test(mark="fast")
-def test_true() -> None:
-    assert_true(5 > 3)
-    assert_true(True)
-```
-
-**`assert_false(value, *, msg=None)`** - Assert that `value is False`
-
-```python
-from snektest import test
-from snektest.assertions import assert_false
-
-@test(mark="fast")
-def test_false() -> None:
-    assert_false(5 < 3)
-    assert_false(False)
-```
-
-### None Checks
-
-**`assert_is_none(value, *, msg=None)`** - Assert that `value is None`
-
-```python
-from snektest import test
-from snektest.assertions import assert_is_none
-
-@test(mark="fast")
-def test_none() -> None:
-    result = None
-    assert_is_none(result)
-```
-
-**`assert_is_not_none(value, *, msg=None)`** - Assert that `value is not None`
-
-```python
-from snektest import test
-from snektest.assertions import assert_is_not_none
-
-@test(mark="fast")
-def test_not_none() -> None:
-    result = "something"
-    assert_is_not_none(result)
-```
-
-### Identity Checks
-
-**`assert_is(actual, expected, *, msg=None)`** - Assert that `actual is expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_is
-
-@test(mark="fast")
-def test_identity() -> None:
-    a = [1, 2, 3]
-    b = a
-    assert_is(a, b)
-```
-
-**`assert_is_not(actual, expected, *, msg=None)`** - Assert that `actual is not expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_is_not
-
-@test(mark="fast")
-def test_not_identity() -> None:
-    a = [1, 2, 3]
-    b = [1, 2, 3]
-    assert_is_not(a, b)
-```
-
-### Comparisons
-
-**`assert_lt(actual, expected, *, msg=None)`** - Assert that `actual < expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_lt
-
-@test(mark="fast")
-def test_less_than() -> None:
-    assert_lt(3, 5)
-    assert_lt("a", "b")
-```
-
-**`assert_gt(actual, expected, *, msg=None)`** - Assert that `actual > expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_gt
-
-@test(mark="fast")
-def test_greater_than() -> None:
-    assert_gt(5, 3)
-    assert_gt("b", "a")
-```
-
-**`assert_le(actual, expected, *, msg=None)`** - Assert that `actual <= expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_le
-
-@test(mark="fast")
-def test_less_or_equal() -> None:
-    assert_le(3, 5)
-    assert_le(5, 5)
-```
-
-**`assert_ge(actual, expected, *, msg=None)`** - Assert that `actual >= expected`
-
-```python
-from snektest import test
-from snektest.assertions import assert_ge
-
-@test(mark="fast")
-def test_greater_or_equal() -> None:
-    assert_ge(5, 3)
-    assert_ge(5, 5)
-```
-
-### Membership
-
-**`assert_in(member, container, *, msg=None)`** - Assert that `member in container`
-
-```python
-from snektest import test
-from snektest.assertions import assert_in
-
-@test(mark="fast")
-def test_membership() -> None:
-    assert_in(2, [1, 2, 3])
-    assert_in("hello", "hello world")
-    assert_in("key", {"key": "value"})
-```
-
-**`assert_not_in(member, container, *, msg=None)`** - Assert that `member not in container`
-
-```python
-from snektest import test
-from snektest.assertions import assert_not_in
-
-@test(mark="fast")
-def test_not_membership() -> None:
-    assert_not_in(5, [1, 2, 3])
-    assert_not_in("foo", "hello world")
-```
-
-### Type Checks
-
-**`assert_isinstance(obj, classinfo, *, msg=None)`** - Assert that `isinstance(obj, classinfo) is True`
-
-```python
-from snektest import test
-from snektest.assertions import assert_isinstance
-
-@test(mark="fast")
-def test_instance() -> None:
-    assert_isinstance("hello", str)
-    assert_isinstance(42, int)
-    assert_isinstance([1, 2], list)
-    assert_isinstance(5, (int, float))
-```
-
-**`assert_not_isinstance(obj, classinfo, *, msg=None)`** - Assert that `isinstance(obj, classinfo) is False`
-
-```python
-from snektest import test
-from snektest.assertions import assert_not_isinstance
-
-@test(mark="fast")
-def test_not_instance() -> None:
-    assert_not_isinstance("hello", int)
-    assert_not_isinstance(42, str)
-```
-
-### Length
-
-**`assert_len(obj, expected_length, *, msg=None)`** - Assert that `len(obj) == expected_length`
-
-```python
-from snektest import test
-from snektest.assertions import assert_len
-
-@test(mark="fast")
-def test_length() -> None:
-    assert_len([1, 2, 3], 3)
-    assert_len("hello", 5)
-    assert_len({"a": 1, "b": 2}, 2)
-```
+- `assert_eq(actual, expected)` — assert that `actual == expected`
+- `assert_ne(actual, expected)` — assert that `actual != expected`
+- `assert_true(value)` — assert that `value is True`
+- `assert_false(value)` — assert that `value is False`
+- `assert_is_none(value)` — assert that `value is None`
+- `assert_is_not_none(value)` — assert that `value is not None`
+- `assert_is(actual, expected)` — assert that `actual is expected`
+- `assert_is_not(actual, expected)` — assert that `actual is not expected`
+- `assert_lt(actual, expected)` — assert that `actual < expected`
+- `assert_gt(actual, expected)` — assert that `actual > expected`
+- `assert_le(actual, expected)` — assert that `actual <= expected`
+- `assert_ge(actual, expected)` — assert that `actual >= expected`
+- `assert_in(member, container)` — assert that `member in container`
+- `assert_not_in(member, container)` — assert that `member not in container`
+- `assert_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is true; `classinfo` may be a tuple of types
+- `assert_not_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is false
+- `assert_len(obj, expected_length)` — assert that `len(obj) == expected_length`
 
 ### Exception Assertions
 
@@ -612,18 +425,18 @@ def test_length() -> None:
 Use as a context manager to verify that a specific exception is raised:
 
 ```python
-from snektest import test, assert_raises, assert_eq
+from snektest import assert_eq, assert_raises, test
 
 @test(mark="fast")
 def test_division_by_zero() -> None:
     with assert_raises(ZeroDivisionError):
-        1 / 0
+        _ = 1 / 0
 
 @test(mark="fast")
 def test_multiple_exception_types() -> None:
     # Can accept multiple exception types
     with assert_raises(ValueError, TypeError):
-        int("not a number")
+        _ = int("not a number")
 
 @test(mark="fast")
 def test_access_exception() -> None:
@@ -639,7 +452,7 @@ def test_access_exception() -> None:
 **`fail(msg=None)`** - Raise an AssertionFailure unconditionally
 
 ```python
-from snektest import test, fail
+from snektest import fail, test
 
 @test(mark="fast")
 def test_unreachable() -> None:

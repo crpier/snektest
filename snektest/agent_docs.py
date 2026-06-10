@@ -38,6 +38,10 @@ snektest examples
 snektest example async
 ```
 
+## Type checking is part of the contract
+
+Run a strict static type checker (e.g. `pyright`) over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
+
 ## Core patterns
 
 - Import assertions from `snektest`; prefer `assert_eq()` over bare `assert`.
@@ -56,6 +60,7 @@ snektest example async
 - Session fixtures must be zero-argument; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
+- Tests run sequentially on a single shared event loop; avoid import-time side effects in test modules, and do not leave unawaited background tasks behind.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 

@@ -54,7 +54,7 @@ This project uses `uv` for dependency management. The project requires Python >=
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
 2. **Producer-Consumer Pattern**:
    - Producer thread (`load_tests_from_filters`) walks filesystem, imports test modules, adds tests to async queue
-   - Consumer coroutine (`run_tests`) executes tests from queue concurrently
+   - Consumer coroutine (`run_tests`) awaits tests from the queue one at a time, on a single event loop, while collection continues in the producer thread
 3. **Test Discovery** (`load_tests_from_file`): Import modules, find functions decorated with `@test()`, expand parameterized tests
 4. **Test Execution** (`execute_test`): Capture stdout/stderr, execute test function (sync or async), teardown function fixtures, return `TestResult`
 
@@ -100,6 +100,21 @@ Notable exceptions to pyright rules:
 - `reportIncompatibleVariableOverride = false`: Allow subclasses to override with different types
 - `reportMissingSuperCall = false`: Don't require calling parent methods
 - `reportImplicitOverride = false`: Don't require explicit `@override` decorator
+
+## Documentation Surfaces
+
+User-facing guidance lives in four places that must stay in sync. When changing
+public behavior or recommendations, update all of them in the same change:
+
+1. `README.md` — user docs
+2. `snektest/agent_docs.py` (`AGENT_DOCS`) — embedded guide printed by `--agent-docs`
+3. `snektest/examples/*.py` — bundled examples printed by `--example <name>`
+4. This file (`AGENTS.md`) — contributor/architecture docs
+
+Rules of thumb:
+- The canonical import style in all examples is top-level: `from snektest import assert_eq, test`.
+- Never hand-write sample test output in `README.md`; run the example with `uv run snektest` and paste the actual output.
+- Code blocks in docs must type-check under this repo's pyright config and run as written.
 
 ### Code Style Notes
 
