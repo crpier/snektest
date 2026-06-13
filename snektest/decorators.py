@@ -66,29 +66,9 @@ def _normalize_markers(mark: object | None) -> tuple[str, ...]:
     raise TypeError(msg)
 
 
-@overload
 def test(
     *params: list[Param[Any]],
     mark: Marker | None = None,
-) -> Callable[
-    [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
-    Callable[[*tuple[Any, ...]], Coroutine[None] | None],
-]: ...
-
-
-@overload
-def test(
-    *params: list[Param[Any]],
-    mark: object | None = None,
-) -> Callable[
-    [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
-    Callable[[*tuple[Any, ...]], Coroutine[None] | None],
-]: ...
-
-
-def test(
-    *params: list[Param[Any]],
-    mark: object | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],

@@ -98,13 +98,6 @@ def test(
     [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
 ]: ...
 @overload
-def test(
-    *params: list[Param[Any]],
-    mark: object | None = None,
-) -> Callable[
-    [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
-]: ...
-@overload
 def load_fixture[R](
     fixture_gen: Fixture[R] | SessionFixture[R],
 ) -> R: ...
