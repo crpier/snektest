@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from rich.console import Console
+from rich.text import Text
 
 from snektest.models import (
     AssertionFailure,
@@ -48,6 +49,48 @@ def _print_optional_output(console: Console, *, title: str, output: str | None) 
     console.print(output, markup=False, highlight=False)
 
 
+def _print_result_heading(
+    console: Console,
+    *,
+    result: TestResult,
+    status: str,
+    style: str,
+) -> None:
+    """Print test names like progress output so they remain copy-pasteable."""
+    console.print(
+        Text.assemble(
+            str(result.name),
+            " ... ",
+            (f"{status} ({result.duration:.2f}s)", style),
+        ),
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+def _print_fixture_teardown_heading(
+    console: Console,
+    *,
+    result: TestResult,
+    teardown_failure: TeardownFailure,
+) -> None:
+    """Print fixture failure headings without Rich rule title truncation."""
+    console.print(
+        Text.assemble(
+            str(result.name),
+            " ... ",
+            (
+                f"FIXTURE TEARDOWN FAILED: {teardown_failure.fixture_name}",
+                "bold red",
+            ),
+        ),
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
 def _print_result_details(
     console: Console,
     *,
@@ -84,7 +127,12 @@ def _print_result_details(
 
 def _print_test_failures(console: Console, failures: list[TestResult]) -> None:
     for result in failures:
-        console.rule(f"{result.name}", style="bold red")
+        _print_result_heading(
+            console,
+            result=result,
+            status="FAIL",
+            style="bold red",
+        )
         failing_result = cast("FailedResult", result.result)
 
         _print_result_details(
@@ -92,11 +140,17 @@ def _print_test_failures(console: Console, failures: list[TestResult]) -> None:
             result=result,
             outcome=failing_result,
         )
+        console.print()
 
 
 def _print_test_errors(console: Console, errors: list[TestResult]) -> None:
     for result in errors:
-        console.rule(f"{result.name}", style="bold dark_orange")
+        _print_result_heading(
+            console,
+            result=result,
+            status="ERROR",
+            style="bold dark_orange",
+        )
         error_result = cast("ErrorResult", result.result)
 
         _print_result_details(
@@ -104,6 +158,7 @@ def _print_test_errors(console: Console, errors: list[TestResult]) -> None:
             result=result,
             outcome=error_result,
         )
+        console.print()
 
 
 def _print_fixture_teardown_failures(
@@ -111,9 +166,10 @@ def _print_fixture_teardown_failures(
 ) -> None:
     for result in fixture_teardown_failures:
         for teardown_failure in result.fixture_teardown_failures:
-            console.rule(
-                f"{result.name} - Fixture teardown: {teardown_failure.fixture_name}",
-                style="bold red",
+            _print_fixture_teardown_heading(
+                console,
+                result=result,
+                teardown_failure=teardown_failure,
             )
             render_traceback(
                 console,
@@ -121,6 +177,7 @@ def _print_fixture_teardown_failures(
                 teardown_failure.exc_value,
                 teardown_failure.traceback,
             )
+            console.print()
 
         _print_optional_output(
             console,
@@ -143,6 +200,7 @@ def _print_session_teardown_failures(
             teardown_failure.exc_value,
             teardown_failure.traceback,
         )
+        console.print()
 
 
 def print_failures(

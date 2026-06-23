@@ -67,6 +67,49 @@ def test_print_failures_includes_captured_and_fixture_teardown_output() -> None:
 
 
 @test()
+def test_print_failures_separates_multiple_failed_tests_with_blank_line() -> None:
+    console = Console(record=True)
+    first_traceback = _traceback_from_exception(RuntimeError("one"))
+    second_traceback = _traceback_from_exception(RuntimeError("two"))
+
+    first_result = TestResult(
+        name=TestName(file_path=Path("x.py"), func_name="first", params_part=""),
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError,
+            exc_value=RuntimeError("one"),
+            traceback=first_traceback,
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+    second_result = TestResult(
+        name=TestName(file_path=Path("x.py"), func_name="second", params_part=""),
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError,
+            exc_value=RuntimeError("two"),
+            traceback=second_traceback,
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_failures(console, [first_result, second_result])
+
+    assert_in(
+        "RuntimeError: one\n\nx.py::second ... FAIL (0.00s)",
+        console.export_text(),
+    )
+
+
+@test()
 def test_print_test_result_soft_wraps_long_names() -> None:
     console = Console(record=True, width=40)
     result = TestResult(
@@ -93,6 +136,62 @@ def test_print_test_result_soft_wraps_long_names() -> None:
     )
     assert_in("OK (0.00s)", text)
     assert text.count("\n") == 1
+
+
+@test()
+def test_print_failures_soft_wraps_long_names() -> None:
+    console = Console(record=True, width=40)
+    tb = _traceback_from_exception(RuntimeError("boom"))
+    result = TestResult(
+        name=TestName(
+            file_path=Path("test_example_wrapping.py"),
+            func_name="test_with_really_long_name_that_wont_fit_in_a_single_line",
+            params_part="",
+        ),
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError, exc_value=RuntimeError("boom"), traceback=tb
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_failures(console, [result])
+
+    text = console.export_text()
+    assert_in(str(result.name), text)
+    assert_in("FAIL (0.00s)", text)
+
+
+@test()
+def test_print_summary_soft_wraps_long_names() -> None:
+    console = Console(record=True, width=40)
+    tb = _traceback_from_exception(RuntimeError("boom"))
+    result = TestResult(
+        name=TestName(
+            file_path=Path("test_example_wrapping.py"),
+            func_name="test_with_really_long_name_that_wont_fit_in_a_single_line",
+            params_part="",
+        ),
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError, exc_value=RuntimeError("boom"), traceback=tb
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_summary(console, [result], 0.0, session_teardown_failures=[])
+
+    text = console.export_text()
+    assert_in(str(result.name), text)
+    assert_in("FAILED", text)
 
 
 @test()

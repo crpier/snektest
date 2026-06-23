@@ -23,6 +23,15 @@ class RunCounts:
     session_teardown_failed: int
 
 
+def _ellipsize_summary_detail(detail: str, max_width: int) -> str:
+    """Shorten only summary diagnostics, never the test name."""
+    if not detail or len(detail) <= max_width:
+        return detail
+    if max_width <= 1:
+        return "…"
+    return f"{detail[: max_width - 1]}…"
+
+
 def _print_summary_entry(
     console: Console,
     *,
@@ -31,7 +40,29 @@ def _print_summary_entry(
     details: str,
 ) -> None:
     line = Text.assemble((label, style), " ", details)
-    console.print(line, markup=False, no_wrap=True, overflow="ellipsis")
+    console.print(line, markup=False, soft_wrap=True)
+
+
+def _print_named_summary_entry(
+    console: Console,
+    *,
+    label: tuple[str, str],
+    test_name: str,
+    detail_prefix: str = "",
+    detail: str = "",
+) -> None:
+    label_text, label_style = label
+    available_detail_width = (
+        console.width - len(label_text) - 1 - len(test_name) - len(detail_prefix)
+    )
+    line = Text.assemble(
+        (label_text, label_style),
+        " ",
+        test_name,
+        detail_prefix,
+        _ellipsize_summary_detail(detail, available_detail_width),
+    )
+    console.print(line, markup=False, soft_wrap=True)
 
 
 def _summarize_exception(exc_value: BaseException) -> str:
@@ -63,12 +94,12 @@ def _print_test_failures(console: Console, test_results: list[TestResult]) -> No
     for result in test_results:
         if (failed_result := result.result) and isinstance(failed_result, FailedResult):
             error_msg = _summarize_exception(failed_result.exc_value)
-            details = f"{result.name} - {error_msg}" if error_msg else f"{result.name}"
-            _print_summary_entry(
+            _print_named_summary_entry(
                 console,
-                label="FAILED",
-                style="red",
-                details=details,
+                label=("FAILED", "red"),
+                test_name=str(result.name),
+                detail_prefix=" - " if error_msg else "",
+                detail=error_msg,
             )
 
 
@@ -77,12 +108,12 @@ def _print_test_errors(console: Console, test_results: list[TestResult]) -> None
     for result in test_results:
         if (error_result := result.result) and isinstance(error_result, ErrorResult):
             error_msg = _summarize_exception(error_result.exc_value)
-            details = f"{result.name} - {error_msg}" if error_msg else f"{result.name}"
-            _print_summary_entry(
+            _print_named_summary_entry(
                 console,
-                label="ERROR",
-                style="dark_orange",
-                details=details,
+                label=("ERROR", "dark_orange"),
+                test_name=str(result.name),
+                detail_prefix=" - " if error_msg else "",
+                detail=error_msg,
             )
 
 
@@ -93,11 +124,12 @@ def _print_fixture_teardown_failures(
     for result in test_results:
         for teardown_failure in result.fixture_teardown_failures:
             error_msg = _summarize_exception(teardown_failure.exc_value)
-            _print_summary_entry(
+            _print_named_summary_entry(
                 console,
-                label="FIXTURE TEARDOWN FAILED",
-                style="red",
-                details=f"{result.name} - {teardown_failure.fixture_name}: {error_msg}",
+                label=("FIXTURE TEARDOWN FAILED", "red"),
+                test_name=str(result.name),
+                detail_prefix=f" - {teardown_failure.fixture_name}: ",
+                detail=error_msg,
             )
 
 

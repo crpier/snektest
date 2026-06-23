@@ -64,11 +64,12 @@ def test_pdb_stops_on_failure() -> None:
         (Pdb)\u0020
         =================================== FAILURES ===================================
 
-        ─────────────── {test_file}::test_failure ───────────────
+        {test_file}::test_failure ... FAIL ({test_duration}s)
         Traceback (most recent call last):
           File "{test_file}", line 8, in test_failure
         {padded_line}
         E       1 != 2
+
         ─────────────────────────────────── SUMMARY ────────────────────────────────────
         FAILED {test_file}::test_failure - AssertionFailure: 1 !…
 
@@ -130,11 +131,12 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
         (Pdb)\u0020
         =================================== FAILURES ===================================
 
-        ───── {test_file}::test_fix - Fixture teardown: fix ─────
+        {test_file}::test_fix ... FIXTURE TEARDOWN FAILED: fix
         Traceback (most recent call last):
           File "{test_file}", line 7, in fix
         {padded_line}
         RuntimeError: fixture teardown failed
+
         ─────────────────────────────────── SUMMARY ────────────────────────────────────
         FIXTURE TEARDOWN FAILED {test_file}::test_fix - fix: Run…
 
