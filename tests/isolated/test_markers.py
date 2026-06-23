@@ -20,7 +20,7 @@ from snektest.utils import get_test_function_markers
 MarkerDecorator = Callable[[Any], Any]
 
 
-def _apply_markers(func: Callable[[], object | None], mark: object) -> None:
+def _apply_markers(func: Callable[[], object | None], mark: Any) -> None:
     marker_decorator = cast("MarkerDecorator", test(mark=mark))
     marker_decorator(func)
 

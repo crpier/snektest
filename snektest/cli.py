@@ -471,17 +471,17 @@ async def run_script(
 
 def main() -> None:
     """Main entry point for the CLI."""
-    async_runner = cast("Callable[[object], int]", asyncio.run)
+    async_runner = cast("Callable[[Coroutine[object, object, int]], int]", asyncio.run)
     sys.exit(main_inner(async_runner=async_runner))
 
 
 def main_inner(
     *,
-    async_runner: Callable[[object], int],
+    async_runner: Callable[[Coroutine[object, object, int]], int],
     argv: list[str] | None = None,
 ) -> int:
+    coroutine = run_script(argv)
     try:
-        coroutine = run_script(argv)
         return async_runner(coroutine)
     except CollectionError as e:
         formatted = "".join(traceback.format_exception(e)).rstrip()
@@ -499,6 +499,8 @@ def main_inner(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         return 1
+    finally:
+        coroutine.close()
 
 
 if __name__ == "__main__":

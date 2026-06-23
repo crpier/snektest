@@ -253,12 +253,12 @@ def test_main_runs_and_exits() -> None:
 
 
 @test()
-def test_run_module_main_invokes_cli() -> None:
+def test_run_path_main_invokes_cli() -> None:
     original_argv = list(sys.argv)
     try:
         sys.argv = ["snektest", "--nope"]
         with assert_raises(SystemExit):
-            _ = runpy.run_module("snektest.cli", run_name="__main__")
+            _ = runpy.run_path(str(Path("snektest/cli.py")), run_name="__main__")
     finally:
         sys.argv = original_argv
 
