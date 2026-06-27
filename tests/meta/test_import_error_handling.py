@@ -5,9 +5,37 @@ import sys
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.assertions import assert_in, assert_ne, assert_not_in, fail
+from snektest.assertions import assert_eq, assert_in, assert_ne, assert_not_in, fail
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file
+
+
+@test()
+def test_missing_explicit_test_name_exits_unsuccessfully() -> None:
+    tmp_dir = load_fixture(tmp_dir_fixture())
+
+    test_file = create_test_file(
+        tmp_dir,
+        dedent("""
+            from snektest import test
+
+            @test()
+            def test_one() -> None:
+                pass
+        """),
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "snektest.cli", f"{test_file}::aaa"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=0.5,
+    )
+
+    assert_eq(result.returncode, 2)
+    assert_in("No test named `aaa`", result.stdout)
+    assert_not_in("0 passed", result.stdout)
 
 
 @test()

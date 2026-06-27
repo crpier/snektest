@@ -35,11 +35,11 @@ def test_one() -> None:
         loop = asyncio.get_running_loop()
 
         queue: TestsQueue = TestsQueue()
-        load_tests_from_file(file_path, filter_item, queue, loop, mark=None)
+        _ = load_tests_from_file(file_path, filter_item, queue, loop, mark=None)
         _ = await asyncio.wait_for(queue.get(), timeout=1)
 
         queue2: TestsQueue = TestsQueue()
-        load_tests_from_file(file_path, filter_item, queue2, loop, mark=None)
+        _ = load_tests_from_file(file_path, filter_item, queue2, loop, mark=None)
         _ = await asyncio.wait_for(queue2.get(), timeout=1)
 
 
@@ -70,7 +70,7 @@ def test_other() -> None:
         loop = asyncio.get_running_loop()
 
         queue: TestsQueue = TestsQueue()
-        load_tests_from_file(
+        _ = load_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_other"),
             queue,
@@ -81,7 +81,7 @@ def test_other() -> None:
         assert_eq(test_case.name.func_name, "test_other")
 
         queue2: TestsQueue = TestsQueue()
-        load_tests_from_file(
+        _ = load_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_param[one]"),
             queue2,
@@ -93,7 +93,7 @@ def test_other() -> None:
         assert_eq(parametrized_case.param_values, (1,))
 
         queue2 = TestsQueue()
-        load_tests_from_file(
+        _ = load_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_param[does not match]"),
             queue2,
@@ -114,7 +114,7 @@ def test_load_tests_from_file_spec_loader_failure_raises_collection_error() -> N
         queue: TestsQueue = TestsQueue()
         loop = asyncio.new_event_loop()
         try:
-            load_tests_from_file(
+            _ = load_tests_from_file(
                 cast(
                     "PyFilePath",
                     TypeAdapter(PyFilePath).validate_python(Path(__file__)),

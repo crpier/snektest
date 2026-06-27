@@ -25,6 +25,9 @@ uv run snektest tests/integration/test_basic.py::test_no_params
 uv run snektest tests/integration/test_basic.py::test_1_params[ascii name]
 ```
 
+Explicit test-name and parameter-case filters are expected to error when the
+requested test or case does not exist.
+
 ### Type Checking & Linting
 ```bash
 # Type check

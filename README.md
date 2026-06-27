@@ -197,6 +197,7 @@ snektest tests/test_myfeature.py
 
 # Run specific test
 snektest tests/test_myfeature.py::test_something
+# If an explicit test name or parameter case is not found, snektest exits with an error.
 
 # Run tests with a marker
 snektest --mark fast

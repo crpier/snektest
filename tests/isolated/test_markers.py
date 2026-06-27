@@ -94,7 +94,7 @@ def test_unmarked() -> None:
         loop = asyncio.get_running_loop()
 
         queue: TestsQueue = TestsQueue()
-        load_tests_from_file(
+        _ = load_tests_from_file(
             file_path,
             filter_item,
             queue,
@@ -107,7 +107,7 @@ def test_unmarked() -> None:
         queue.shutdown()
 
         queue_empty: TestsQueue = TestsQueue()
-        load_tests_from_file(
+        _ = load_tests_from_file(
             file_path,
             filter_item,
             queue_empty,

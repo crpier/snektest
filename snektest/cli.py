@@ -484,8 +484,11 @@ def main_inner(
     try:
         return async_runner(coroutine)
     except CollectionError as e:
-        formatted = "".join(traceback.format_exception(e)).rstrip()
-        print_error(f"Collection error:\n{formatted}")
+        if e.__cause__ is None:
+            print_error(f"Collection error: {e}")
+        else:
+            formatted = "".join(traceback.format_exception(e)).rstrip()
+            print_error(f"Collection error:\n{formatted}")
         return 2
     except BadRequestError as e:
         print_error(f"Bad request error: {e}")

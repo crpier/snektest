@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
@@ -24,6 +25,14 @@ TEST_FILE_PREFIX = "test_"
 TestsQueue = asyncio.Queue[TestCase]
 
 
+@dataclass(frozen=True)
+class _CollectionMatchStats:
+    """Selector match details for one collected file."""
+
+    function_matched: bool
+    params_matched: bool
+
+
 def load_tests_from_file(  # noqa: PLR0913
     file_path: PyFilePath,
     filter_item: FilterItem,
@@ -32,7 +41,7 @@ def load_tests_from_file(  # noqa: PLR0913
     *,
     mark: str | None = None,
     spec_loader: Callable[..., object] = spec_from_file_location,
-) -> None:
+) -> _CollectionMatchStats:
     """Load and queue tests from a single Python file."""
     module_name = ".".join(file_path.with_suffix("").parts)
     if module_name in modules:
@@ -49,17 +58,28 @@ def load_tests_from_file(  # noqa: PLR0913
         modules[module_name] = module
         loader.exec_module(module)
 
-    runnable_functions = [func for _, func in getmembers(module, isfunction)]
-    runnable_functions = filter(is_test_function, runnable_functions)
-    if filter_item.function_name:
-        runnable_functions = filter(
-            lambda func: func.__name__ == filter_item.function_name, runnable_functions
-        )
+    test_functions = [
+        func for _, func in getmembers(module, isfunction) if is_test_function(func)
+    ]
+    if filter_item.function_name is None:
+        named_functions = test_functions
+    else:
+        named_functions = [
+            func
+            for func in test_functions
+            if func.__name__ == filter_item.function_name
+        ]
 
-    if mark is not None:
-        runnable_functions = filter(
-            lambda func: mark in get_test_function_markers(func), runnable_functions
-        )
+    params_matched = filter_item.params is None or any(
+        filter_item.params in get_test_function_params(func) for func in named_functions
+    )
+
+    if mark is None:
+        runnable_functions = named_functions
+    else:
+        runnable_functions = [
+            func for func in named_functions if mark in get_test_function_markers(func)
+        ]
 
     for func in runnable_functions:
         markers = get_test_function_markers(func)
@@ -76,6 +96,11 @@ def load_tests_from_file(  # noqa: PLR0913
                 param_values=tuple(param.value for param in params),
             )
             _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
+
+    return _CollectionMatchStats(
+        function_matched=filter_item.function_name is None or bool(named_functions),
+        params_matched=params_matched,
+    )
 
 
 def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
@@ -121,14 +146,30 @@ def load_tests_from_filters(
     try:
         for filter_item in filter_items:
             file_paths = generate_file_list(filter_item)
+            function_matched = filter_item.function_name is None
+            params_matched = filter_item.params is None
             for file_path in file_paths:
-                load_tests_from_file(
+                stats = load_tests_from_file(
                     file_path=file_path,
                     filter_item=filter_item,
                     queue=queue,
                     loop=loop,
                     mark=mark,
                 )
+                function_matched = function_matched or stats.function_matched
+                params_matched = params_matched or stats.params_matched
+            if filter_item.function_name is not None and not function_matched:
+                msg = (
+                    f"No test named `{filter_item.function_name}` found for "
+                    f"filter `{filter_item}`"
+                )
+                raise CollectionError(msg)  # noqa: TRY301
+            if filter_item.params is not None and not params_matched:
+                msg = (
+                    f"No parameterized case `{filter_item.params}` found for "
+                    f"filter `{filter_item}`"
+                )
+                raise CollectionError(msg)  # noqa: TRY301
     except BaseException as e:
         if exception_holder is not None:
             if isinstance(e, CollectionError):

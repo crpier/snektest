@@ -11,7 +11,7 @@ from io import StringIO
 from pathlib import Path
 from typing import cast
 
-from snektest import assert_eq, assert_raises, test
+from snektest import assert_eq, assert_in, assert_raises, test
 from snektest.cli import (
     main,
     main_inner,
@@ -154,6 +154,26 @@ async def test_run_script_returns_2_on_cancelled_error() -> None:
 async def test_run_tests_programmatic_rejects_unknown_marker() -> None:
     with assert_raises(BadRequestError):
         _ = await run_tests_programmatic([FilterItem(".")], mark="needs-s3")
+
+
+@test()
+async def test_run_tests_programmatic_rejects_missing_explicit_test_name() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_missing_explicit_name.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_one() -> None:
+    pass
+""".lstrip()
+        )
+
+        with assert_raises(CollectionError) as raised:
+            _ = await run_tests_programmatic([FilterItem(f"{test_file}::aaa")])
+
+    assert_in("No test named `aaa`", str(raised.exception))
 
 
 @test()
