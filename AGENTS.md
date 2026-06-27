@@ -63,14 +63,38 @@ This project uses `uv` for dependency management. The project requires Python >=
 
 ### Fixture System
 
-Two fixture scopes with generator-based setup/teardown:
+Fixtures are generator functions decorated with `@fixture`, annotated
+`Generator[T]` or `AsyncGenerator[T]`. Calling a decorated fixture returns a
+handle (`Fixture[T]` / `AsyncFixture[T]`, defined in `annotations.py`); pass it to
+`load_fixture()`. The handle carries the fixture's `scope`, a `key` (the
+decorated function), and a `make` callable, so scope is read directly off the
+decorator — no frame/annotation inspection. The handle is also a (async) context
+manager, so fixtures double as setup helpers in standalone scripts.
 
-- **Function fixtures**: Created via `load_fixture()` directly in tests. Annotate as `Fixture[T]` or `AsyncFixture[T]` for typed function scope. Stored in `_FUNCTION_FIXTURES` list. Torn down after each test in reverse order.
-- **Session fixtures**: Annotated as `SessionFixture[T]` or `AsyncSessionFixture[T]`, with no fixture decorator required. Registered in `_SESSION_FIXTURES` dict keyed by code object when `load_fixture()` inspects the fixture return annotation. Created on first `load_fixture()` call, reused across tests, torn down after all tests complete. Session fixtures must not accept parameters; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
+All fixture state and teardown is owned by a `FixtureRegistry` (`fixtures.py`),
+created fresh per run and reached ambiently through a `ContextVar` (set by
+`run_tests` via `use_registry`). `load_fixture` is a free function that reads the
+current registry — tests take no context parameter.
 
-Both use generators/async generators with yield for setup/teardown:
+- **Function fixtures** (`@fixture`): Set up on each `load_fixture()` call,
+  pushed onto the registry's function stack, torn down after each test in reverse
+  (first-in-last-out) order. May take arguments, passed at the call site.
+- **Session fixtures** (`@fixture(scope="session")`): Cached in the registry
+  keyed by the decorated function, created on first `load_fixture()` call, reused
+  across tests, torn down after all tests complete. Concurrent first-awaits of an
+  async session fixture share one setup coroutine. Session fixtures must not
+  accept parameters (enforced statically via the `@fixture(scope="session")`
+  overload and at load time by the registry); use function fixtures for
+  parameter-dependent setup, or return a factory/cache from a zero-argument
+  session fixture.
+
 ```python
-async def my_fixture() -> AsyncFixture[str]:
+from collections.abc import AsyncGenerator
+
+from snektest import fixture
+
+@fixture
+async def my_fixture() -> AsyncGenerator[str]:
     # setup
     yield "value"
     # teardown

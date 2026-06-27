@@ -17,8 +17,9 @@ def test_function_fixture_teardown_failure() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import Generator
-            from snektest import load_fixture, test
+            from snektest import fixture, load_fixture, test
 
+            @fixture
             def fixture_with_failing_teardown() -> Generator[None]:
                 yield None
                 msg = "failing teardown"
@@ -44,9 +45,12 @@ def test_session_fixture_teardown_failure() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import SessionFixture, load_fixture, test
+            from collections.abc import Generator
 
-            def session_fixture_with_failing_teardown() -> SessionFixture[None]:
+            from snektest import fixture, load_fixture, test
+
+            @fixture(scope="session")
+            def session_fixture_with_failing_teardown() -> Generator[None]:
                 yield None
                 msg = "failing teardown"
                 raise ValueError(msg)
@@ -72,8 +76,9 @@ def test_good_fixture_no_errors() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import Generator
-            from snektest import load_fixture, test
+            from snektest import fixture, load_fixture, test
 
+            @fixture
             def good_fixture() -> Generator[None]:
                 yield None
 

@@ -87,8 +87,9 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import load_fixture, test
+            from snektest import fixture, load_fixture, test
 
+            @fixture
             def fix():
                 value = "fixture value"
                 yield value
@@ -125,7 +126,7 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
     )
     expected_output = dedent(f"""
         {test_file}::test_fix ... OK ({test_duration}s)
-        > {test_file}(7)fix()
+        > {test_file}(8)fix()
         -> raise RuntimeError("fixture teardown failed")
         (Pdb) 'fixture value'
         (Pdb)\u0020
@@ -133,7 +134,7 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
 
         {test_file}::test_fix ... FIXTURE TEARDOWN FAILED: fix
         Traceback (most recent call last):
-          File "{test_file}", line 7, in fix
+          File "{test_file}", line 8, in fix
         {padded_line}
         RuntimeError: fixture teardown failed
 

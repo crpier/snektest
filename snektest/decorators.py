@@ -1,27 +1,21 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import Future
 from functools import wraps
-from inspect import Parameter, Signature, currentframe, iscoroutinefunction
+from inspect import (
+    Parameter,
+    Signature,
+    isasyncgenfunction,
+    iscoroutinefunction,
+)
 from typing import Any, Literal, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
-from snektest.annotations import (
-    AsyncFixture,
-    AsyncSessionFixture,
-    Coroutine,
-    Fixture,
-    SessionFixture,
-)
-from snektest.fixtures import (
-    is_session_fixture,
-    load_function_fixture,
-    load_session_fixture,
-    register_session_fixture_from_namespace,
-)
+from snektest.annotations import AsyncFixture, Coroutine, Fixture, Scope
+from snektest.fixtures import current_registry
 from snektest.models import Param
-from snektest.utils import get_code_from_generator, mark_test_function
+from snektest.utils import mark_test_function
 
 _given = cast("Any", given)
 
@@ -227,39 +221,89 @@ def test_hypothesis(
     return decorator
 
 
-@overload
-def load_fixture[R](
-    fixture_gen: Fixture[R] | SessionFixture[R],
-) -> R: ...
+class _FunctionDecorator(Protocol):
+    @overload
+    def __call__[**P, T](
+        self, func: Callable[P, Generator[T]]
+    ) -> Callable[P, Fixture[T]]: ...
+    @overload
+    def __call__[**P, T](
+        self, func: Callable[P, AsyncGenerator[T]]
+    ) -> Callable[P, AsyncFixture[T]]: ...
+
+
+class _SessionDecorator(Protocol):
+    @overload
+    def __call__[T](
+        self, func: Callable[[], Generator[T]]
+    ) -> Callable[[], Fixture[T]]: ...
+    @overload
+    def __call__[T](
+        self, func: Callable[[], AsyncGenerator[T]]
+    ) -> Callable[[], AsyncFixture[T]]: ...
 
 
 @overload
-def load_fixture[R](
-    fixture_gen: AsyncFixture[R] | AsyncSessionFixture[R],
-) -> Coroutine[R]: ...
+def fixture[**P, T](func: Callable[P, Generator[T]]) -> Callable[P, Fixture[T]]: ...
+@overload
+def fixture[**P, T](
+    func: Callable[P, AsyncGenerator[T]],
+) -> Callable[P, AsyncFixture[T]]: ...
+@overload
+def fixture(*, scope: Literal["session"]) -> _SessionDecorator: ...
+@overload
+def fixture(*, scope: Literal["function"] = ...) -> _FunctionDecorator: ...
+def fixture(
+    func: Callable[..., Generator[Any]]
+    | Callable[..., AsyncGenerator[Any]]
+    | None = None,
+    *,
+    scope: Scope = "function",
+) -> Any:
+    """Mark a generator function as a fixture.
+
+    `@fixture` (default) is function-scoped: set up and torn down for each test.
+    `@fixture(scope="session")` is set up once and reused; session fixtures cannot
+    take parameters. Calling a decorated fixture returns a handle to pass to
+    `load_fixture`, or to use directly as a context manager outside the runner.
+    """
+
+    def decorate(
+        f: Callable[..., Generator[Any]] | Callable[..., AsyncGenerator[Any]],
+    ) -> Callable[..., Fixture[Any] | AsyncFixture[Any]]:
+        is_async = isasyncgenfunction(f)
+        fixture_name = cast("str", getattr(f, "__name__", "fixture"))
+
+        @wraps(f)
+        def make_handle(*args: Any, **kwargs: Any) -> Fixture[Any] | AsyncFixture[Any]:
+            if is_async:
+                async_make = cast(
+                    "Callable[[], AsyncGenerator[Any]]", lambda: f(*args, **kwargs)
+                )
+                return AsyncFixture(
+                    make=async_make, scope=scope, key=f, name=fixture_name
+                )
+            sync_make = cast("Callable[[], Generator[Any]]", lambda: f(*args, **kwargs))
+            return Fixture(make=sync_make, scope=scope, key=f, name=fixture_name)
+
+        return make_handle
+
+    if func is not None:
+        return decorate(func)
+    return decorate
 
 
-def load_fixture[R](
-    fixture_gen: Fixture[R]
-    | AsyncFixture[R]
-    | SessionFixture[R]
-    | AsyncSessionFixture[R],
-) -> Coroutine[R] | R:
-    """Load a fixture from a generator.
-    When loading a fixture, `snektest` takes care to handle tearing down the
-    fixture after the test has finished."""
-    fixture_gen_code = get_code_from_generator(fixture_gen)
-    frame = currentframe()
-    caller_frame = frame.f_back if frame is not None else None
-    if caller_frame is not None:
-        register_session_fixture_from_namespace(
-            fixture_gen_code, caller_frame.f_globals
-        )
-        register_session_fixture_from_namespace(fixture_gen_code, caller_frame.f_locals)
-    del frame
-    del caller_frame
+@overload
+def load_fixture[R](fix: Fixture[R]) -> R: ...
+@overload
+def load_fixture[R](fix: AsyncFixture[R]) -> Coroutine[R]: ...
+def load_fixture[R](fix: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
+    """Load a fixture from its handle.
 
-    if is_session_fixture(fixture_gen_code):
-        return load_session_fixture(fixture_gen)
-
-    return load_function_fixture(fixture_gen)
+    The active run's `FixtureRegistry` sets it up, caches session fixtures, and
+    tears it down after the test (function scope) or after the run (session scope).
+    """
+    registry = current_registry()
+    if fix.scope == "session":
+        return registry.load_session(fix)
+    return registry.load_function(fix)

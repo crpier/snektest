@@ -131,7 +131,7 @@ async def test_run_script_prints_named_example() -> None:
         result = await run_script(["--example", "fixtures"])
 
     assert_eq(result, 0)
-    assert "AsyncSessionFixture" in buffer.getvalue()
+    assert '@fixture(scope="session")' in buffer.getvalue()
 
 
 @test()

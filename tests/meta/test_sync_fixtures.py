@@ -16,9 +16,12 @@ def test_sync_session_fixture() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import SessionFixture, load_fixture, test, assert_eq
+            from collections.abc import Generator
 
-            def fixture_for_session() -> SessionFixture[int]:
+            from snektest import fixture, load_fixture, test, assert_eq
+
+            @fixture(scope="session")
+            def fixture_for_session() -> Generator[int]:
                 print("session fixture started")
                 yield 10
                 print("session fixture ended")
@@ -48,9 +51,12 @@ def test_sync_session_fixture_rejects_parameters() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import SessionFixture, load_fixture, test
+            from collections.abc import Generator
 
-            def fixture_for_session(value: int) -> SessionFixture[int]:
+            from snektest import fixture, load_fixture, test
+
+            @fixture(scope="session")
+            def fixture_for_session(value: int) -> Generator[int]:
                 yield value
 
             @test()
@@ -78,8 +84,9 @@ def test_sync_function_fixture() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import Generator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
 
+            @fixture
             def simple_fixture() -> Generator[str]:
                 print("simple sync fixture started")
                 yield "some fixture"
@@ -167,9 +174,10 @@ def test_sync_fixture_with_params() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import Generator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
             from snektest.models import Param
 
+            @fixture
             def fixture_with_param(param1: str) -> Generator[str]:
                 yield param1
 
@@ -194,9 +202,10 @@ def test_sync_fixture_teardown() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import Generator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
             from snektest.models import Param
 
+            @fixture
             def fixture_with_teardown_and_param(param: str) -> Generator[str]:
                 print(f"setup: {param}")
                 yield param

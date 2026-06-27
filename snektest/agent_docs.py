@@ -54,9 +54,9 @@ Run a strict static type checker (e.g. `pyright`) over test code before running 
 - Use `mark="slow"` for tests that use network IO, subprocesses, or expensive external resources.
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`.
 - Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
-- Use generator fixtures with `load_fixture(fixture())`.
-- Annotate function fixtures as `Fixture[T]` or `AsyncFixture[T]`.
-- Annotate shared fixtures as `SessionFixture[T]` or `AsyncSessionFixture[T]`; snektest detects these return annotations when `load_fixture()` is called, with no fixture decorator required.
+- Define fixtures as generator functions decorated with `@fixture`, annotated `Generator[T]` or `AsyncGenerator[T]`. Load them with `load_fixture(fixture())` — call the decorated fixture and pass the returned handle.
+- `@fixture` (default) is function-scoped: set up and torn down for each test. `@fixture(scope="session")` is set up once and reused across the run.
+- Fixtures may take arguments; pass them at the call site, e.g. `load_fixture(make_user("Ada"))`. Calling a fixture twice gives two independent instances.
 - Session fixtures must be zero-argument; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.

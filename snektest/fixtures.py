@@ -1,79 +1,39 @@
-"""Fixture registration, caching, setup, and teardown state."""
+"""Fixture registry: per-run ownership of caching, setup, and teardown."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Generator, Mapping
+import sys
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from inspect import isasyncgen, isgenerator, signature
-from sys import modules
-from types import CodeType, FunctionType
-from typing import Any, cast, get_type_hints
+from types import TracebackType
+from typing import Any, cast
 
-from snektest.annotations import AsyncSessionFixture, Coroutine, SessionFixture
-from snektest.models import FixtureError, UnreachableError
-from snektest.utils import get_code_from_generator, get_func_name_from_generator
+from snektest.annotations import AsyncFixture, Coroutine, Fixture
+from snektest.models import (
+    BadRequestError,
+    FixtureError,
+    TeardownFailure,
+    UnreachableError,
+)
 
-_SESSION_FIXTURES: dict[
-    CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
-] = {}
-_FUNCTION_FIXTURES: list[AsyncGenerator[Any] | Generator[Any]] = []
-
-
-def _is_session_fixture_return_annotation(annotation: object) -> bool:
-    """Return whether an annotation marks a fixture as session-scoped."""
-    origin = getattr(annotation, "__origin__", annotation)
-    return origin in {SessionFixture, AsyncSessionFixture}
+type _SessionSlot = tuple[AsyncGenerator[Any] | Generator[Any] | None, object, str]
 
 
-def _is_session_fixture_function(function: FunctionType) -> bool:
-    """Return whether a function's return annotation marks a session fixture."""
-    try:
-        return_annotation = get_type_hints(function).get("return")
-    except Exception:
-        return False
-    return return_annotation is not None and _is_session_fixture_return_annotation(
-        return_annotation
-    )
-
-
-def _ensure_session_fixture_has_no_parameters(function: FunctionType) -> None:
+def _ensure_session_fixture_has_no_parameters(function: object, name: str) -> None:
     """Protect session fixture caching from call-argument-dependent values."""
-    parameters = signature(function).parameters
+    parameters = signature(cast("Callable[..., object]", function)).parameters
     if not parameters:
         return
 
     parameter_names = ", ".join(parameters)
+    qualname = cast("str", getattr(function, "__qualname__", name))
     msg = (
-        f"Session fixture {function.__qualname__} cannot accept parameters: {parameter_names}. "
+        f"Session fixture {qualname} cannot accept parameters: {parameter_names}. "
         "Session fixtures are cached once per fixture function; use a function fixture for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture."
     )
     raise FixtureError(msg)
-
-
-def register_session_fixture_from_namespace(
-    fixture_code: CodeType,
-    namespace: Mapping[str, object],
-) -> None:
-    """Register a matching session fixture function from a namespace."""
-    for value in namespace.values():
-        if not isinstance(value, FunctionType):
-            continue
-        if value.__code__ == fixture_code and _is_session_fixture_function(value):
-            _ensure_session_fixture_has_no_parameters(value)
-            register_session_fixture(fixture_code)
-            return
-
-
-def _register_session_fixtures_from_loaded_modules(fixture_code: CodeType) -> None:
-    """Register matching session fixture functions from already-loaded modules.
-
-    Generator objects expose their code object but not the function object that
-    created them. Searching loaded module globals lets `load_fixture` recover the
-    fixture function's return annotation without requiring a decorator.
-    """
-    for module in list(modules.values()):
-        register_session_fixture_from_namespace(fixture_code, vars(module))
-        if fixture_code in _SESSION_FIXTURES:
-            return
 
 
 @dataclass(frozen=True)
@@ -83,123 +43,158 @@ class _PendingAsyncSessionFixtureSetup:
     awaitable: Awaitable[Any]
 
 
-def _wrap_async_session_fixture_result[R](result: R) -> Coroutine[R]:
-    async def wrapper() -> R:
-        return result
-
-    return wrapper()
-
-
-def _create_async_session_fixture_setup[R](
-    fixture_code: CodeType,
-    gen: AsyncGenerator[R],
-) -> Coroutine[R]:
-    async def result_updater() -> R:
-        registered_gen, _ = _SESSION_FIXTURES[fixture_code]
-        if not isasyncgen(registered_gen):
-            msg = "This should not happen I think"
-            raise UnreachableError(msg)
-        result = await anext(registered_gen)
-        _SESSION_FIXTURES[fixture_code] = (registered_gen, result)
-        return result
-
-    awaitable: Awaitable[R]
+async def teardown_fixture(
+    fixture_name: str,
+    generator: object,
+    *,
+    exc_info_provider: Callable[
+        [], tuple[object | None, object | None, TracebackType | None]
+    ] = sys.exc_info,
+) -> TeardownFailure | None:
+    """Advance one fixture (sync or async) through teardown, capturing failure."""
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        awaitable = result_updater()
+        if isasyncgen(generator):
+            await anext(generator)
+        elif isgenerator(generator):
+            next(generator)
+    except StopAsyncIteration, StopIteration:
+        return None
+    except Exception:
+        exc_type, exc_value, traceback = exc_info_provider()
+        if exc_type is None or exc_value is None or traceback is None:
+            msg = "Invalid exception info gathered during teardown. This shouldn't be possible!"
+            raise UnreachableError(msg) from None
+        return TeardownFailure(
+            fixture_name=fixture_name,
+            exc_type=cast("type[BaseException]", exc_type),
+            exc_value=cast("BaseException", exc_value),
+            traceback=traceback,
+        )
     else:
-        awaitable = loop.create_task(result_updater())
-    _SESSION_FIXTURES[fixture_code] = (
-        gen,
-        _PendingAsyncSessionFixtureSetup(awaitable),
-    )
-    return cast("Coroutine[R]", awaitable)
+        msg = f"Incorrect fixture function {fixture_name} yielded more than once"
+        raise BadRequestError(msg)
 
 
-def register_session_fixture(
-    fixture_code: CodeType,
-) -> None:
-    """Register a session-scoped fixture."""
-    if fixture_code not in _SESSION_FIXTURES:
-        _SESSION_FIXTURES[fixture_code] = (None, None)
+class FixtureRegistry:
+    """Owns all fixture state and teardown for a single test run.
+
+    A fresh registry is created per run and reached ambiently through a
+    `ContextVar`. It caches session fixtures (keyed by the decorated function),
+    tracks active function fixtures for first-in-last-out teardown, and drives
+    the concurrent-first-await machinery for async session fixtures.
+    """
+
+    def __init__(self) -> None:
+        self._session: dict[object, _SessionSlot] = {}
+        self._function_stack: list[
+            tuple[str, AsyncGenerator[Any] | Generator[Any]]
+        ] = []
+
+    def load_function[R](
+        self, handle: Fixture[R] | AsyncFixture[R]
+    ) -> R | Coroutine[R]:
+        """Set up a function-scoped fixture and register it for teardown."""
+        if isinstance(handle, AsyncFixture):
+            agen = handle.make()
+            self._function_stack.append((handle.name, agen))
+            return cast("Coroutine[R]", agen.__anext__())
+        gen = handle.make()
+        self._function_stack.append((handle.name, gen))
+        return next(gen)
+
+    def load_session[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
+        """Set up a session-scoped fixture once and reuse it thereafter."""
+        if isinstance(handle, AsyncFixture):
+            return self._load_session_async(handle)
+        return self._load_session_sync(handle)
+
+    def _load_session_sync[R](self, handle: Fixture[R]) -> R:
+        slot = self._session.get(handle.key)
+        if slot is not None:
+            return cast("R", slot[1])
+        _ensure_session_fixture_has_no_parameters(handle.key, handle.name)
+        gen = handle.make()
+        value = next(gen)
+        self._session[handle.key] = (gen, value, handle.name)
+        return value
+
+    def _load_session_async[R](self, handle: AsyncFixture[R]) -> Coroutine[R]:
+        slot = self._session.get(handle.key)
+        if slot is None:
+            _ensure_session_fixture_has_no_parameters(handle.key, handle.name)
+            agen = handle.make()
+            return self._create_async_session_setup(handle.key, handle.name, agen)
+        cached = slot[1]
+        if isinstance(cached, _PendingAsyncSessionFixtureSetup):
+            return cast("Coroutine[R]", cached.awaitable)
+        return self._wrap_async_session_result(cast("R", cached))
+
+    def _create_async_session_setup[R](
+        self, key: object, name: str, agen: AsyncGenerator[R]
+    ) -> Coroutine[R]:
+        async def result_updater() -> R:
+            registered_gen = self._session[key][0]
+            if not isasyncgen(registered_gen):
+                msg = "Async session fixture setup lost its generator. This shouldn't be possible!"
+                raise UnreachableError(msg)
+            result = cast("R", await anext(registered_gen))
+            self._session[key] = (registered_gen, result, name)
+            return result
+
+        awaitable: Awaitable[R]
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            awaitable = result_updater()
+        else:
+            awaitable = loop.create_task(result_updater())
+        self._session[key] = (agen, _PendingAsyncSessionFixtureSetup(awaitable), name)
+        return cast("Coroutine[R]", awaitable)
+
+    def _wrap_async_session_result[R](self, result: R) -> Coroutine[R]:
+        async def wrapper() -> R:
+            return result
+
+        return wrapper()
+
+    async def teardown_function_fixtures(self) -> list[TeardownFailure]:
+        """Tear down active function fixtures in first-in-last-out order."""
+        failures: list[TeardownFailure] = []
+        for fixture_name, generator in reversed(self._function_stack):
+            failure = await teardown_fixture(fixture_name, generator)
+            if failure is not None:
+                failures.append(failure)
+        self._function_stack.clear()
+        return failures
+
+    async def teardown_session_fixtures(self) -> list[TeardownFailure]:
+        """Tear down session fixtures in reverse setup order."""
+        failures: list[TeardownFailure] = []
+        for generator, _result, name in reversed(list(self._session.values())):
+            if generator is not None:
+                failure = await teardown_fixture(name, generator)
+                if failure is not None:
+                    failures.append(failure)
+        return failures
 
 
-def get_registered_session_fixtures() -> dict[
-    CodeType, tuple[AsyncGenerator[Any] | Generator[Any] | None, object]
-]:
-    """Get all registered session fixtures."""
-    return _SESSION_FIXTURES
+_current_registry: ContextVar[FixtureRegistry] = ContextVar("snektest_fixture_registry")
 
 
-def reset_session_fixtures() -> None:
-    """Clear cached session fixtures for a fresh test run."""
-    _SESSION_FIXTURES.clear()
-
-
-def is_session_fixture(fixture_code: CodeType) -> bool:
-    """Check whether a fixture code object is session-scoped."""
-    if fixture_code not in _SESSION_FIXTURES:
-        _register_session_fixtures_from_loaded_modules(fixture_code)
-    return fixture_code in _SESSION_FIXTURES
-
-
-def load_session_fixture[R](
-    fixture_gen: AsyncGenerator[R] | Generator[R],
-) -> Coroutine[R] | R:
-    """Load a session-scoped fixture, creating it on first use and reusing thereafter."""
-    fixture_code = get_code_from_generator(fixture_gen)
+def current_registry() -> FixtureRegistry:
+    """Return the fixture registry for the current run."""
     try:
-        gen, cached_result = _SESSION_FIXTURES[fixture_code]
-    except KeyError:
-        msg = f"Function {fixture_code.co_qualname} was not registered as a session fixture. This shouldn't be possible!"
+        return _current_registry.get()
+    except LookupError:
+        msg = "No active fixture registry. `load_fixture` must be called during a snektest run."
         raise UnreachableError(msg) from None
 
-    if gen is None:
-        gen = fixture_gen
-        if isasyncgen(gen):
-            return _create_async_session_fixture_setup(fixture_code, gen)
-        if isgenerator(gen):
-            cached_result = next(gen)
-            _SESSION_FIXTURES[fixture_code] = (gen, cached_result)
-            return cached_result
-        msg = "Fixture must be a generator or async generator"
-        raise UnreachableError(msg)
 
-    if isinstance(cached_result, _PendingAsyncSessionFixtureSetup):
-        return cast("Coroutine[R]", cached_result.awaitable)
-    if isasyncgen(gen):
-        return _wrap_async_session_fixture_result(cast("R", cached_result))
-    return cast("R", cached_result)
-
-
-def load_function_fixture[R](
-    fixture_gen: AsyncGenerator[R] | Generator[R],
-) -> Coroutine[R] | R:
-    """Load a function-scoped fixture by registering and yielding its value."""
-    if isasyncgen(fixture_gen):
-        _FUNCTION_FIXTURES.append(fixture_gen)
-        return anext(fixture_gen)
-    if isgenerator(fixture_gen):
-        _FUNCTION_FIXTURES.append(fixture_gen)
-        return next(fixture_gen)
-    msg = "Fixture must be a generator or async generator"
-    raise UnreachableError(msg)
-
-
-def get_active_function_fixtures() -> list[
-    tuple[str, AsyncGenerator[Any] | Generator[Any]]
-]:
-    """Return the list of active function fixtures, as (function_name, generator) tuples.
-
-    Returns:
-        List of (fixture_name, generator) tuples in reverse order.
-    """
-    fixtures_to_teardown: list[tuple[str, AsyncGenerator[Any] | Generator[Any]]] = []
-    # Returning active fixtures in reverse order makes setup/teardown first-in-last-out
-    for generator in reversed(_FUNCTION_FIXTURES):
-        fixture_name = get_func_name_from_generator(generator)
-        fixtures_to_teardown.append((fixture_name, generator))
-
-    _FUNCTION_FIXTURES.clear()
-    return fixtures_to_teardown
+@contextmanager
+def use_registry(registry: FixtureRegistry) -> Generator[FixtureRegistry]:
+    """Bind a fixture registry for the duration of a run."""
+    token = _current_registry.set(registry)
+    try:
+        yield registry
+    finally:
+        _current_registry.reset(token)

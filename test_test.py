@@ -1,32 +1,28 @@
-"""Scratch test showing fixture return type aliases."""
+"""Scratch test showing fixture handle typing through load_fixture."""
 
-from collections.abc import Coroutine
+from collections.abc import AsyncGenerator, Coroutine, Generator
 from typing import assert_type
 
-from snektest import (
-    AsyncFixture,
-    AsyncSessionFixture,
-    Fixture,
-    SessionFixture,
-    assert_eq,
-    load_fixture,
-    test,
-)
+from snektest import assert_eq, fixture, load_fixture, test
 
 
-def provide_number() -> Fixture[int]:
+@fixture
+def provide_number() -> Generator[int]:
     yield 1
 
 
-async def provide_word() -> AsyncFixture[str]:
+@fixture
+async def provide_word() -> AsyncGenerator[str]:
     yield "word"
 
 
-def provide_session_number() -> SessionFixture[int]:
+@fixture(scope="session")
+def provide_session_number() -> Generator[int]:
     yield 2
 
 
-async def provide_async_session_word() -> AsyncSessionFixture[str]:
+@fixture(scope="session")
+async def provide_async_session_word() -> AsyncGenerator[str]:
     yield "session word"
 
 
