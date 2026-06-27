@@ -109,6 +109,7 @@ fixture later in a test when delayed fixture loading is the behavior being teste
 
 Get helpful error messages with custom assertions:
 
+<!-- snektest-doc: expect-fail -->
 ```python
 from snektest import assert_eq, test
 
@@ -128,6 +129,7 @@ E       + {'age': 30, 'name': 'alice'}
 E       ?                      ^^^^^
 ```
 
+<!-- snektest-doc: expect-fail -->
 ```python
 from snektest import assert_in, test
 
@@ -362,6 +364,7 @@ async def test_list_operations(numbers: list[int]) -> None:
 
 The decorator provides full type safety - strategy types are checked against function parameters:
 
+<!-- snektest-doc: expect-type-error, skip-run -->
 ```python
 from hypothesis import strategies as st
 from snektest import test_hypothesis
@@ -466,6 +469,7 @@ def test_access_exception() -> None:
 
 **`fail(msg=None)`** - Raise an AssertionFailure unconditionally
 
+<!-- snektest-doc: expect-fail -->
 ```python
 from snektest import fail, test
 
