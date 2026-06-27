@@ -13,6 +13,7 @@ from typing import cast
 
 from snektest import assert_eq, assert_in, assert_raises, test
 from snektest.cli import (
+    ParseError,
     main,
     main_inner,
     parse_cli_args,
@@ -31,18 +32,18 @@ from snektest.models import (
 
 
 @test()
-def test_parse_cli_args_invalid_option_returns_2() -> None:
+def test_parse_cli_args_invalid_option_returns_error() -> None:
     result = parse_cli_args(["--nope"])
-    assert_eq(result, 2)
+    assert isinstance(result, ParseError)
+    assert_in("Invalid option", result.message)
 
 
 @test()
 def test_parse_cli_args_defaults_to_dot() -> None:
-    parsed = parse_cli_args([])
-    assert not isinstance(parsed, int)
+    options = parse_cli_args([])
+    assert not isinstance(options, ParseError)
 
-    potential_filter, options = parsed
-    assert_eq(potential_filter, ["."])
+    assert_eq(options.filters, (".",))
     assert_eq(options.action, None)
     assert_eq(options.capture_output, True)
     assert_eq(options.json_output, False)
@@ -52,33 +53,44 @@ def test_parse_cli_args_defaults_to_dot() -> None:
 
 @test()
 def test_parse_cli_args_s_flag_disables_capture() -> None:
-    parsed = parse_cli_args(["-s", "."])
-    assert not isinstance(parsed, int)
+    options = parse_cli_args(["-s", "."])
+    assert not isinstance(options, ParseError)
 
-    _potential_filter, options = parsed
     assert_eq(options.capture_output, False)
     assert_eq(options.mark, None)
 
 
 @test()
 def test_parse_cli_args_agent_docs_action() -> None:
-    parsed = parse_cli_args(["--agent-docs"])
-    assert not isinstance(parsed, int)
+    options = parse_cli_args(["--agent-docs"])
+    assert not isinstance(options, ParseError)
 
-    potential_filter, options = parsed
-    assert_eq(potential_filter, [])
+    assert_eq(options.filters, ())
     assert_eq(options.action, "agent_docs")
 
 
 @test()
 def test_parse_cli_args_example_command_action() -> None:
-    parsed = parse_cli_args(["example", "async"])
-    assert not isinstance(parsed, int)
+    options = parse_cli_args(["example", "async"])
+    assert not isinstance(options, ParseError)
 
-    potential_filter, options = parsed
-    assert_eq(potential_filter, [])
+    assert_eq(options.filters, ())
     assert_eq(options.action, "show_example")
     assert_eq(options.example_name, "async")
+
+
+@test()
+def test_parse_cli_args_duplicate_action_returns_error() -> None:
+    result = parse_cli_args(["--help", "--examples"])
+    assert isinstance(result, ParseError)
+    assert_in("Only one help/docs/examples", result.message)
+
+
+@test()
+def test_parse_cli_args_action_with_filter_returns_error() -> None:
+    result = parse_cli_args(["--help", "."])
+    assert isinstance(result, ParseError)
+    assert_in("Cannot combine", result.message)
 
 
 @test()

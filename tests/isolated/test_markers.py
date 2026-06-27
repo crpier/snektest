@@ -10,9 +10,9 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter
 
-from snektest import assert_eq, assert_raises, test
+from snektest import assert_eq, assert_in, assert_raises, test
 from snektest.annotations import PyFilePath
-from snektest.cli import TestRunSummary, build_json_summary, parse_cli_args
+from snektest.cli import ParseError, TestRunSummary, build_json_summary, parse_cli_args
 from snektest.collection import TestsQueue, load_tests_from_file
 from snektest.models import FilterItem, PassedResult, TestName, TestResult
 from snektest.utils import get_test_function_markers
@@ -121,35 +121,38 @@ def test_unmarked() -> None:
 
 @test()
 def test_parse_cli_args_mark_option() -> None:
-    parsed = parse_cli_args(["--mark", "fast", "."])
-    assert not isinstance(parsed, int)
+    options = parse_cli_args(["--mark", "fast", "."])
+    assert not isinstance(options, ParseError)
 
-    _potential_filter, options = parsed
     assert_eq(options.mark, "fast")
 
 
 @test()
 def test_parse_cli_args_mark_missing_value() -> None:
     result = parse_cli_args(["--mark"])
-    assert_eq(result, 2)
+    assert isinstance(result, ParseError)
+    assert_in("Missing value for --mark", result.message)
 
 
 @test()
 def test_parse_cli_args_mark_only_once() -> None:
     result = parse_cli_args(["--mark", "fast", "--mark", "slow"])
-    assert_eq(result, 2)
+    assert isinstance(result, ParseError)
+    assert_in("Only one --mark value", result.message)
 
 
 @test()
 def test_parse_cli_args_mark_rejects_option_value() -> None:
     result = parse_cli_args(["--mark", "--pdb"])
-    assert_eq(result, 2)
+    assert isinstance(result, ParseError)
+    assert_in("Missing value for --mark", result.message)
 
 
 @test()
 def test_parse_cli_args_mark_rejects_unknown_marker() -> None:
     result = parse_cli_args(["--mark", "needs-s3"])
-    assert_eq(result, 2)
+    assert isinstance(result, ParseError)
+    assert_in("Invalid --mark value", result.message)
 
 
 @test()
