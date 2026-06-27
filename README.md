@@ -26,9 +26,12 @@ must not accept parameters).
 Create a `test_*.py` file. The recommended style is to mark every test with the resources it may use:
 
 ```python
-from snektest import AsyncFixture, assert_eq, load_fixture, test
+from collections.abc import AsyncGenerator
 
-async def provide_number() -> AsyncFixture[int]:
+from snektest import assert_eq, fixture, load_fixture, test
+
+@fixture
+async def provide_number() -> AsyncGenerator[int]:
     yield 2
 
 @test(mark="fast")
@@ -59,20 +62,26 @@ snektest --mark fast
 
 ### Fixtures
 
-Annotate regular function fixtures as `Fixture[T]` or `AsyncFixture[T]`.
-Annotate shared session fixtures as `SessionFixture[T]` or
-`AsyncSessionFixture[T]`; snektest detects these return annotations when
-`load_fixture()` is called, with no fixture decorator required. Session fixtures
-must not accept parameters because they are cached once per fixture function. Use
-a function fixture for parameter-dependent setup, or have a zero-argument session
-fixture return a factory/cache.
+Define fixtures as generator functions decorated with `@fixture`, annotated
+`Generator[T]` or `AsyncGenerator[T]`. `@fixture` (the default) is
+function-scoped: set up and torn down for each test. `@fixture(scope="session")`
+is set up once and reused across the run. Calling a decorated fixture returns a
+handle; pass it to `load_fixture()`. Fixtures may take arguments, passed at the
+call site (e.g. `load_fixture(make_user("Ada"))`), and calling one twice yields
+two independent instances. Session fixtures must not accept parameters because
+they are cached once per fixture function. Use a function fixture for
+parameter-dependent setup, or have a zero-argument session fixture return a
+factory/cache.
 
 Set up and tear down test dependencies with session-scoped fixtures:
 
 ```python
-from snektest import AsyncSessionFixture, assert_eq, load_fixture, test
+from collections.abc import AsyncGenerator
 
-async def connection_pool() -> AsyncSessionFixture[dict[str, str]]:
+from snektest import assert_eq, fixture, load_fixture, test
+
+@fixture(scope="session")
+async def connection_pool() -> AsyncGenerator[dict[str, str]]:
     # Setup: runs once for all tests
     pool = {"host": "localhost", "status": "connected"}
     yield pool
@@ -85,6 +94,11 @@ async def test_connection() -> None:
 
     assert_eq(pool["status"], "connected")
 ```
+
+A fixture handle is also a context manager, so fixtures double as setup helpers
+in standalone scripts (no runner needed): `with user_fixture() as user: ...` or
+`async with connection_pool() as pool: ...`. In standalone use there is no
+runner, so scope is ignored and each block does its own setup and teardown.
 
 Load fixtures at the beginning of each test, before actions or assertions. This
 keeps fixture setup unconditional, makes teardown ownership obvious, and avoids

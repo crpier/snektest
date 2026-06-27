@@ -1,6 +1,4 @@
-from collections.abc import AsyncGenerator, Callable, Generator
-from inspect import isasyncgen
-from types import CodeType
+from collections.abc import Callable
 from typing import Any
 
 from snektest.models import Param
@@ -38,21 +36,3 @@ def get_test_function_params(
 def get_test_function_markers(func: Callable[..., Any]) -> tuple[str, ...]:
     """Get the markers tuple for a test function."""
     return getattr(func, MARKERS_ATTR_NAME, ())
-
-
-def get_code_from_generator(
-    generator: AsyncGenerator[Any] | Generator[Any],
-) -> CodeType:
-    """Get the code object from a generator."""
-    return generator.ag_code if isasyncgen(generator) else generator.gi_code  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
-
-
-def get_func_name_from_generator(
-    generator: AsyncGenerator[Any] | Generator[Any],
-) -> str:
-    """Get the code object from a generator."""
-    return (
-        generator.ag_code.co_name
-        if isasyncgen(generator)
-        else generator.gi_code.co_name  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
-    )

@@ -5,20 +5,15 @@ import pdb  # noqa: T100
 import sys
 import time
 from collections.abc import Callable
-from inspect import isasyncgen, iscoroutine, isgenerator
+from inspect import iscoroutine
 from pathlib import Path
 from types import TracebackType
 from typing import cast
 
 from snektest.collection import TestsQueue
-from snektest.fixtures import (
-    get_active_function_fixtures,
-    get_registered_session_fixtures,
-    reset_session_fixtures,
-)
+from snektest.fixtures import FixtureRegistry, current_registry, use_registry
 from snektest.models import (
     AssertionFailure,
-    BadRequestError,
     ErrorResult,
     FailedResult,
     PassedResult,
@@ -29,38 +24,6 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
-
-
-async def teardown_fixture(
-    fixture_name: str,
-    generator: object,
-    *,
-    exc_info_provider: Callable[
-        [], tuple[object | None, object | None, TracebackType | None]
-    ] = sys.exc_info,
-) -> TeardownFailure | None:
-    """Teardown a single fixture and return failure if it occurs."""
-    try:
-        if isasyncgen(generator):
-            await anext(generator)
-        elif isgenerator(generator):
-            next(generator)
-    except StopAsyncIteration, StopIteration:
-        return None
-    except Exception:
-        exc_type, exc_value, traceback = exc_info_provider()
-        if exc_type is None or exc_value is None or traceback is None:
-            msg = "Invalid exception info gathered during teardown. This shouldn't be possible!"
-            raise UnreachableError(msg) from None
-        return TeardownFailure(
-            fixture_name=fixture_name,
-            exc_type=cast("type[BaseException]", exc_type),
-            exc_value=cast("BaseException", exc_value),
-            traceback=traceback,
-        )
-    else:
-        msg = f"Incorrect fixture function {fixture_name} yielded more than once"
-        raise BadRequestError(msg)
 
 
 async def execute_test(
@@ -107,11 +70,9 @@ async def execute_test(
         fixture_teardown_buffer,
         _,
     ):
-        fixture_teardown_failures: list[TeardownFailure] = []
-        for fixture_name, generator in get_active_function_fixtures():
-            failure = await teardown_fixture(fixture_name, generator)
-            if failure:
-                fixture_teardown_failures.append(failure)
+        fixture_teardown_failures = (
+            await current_registry().teardown_function_fixtures()
+        )
 
     fixture_teardown_output_value = fixture_teardown_buffer.getvalue() or None
 
@@ -132,15 +93,7 @@ async def teardown_session_fixtures(
 ) -> tuple[list[TeardownFailure], str | None]:
     """Teardown all session fixtures and return failures and output."""
     with maybe_capture_output(capture_output) as (teardown_output, _):
-        session_teardown_failures: list[TeardownFailure] = []
-        for fixture_func, (gen, _) in reversed(
-            get_registered_session_fixtures().items()
-        ):
-            if gen is not None:
-                fixture_name = fixture_func.co_name
-                failure = await teardown_fixture(fixture_name, gen)
-                if failure:
-                    session_teardown_failures.append(failure)
+        session_teardown_failures = await current_registry().teardown_session_fixtures()
 
     output_value = teardown_output.getvalue() or None
     return session_teardown_failures, output_value
@@ -284,55 +237,56 @@ async def run_tests(  # noqa: PLR0913
     test_results: list[TestResult] = []
     session_teardown_failures: list[TeardownFailure] = []
     pdb_triggered = False
-    try:
-        while True:
-            test_case = await queue.get()
-            test_result = await execute_test(test_case, capture_output=capture_output)
-            test_results.append(test_result)
-            reporter.test_finished(test_result)
-            if not pdb_triggered and _maybe_debug_test_result(
-                test_result,
-                pdb_on_failure=pdb_on_failure,
-                post_mortem=post_mortem,
-                resolver=resolver,
-            ):
-                pdb_triggered = True
-                break
-    except asyncio.QueueShutDown:
-        pass
-    finally:
-        if collection_failed():
-            reset_session_fixtures()
-        else:
-            session_teardown_failures, session_output = await teardown_session_fixtures(
-                capture_output=capture_output
-            )
-            if not pdb_triggered and _maybe_debug_session_teardown(
-                session_teardown_failures,
-                pdb_on_failure=pdb_on_failure,
-                post_mortem=post_mortem,
-            ):
-                pdb_triggered = True
+    with use_registry(FixtureRegistry()):
+        try:
+            while True:
+                test_case = await queue.get()
+                test_result = await execute_test(
+                    test_case, capture_output=capture_output
+                )
+                test_results.append(test_result)
+                reporter.test_finished(test_result)
+                if not pdb_triggered and _maybe_debug_test_result(
+                    test_result,
+                    pdb_on_failure=pdb_on_failure,
+                    post_mortem=post_mortem,
+                    resolver=resolver,
+                ):
+                    pdb_triggered = True
+                    break
+        except asyncio.QueueShutDown:
+            pass
+        finally:
+            if not collection_failed():
+                (
+                    session_teardown_failures,
+                    session_output,
+                ) = await teardown_session_fixtures(capture_output=capture_output)
+                if not pdb_triggered and _maybe_debug_session_teardown(
+                    session_teardown_failures,
+                    pdb_on_failure=pdb_on_failure,
+                    post_mortem=post_mortem,
+                ):
+                    pdb_triggered = True
 
-            (
-                has_test_failures,
-                has_fixture_teardown_failures,
-                has_session_teardown_failures,
-            ) = has_any_failures(test_results, session_teardown_failures)
+                (
+                    has_test_failures,
+                    has_fixture_teardown_failures,
+                    has_session_teardown_failures,
+                ) = has_any_failures(test_results, session_teardown_failures)
 
-            session_output_for_display = None
-            if session_output and (
-                has_test_failures
-                or has_fixture_teardown_failures
-                or has_session_teardown_failures
-            ):
-                session_output_for_display = session_output
+                session_output_for_display = None
+                if session_output and (
+                    has_test_failures
+                    or has_fixture_teardown_failures
+                    or has_session_teardown_failures
+                ):
+                    session_output_for_display = session_output
 
-            reporter.run_finished(
-                test_results=test_results,
-                session_teardown_failures=session_teardown_failures,
-                session_teardown_output=session_output_for_display,
-                total_duration=time.monotonic() - total_duration,
-            )
-            reset_session_fixtures()
+                reporter.run_finished(
+                    test_results=test_results,
+                    session_teardown_failures=session_teardown_failures,
+                    session_teardown_output=session_output_for_display,
+                    total_duration=time.monotonic() - total_duration,
+                )
     return test_results, session_teardown_failures

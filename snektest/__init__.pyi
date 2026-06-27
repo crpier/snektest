@@ -3,10 +3,8 @@ from typing import Any, overload
 
 from snektest.annotations import (
     AsyncFixture,
-    AsyncSessionFixture,
     Coroutine,
     Fixture,
-    SessionFixture,
 )
 from snektest.assertions import (
     assert_eq,
@@ -30,17 +28,17 @@ from snektest.assertions import (
     fail,
 )
 from snektest.decorators import Marker, SearchStrategy
+from snektest.decorators import fixture as fixture
+from snektest.decorators import load_fixture as load_fixture
 from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
 
 __all__ = [
     "AsyncFixture",
-    "AsyncSessionFixture",
     "Fixture",
     "Marker",
     "Param",
     "Scope",
-    "SessionFixture",
     "UnreachableError",
     "assert_eq",
     "assert_false",
@@ -61,6 +59,7 @@ __all__ = [
     "assert_raises",
     "assert_true",
     "fail",
+    "fixture",
     "load_fixture",
     "test",
     "test_hypothesis",
@@ -97,14 +96,6 @@ def test(
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
 ]: ...
-@overload
-def load_fixture[R](
-    fixture_gen: Fixture[R] | SessionFixture[R],
-) -> R: ...
-@overload
-def load_fixture[R](
-    fixture_gen: AsyncFixture[R] | AsyncSessionFixture[R],
-) -> Coroutine[R]: ...
 @overload
 def test_hypothesis[T1](
     strategy1: SearchStrategy[T1],

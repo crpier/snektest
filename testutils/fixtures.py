@@ -1,12 +1,14 @@
 """Shared fixtures for snektest's test suite."""
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 
-from snektest import SessionFixture
+from snektest import fixture
 
 
-def tmp_dir_fixture() -> SessionFixture[Path]:
+@fixture(scope="session")
+def tmp_dir_fixture() -> Generator[Path]:
     """Fixture that provides a temporary directory for tests.
 
     Yields:

@@ -16,9 +16,12 @@ def test_async_session_fixture() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import AsyncSessionFixture, load_fixture, test, assert_eq
+            from collections.abc import AsyncGenerator
 
-            async def fixture_for_session() -> AsyncSessionFixture[int]:
+            from snektest import fixture, load_fixture, test, assert_eq
+
+            @fixture(scope="session")
+            async def fixture_for_session() -> AsyncGenerator[int]:
                 print("session fixture started")
                 yield 10
                 print("session fixture ended")
@@ -48,9 +51,12 @@ def test_async_session_fixture_rejects_parameters() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent("""
-            from snektest import AsyncSessionFixture, load_fixture, test
+            from collections.abc import AsyncGenerator
 
-            async def fixture_for_session(value: int) -> AsyncSessionFixture[int]:
+            from snektest import fixture, load_fixture, test
+
+            @fixture(scope="session")
+            async def fixture_for_session(value: int) -> AsyncGenerator[int]:
                 yield value
 
             @test()
@@ -78,9 +84,10 @@ def test_async_session_fixture_reused_by_three_tests() -> None:
     test_file = create_test_file(
         tmp_dir,
         dedent(f"""
+            from collections.abc import AsyncGenerator
             from pathlib import Path
 
-            from snektest import AsyncSessionFixture, assert_eq, load_fixture, test
+            from snektest import assert_eq, fixture, load_fixture, test
 
             EVENTS_FILE = Path({str(events_file)!r})
 
@@ -88,7 +95,8 @@ def test_async_session_fixture_reused_by_three_tests() -> None:
                 existing = EVENTS_FILE.read_text() if EVENTS_FILE.exists() else ""
                 EVENTS_FILE.write_text(existing + event + "\\n")
 
-            async def fixture_for_session() -> AsyncSessionFixture[int]:
+            @fixture(scope="session")
+            async def fixture_for_session() -> AsyncGenerator[int]:
                 record("setup")
                 yield 10
                 record("teardown")
@@ -128,8 +136,9 @@ def test_async_function_fixture() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import AsyncGenerator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
 
+            @fixture
             async def simple_fixture() -> AsyncGenerator[str]:
                 print("simple async fixture started")
                 yield "some fixture"
@@ -217,9 +226,10 @@ def test_async_fixture_with_params() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import AsyncGenerator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
             from snektest.models import Param
 
+            @fixture
             async def fixture_with_param(param1: str) -> AsyncGenerator[str]:
                 yield param1
 
@@ -244,9 +254,10 @@ def test_async_fixture_teardown() -> None:
         tmp_dir,
         dedent("""
             from collections.abc import AsyncGenerator
-            from snektest import load_fixture, test, assert_eq
+            from snektest import fixture, load_fixture, test, assert_eq
             from snektest.models import Param
 
+            @fixture
             async def fixture_with_teardown_and_param(param: str) -> AsyncGenerator[str]:
                 print(f"setup: {param}")
                 yield param
