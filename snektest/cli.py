@@ -4,7 +4,7 @@ import sys
 import threading
 import traceback
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, cast
 
 from snektest.agent_docs import (
@@ -111,23 +111,23 @@ class CliOptions:
     action: CliAction | None = None
     capture_output: bool = True
     example_name: str | None = None
+    filters: tuple[str, ...] = ()
     json_output: bool = False
     pdb_on_failure: bool = False
     mark: str | None = None
 
 
-@dataclass
-class CliParseState:
-    action: CliAction | None = None
-    capture_output: bool = True
-    example_name: str | None = None
-    json_output: bool = False
-    mark: str | None = None
-    pdb_on_failure: bool = False
-    potential_filter: list[str] = field(default_factory=list[str])
+@dataclass(frozen=True)
+class ParseError:
+    """A CLI usage error, returned by the parser so the caller renders it once.
+
+    Parsing stays pure: every invalid-argument path returns one of these instead
+    of printing, so the single render seam lives in `run_script`.
+    """
+
+    message: str
 
 
-PARSE_ERROR = -1
 VALID_MARKER_VALUES = {"fast", "medium", "slow"}
 
 HELP_TEXT = """Usage: snektest [OPTIONS] [FILTER ...]
@@ -170,105 +170,50 @@ def _invalid_mark_message(mark_value: str) -> str:
     return f"Invalid --mark value: `{mark_value}`. Use one of: {allowed}"
 
 
-def _parse_mark_value(
-    argv: list[str], index: int, mark: str | None
-) -> tuple[str, int] | None:
-    if mark is not None:
-        print_error("Only one --mark value is supported")
-        return None
+def _consume_flag_value(
+    argv: list[str], index: int, flag: str
+) -> tuple[str, int] | ParseError:
+    """Read the value following a value-taking flag at `index`.
+
+    Returns the value with the index it was consumed from, or a ParseError when
+    the value is missing or looks like another option (a leading dash).
+    """
     if index + 1 >= len(argv):
-        print_error("Missing value for --mark")
-        return None
-    mark_value = argv[index + 1]
-    if mark_value.startswith("-"):
-        print_error("Missing value for --mark")
-        return None
+        return ParseError(f"Missing value for {flag}")
+    value = argv[index + 1]
+    if value.startswith("-"):
+        return ParseError(f"Missing value for {flag}")
+    return value, index + 1
+
+
+# Args that select a CLI action, both as `--flags` and as bare positional words.
+_ACTION_ARGS: dict[str, CliAction] = {
+    "--agent-docs": "agent_docs",
+    "--examples": "list_examples",
+    "--help": "help",
+    "--llms": "agent_docs",
+    "-h": "help",
+    "examples": "list_examples",
+}
+
+
+def _parse_mark_flag(
+    argv: list[str], index: int, current_mark: str | None
+) -> tuple[str, int] | ParseError:
+    """Parse `--mark` and its value, rejecting repeats and unknown markers.
+
+    Returns the marker with the index its value was consumed from, or a
+    ParseError. Lives apart from the main loop so the dispatch stays flat.
+    """
+    if current_mark is not None:
+        return ParseError("Only one --mark value is supported")
+    consumed = _consume_flag_value(argv, index, "--mark")
+    if isinstance(consumed, ParseError):
+        return consumed
+    mark_value, value_index = consumed
     if not _is_valid_mark_value(mark_value):
-        print_error(_invalid_mark_message(mark_value))
-        return None
-    return mark_value, index + 1
-
-
-def _parse_example_value(argv: list[str], index: int) -> tuple[str, int] | None:
-    if index + 1 >= len(argv):
-        print_error("Missing value for --example")
-        return None
-    example_name = argv[index + 1]
-    if example_name.startswith("-"):
-        print_error("Missing value for --example")
-        return None
-    return example_name, index + 1
-
-
-def _set_cli_action(state: CliParseState, new_action: CliAction) -> bool:
-    if state.action is not None:
-        print_error("Only one help/docs/examples command is supported")
-        return False
-    state.action = new_action
-    return True
-
-
-def _parse_example_action(argv: list[str], index: int, state: CliParseState) -> int:
-    next_index = PARSE_ERROR
-    if _set_cli_action(state, "show_example"):
-        parsed_example = _parse_example_value(argv, index)
-        if parsed_example is not None:
-            state.example_name, next_index = parsed_example
-    return next_index
-
-
-def _parse_action_option(command: str, state: CliParseState) -> int:
-    actions: dict[str, CliAction] = {
-        "--agent-docs": "agent_docs",
-        "--examples": "list_examples",
-        "--help": "help",
-        "--llms": "agent_docs",
-        "-h": "help",
-    }
-    next_index = PARSE_ERROR
-    action = actions.get(command)
-    if action is not None and _set_cli_action(state, action):
-        next_index = 0
-    return next_index
-
-
-def _parse_option(argv: list[str], index: int, state: CliParseState) -> int:
-    command = argv[index]
-    next_index = index
-    if command in {"-h", "--agent-docs", "--examples", "--help", "--llms"}:
-        parsed_index = _parse_action_option(command, state)
-        next_index = index if parsed_index != PARSE_ERROR else PARSE_ERROR
-    elif command == "--example":
-        next_index = _parse_example_action(argv, index, state)
-    elif command == "-s":
-        state.capture_output = False
-    elif command == "--json-output":
-        state.json_output = True
-    elif command == "--pdb":
-        state.pdb_on_failure = True
-    elif command == "--mark":
-        parsed_mark = _parse_mark_value(argv, index, state.mark)
-        if parsed_mark is None:
-            next_index = PARSE_ERROR
-        else:
-            state.mark, next_index = parsed_mark
-    else:
-        print_error(f"Invalid option: `{command}`")
-        next_index = PARSE_ERROR
-    return next_index
-
-
-def _parse_positional(argv: list[str], index: int, state: CliParseState) -> int:
-    command = argv[index]
-    next_index = index
-    if command == "examples":
-        if not _set_cli_action(state, "list_examples"):
-            next_index = PARSE_ERROR
-    elif command == "example":
-        next_index = _parse_example_action(argv, index, state)
-    else:
-        state.potential_filter.append(command)
-    return next_index
+        return ParseError(_invalid_mark_message(mark_value))
+    return mark_value, value_index
 
 
 def _print_cli_action(options: CliOptions) -> int:
@@ -292,41 +237,74 @@ def _print_cli_action(options: CliOptions) -> int:
     return 0
 
 
-def _finish_parse_state(state: CliParseState) -> tuple[list[str], CliOptions] | int:
-    potential_filter = state.potential_filter
-    if state.action is not None and potential_filter:
-        print_error("Cannot combine help/docs/examples commands with test filters")
-        return 2
+def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0912
+    """Parse argv into CliOptions, or a ParseError on invalid usage.
 
-    if state.action is None and not potential_filter:
-        potential_filter.append(".")
+    Pure: never prints. The caller renders any ParseError once. Value-taking
+    flags (`--mark`, `--example`) consume the following arg; positional
+    `example`/`examples` are action words, and every other bare arg is a
+    filter.
 
-    options = CliOptions(
-        action=state.action,
-        capture_output=state.capture_output,
-        example_name=state.example_name,
-        json_output=state.json_output,
-        pdb_on_failure=state.pdb_on_failure,
-        mark=state.mark,
-    )
-    return potential_filter, options
-
-
-def parse_cli_args(argv: list[str]) -> tuple[list[str], CliOptions] | int:
-    state = CliParseState()
+    The flat per-flag dispatch is intentionally branchy: it is the body of a
+    deep module behind a one-call interface. Splitting it to satisfy the
+    complexity metric would only re-spread parsing state across helpers.
+    """
+    action: CliAction | None = None
+    capture_output = True
+    example_name: str | None = None
+    json_output = False
+    mark: str | None = None
+    pdb_on_failure = False
+    filters: list[str] = []
+    duplicate_action = ParseError("Only one help/docs/examples command is supported")
 
     index = 0
     while index < len(argv):
-        command = argv[index]
-        if command.startswith("-"):
-            index = _parse_option(argv, index, state)
+        arg = argv[index]
+        chosen_action = "show_example" if arg in {"--example", "example"} else None
+        chosen_action = chosen_action or _ACTION_ARGS.get(arg)
+        if chosen_action is not None:
+            if action is not None:
+                return duplicate_action
+            action = chosen_action
+            if chosen_action == "show_example":
+                consumed = _consume_flag_value(argv, index, "--example")
+                if isinstance(consumed, ParseError):
+                    return consumed
+                example_name, index = consumed
+        elif arg == "-s":
+            capture_output = False
+        elif arg == "--json-output":
+            json_output = True
+        elif arg == "--pdb":
+            pdb_on_failure = True
+        elif arg == "--mark":
+            parsed_mark = _parse_mark_flag(argv, index, mark)
+            if isinstance(parsed_mark, ParseError):
+                return parsed_mark
+            mark, index = parsed_mark
+        elif arg.startswith("-"):
+            return ParseError(f"Invalid option: `{arg}`")
         else:
-            index = _parse_positional(argv, index, state)
-        if index == PARSE_ERROR:
-            return 2
+            filters.append(arg)
         index += 1
 
-    return _finish_parse_state(state)
+    if action is not None and filters:
+        return ParseError(
+            "Cannot combine help/docs/examples commands with test filters"
+        )
+    if action is None and not filters:
+        filters.append(".")
+
+    return CliOptions(
+        action=action,
+        capture_output=capture_output,
+        example_name=example_name,
+        filters=tuple(filters),
+        json_output=json_output,
+        mark=mark,
+        pdb_on_failure=pdb_on_failure,
+    )
 
 
 async def _run_tests_with_producer_thread(
@@ -433,16 +411,17 @@ async def run_script(
 ) -> int:
     """Parse arguments and run tests."""
     parsed = parse_cli_args(sys.argv[1:] if argv is None else argv)
-    if isinstance(parsed, int):
-        return parsed
+    if isinstance(parsed, ParseError):
+        print_error(parsed.message)
+        return 2
 
-    potential_filter, options = parsed
+    options = parsed
 
     if options.action is not None:
         return _print_cli_action(options)
 
     try:
-        filter_items = [FilterItem(item) for item in potential_filter]
+        filter_items = [FilterItem(item) for item in options.filters]
     except ArgsError as e:
         print_error(str(e))
         return 2
