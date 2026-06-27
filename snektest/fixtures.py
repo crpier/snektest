@@ -89,18 +89,52 @@ class FixtureRegistry:
         self._function_stack: list[
             tuple[str, AsyncGenerator[Any] | Generator[Any]]
         ] = []
+        self._loading_session: str | None = None
+
+    @contextmanager
+    def _session_setup_scope(self, name: str) -> Generator[None]:
+        """Mark that a session fixture is mid-setup, to forbid function deps."""
+        previous = self._loading_session
+        self._loading_session = name
+        try:
+            yield
+        finally:
+            self._loading_session = previous
 
     def load_function[R](
         self, handle: Fixture[R] | AsyncFixture[R]
     ) -> R | Coroutine[R]:
-        """Set up a function-scoped fixture and register it for teardown."""
+        """Set up a function-scoped fixture and register it for teardown.
+
+        A fixture may depend on another by calling `load_fixture` in its body.
+        The dependency is registered for teardown only after its own setup
+        completes, so it lands below the depending fixture on the teardown stack
+        and is torn down *after* it (the depending fixture may use the dependency
+        during teardown). A session fixture may not depend on a function fixture:
+        the function fixture is torn down after each test while the session
+        fixture outlives it, so the dependency is rejected here.
+        """
+        if self._loading_session is not None:
+            msg = (
+                f"Session fixture {self._loading_session} cannot depend on function "
+                f"fixture {handle.name}. A function fixture is torn down after each "
+                "test, but the session fixture outlives it and would reference "
+                "torn-down state. Make the dependency a session fixture instead."
+            )
+            raise FixtureError(msg)
         if isinstance(handle, AsyncFixture):
             agen = handle.make()
-            self._function_stack.append((handle.name, agen))
-            return cast("Coroutine[R]", agen.__anext__())
+            return cast("Coroutine[R]", self._setup_async_function(handle.name, agen))
         gen = handle.make()
+        value = next(gen)
         self._function_stack.append((handle.name, gen))
-        return next(gen)
+        return value
+
+    async def _setup_async_function[R](self, name: str, agen: AsyncGenerator[R]) -> R:
+        """Await an async function fixture's setup, then register its teardown."""
+        value = await agen.__anext__()
+        self._function_stack.append((name, agen))
+        return value
 
     def load_session[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
         """Set up a session-scoped fixture once and reuse it thereafter."""
@@ -114,7 +148,8 @@ class FixtureRegistry:
             return cast("R", slot[1])
         _ensure_session_fixture_has_no_parameters(handle.key, handle.name)
         gen = handle.make()
-        value = next(gen)
+        with self._session_setup_scope(handle.name):
+            value = next(gen)
         self._session[handle.key] = (gen, value, handle.name)
         return value
 
@@ -137,7 +172,8 @@ class FixtureRegistry:
             if not isasyncgen(registered_gen):
                 msg = "Async session fixture setup lost its generator. This shouldn't be possible!"
                 raise UnreachableError(msg)
-            result = cast("R", await anext(registered_gen))
+            with self._session_setup_scope(name):
+                result = cast("R", await anext(registered_gen))
             self._session[key] = (registered_gen, result, name)
             return result
 

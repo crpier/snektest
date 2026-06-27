@@ -89,6 +89,16 @@ current registry — tests take no context parameter.
   overload and at load time by the registry); use function fixtures for
   parameter-dependent setup, or return a factory/cache from a zero-argument
   session fixture.
+- **Fixtures depending on fixtures**: a fixture may `load_fixture()` another in
+  its body (resolved through the ambient registry). The dependency is registered
+  for teardown only after its own setup completes, so it lands below the
+  depending fixture on the teardown stack and is torn down *after* it — a
+  depending fixture may use its dependency during teardown. This holds for both
+  scopes. A function fixture may depend on function or session fixtures; a
+  session fixture may depend on session fixtures only — depending on a function
+  fixture raises `FixtureError` at load time, because the cached session fixture
+  would outlive the per-test dependency. An async fixture may depend on sync or
+  async fixtures; a sync fixture cannot await an async dependency.
 
 ```python
 from collections.abc import AsyncGenerator

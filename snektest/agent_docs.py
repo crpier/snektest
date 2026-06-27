@@ -58,6 +58,7 @@ Run a strict static type checker (e.g. `pyright`) over test code before running 
 - `@fixture` (default) is function-scoped: set up and torn down for each test. `@fixture(scope="session")` is set up once and reused across the run.
 - Fixtures may take arguments; pass them at the call site, e.g. `load_fixture(make_user("Ada"))`. Calling a fixture twice gives two independent instances.
 - Session fixtures must be zero-argument; use function fixtures for parameter-dependent setup, or return a factory/cache from a zero-argument session fixture.
+- A fixture may depend on another by calling `load_fixture()` in its body. A function fixture may depend on function or session fixtures; a session fixture may depend on session fixtures but not function fixtures (raises `FixtureError`, since it would outlive the per-test dependency). An async fixture may depend on sync or async fixtures; a sync fixture cannot await an async dependency. A depending fixture is torn down before the fixtures it loaded, so it may use them during teardown.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
 - Tests run sequentially on a single shared event loop; avoid import-time side effects in test modules, and do not leave unawaited background tasks behind.
