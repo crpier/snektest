@@ -14,15 +14,17 @@ snektest is a Python testing framework with first class support for async and st
 # Run all tests
 uv run snektest
 
+# Run a specific test file
+uv run snektest tests/test_myfeature.py
 
-# Run specific test file
-uv run snektest tests/integration/test_basic.py
+# Run a specific test function
+uv run snektest tests/test_myfeature.py::test_something
 
-# Run specific test function
-uv run snektest tests/integration/test_basic.py::test_no_params
+# Run a specific parameterized case (case name in brackets)
+uv run snektest tests/test_myfeature.py::test_something[case-name]
 
-# Run specific parameterized test
-uv run snektest tests/integration/test_basic.py::test_1_params[ascii name]
+# Run one marker group
+uv run snektest --mark fast
 ```
 
 Explicit test-name and parameter-case filters are expected to error when the
@@ -100,9 +102,21 @@ async def my_fixture() -> AsyncGenerator[str]:
     # teardown
 ```
 
+### Markers
+
+`@test(mark=...)` attaches a built-in marker describing the resources a test may
+use: `"fast"` (in-memory, no IO/threads/subprocesses), `"medium"` (local IO or
+threads), or `"slow"` (network IO, subprocesses, or other expensive external
+resources). Marking every test is the recommended public style; filter a run to
+one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
+alias for the three literals; markers are passed as a single literal.
+
 ### Parameterization
 
-Tests can accept multiple parameter sets via `@test(param_list1, param_list2)`. The `Param.to_dict()` creates all combinations using `itertools.product`, keyed by param names. Each combination becomes a separate test execution.
+Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
+each list built from `Param(value=..., name=...)`. `Param.to_dict()` creates all
+combinations using `itertools.product`, keyed by param names. Each combination
+becomes a separate test execution.
 
 ### Summary Output
 
