@@ -100,6 +100,84 @@ in standalone scripts (no runner needed): `with user_fixture() as user: ...` or
 `async with connection_pool() as pool: ...`. In standalone use there is no
 runner, so scope is ignored and each block does its own setup and teardown.
 
+#### Fixtures depending on fixtures
+
+A fixture can depend on another by calling `load_fixture()` in its own body. The
+rules:
+
+- A **function** fixture may depend on a function fixture or a session fixture.
+- A **session** fixture may depend on another session fixture.
+- A **session** fixture may **not** depend on a function fixture: the session
+  fixture is cached for the whole run and would outlive the per-test
+  dependency, so snektest raises `FixtureError`.
+- A function fixture depending on a session fixture reuses the cached session
+  instance, exactly like a test would.
+- An **async** fixture may depend on a sync or async fixture (await the async
+  ones). A **sync** fixture can only depend on sync fixtures, since its body
+  cannot await an async dependency.
+- **Teardown is depending-fixture-first**: a fixture is torn down before the
+  fixtures it loaded, so it may safely use them during its own teardown. This
+  holds for both function and session scope.
+
+```python
+from collections.abc import Generator
+
+from snektest import assert_eq, fixture, load_fixture, test
+
+
+@fixture(scope="session")
+def base_config() -> Generator[dict[str, str]]:
+    yield {"region": "us-east-1"}
+
+
+@fixture
+def client() -> Generator[dict[str, str]]:
+    # Function fixture reusing the cached session fixture above.
+    config = load_fixture(base_config())
+    yield {"region": config["region"], "session": "open"}
+
+
+@fixture
+def request_scope() -> Generator[dict[str, str]]:
+    conn = load_fixture(client())
+    yield dict(conn)
+    # `client` is still alive here: a depending fixture tears down before its
+    # dependency, so teardown may use it.
+    assert_eq(conn["session"], "open")
+
+
+@test(mark="fast")
+def test_layered_fixtures() -> None:
+    scope = load_fixture(request_scope())
+    assert_eq(scope["region"], "us-east-1")
+```
+
+A session fixture that tries to load a function fixture is rejected:
+
+<!-- snektest-doc: expect-fail -->
+```python
+from collections.abc import Generator
+
+from snektest import fixture, load_fixture, test
+
+
+@fixture
+def temp_file() -> Generator[str]:
+    yield "/tmp/scratch"
+
+
+@fixture(scope="session")
+def cache() -> Generator[dict[str, str]]:
+    # FixtureError: a session fixture cannot depend on a function fixture.
+    path = load_fixture(temp_file())
+    yield {"path": path}
+
+
+@test(mark="fast")
+def test_session_cannot_use_function_fixture() -> None:
+    _ = load_fixture(cache())
+```
+
 Load fixtures at the beginning of each test, before actions or assertions. This
 keeps fixture setup unconditional, makes teardown ownership obvious, and avoids
 hiding fixture setup behind an earlier assertion failure or branch. Only load a
