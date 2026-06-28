@@ -25,6 +25,18 @@ class BadRequestError(BaseException):
     """When user didn't write test code correctly"""
 
 
+class TestTimeoutError(Exception):
+    """Raised when an async test exceeds its configured timeout.
+
+    A normal `Exception` so it flows through the same error-reporting path as any
+    other unexpected exception, surfacing as an ERROR result with a clear message.
+    """
+
+    def __init__(self, timeout: float) -> None:
+        self.timeout = timeout
+        super().__init__(f"exceeded the configured timeout of {timeout:g}s")
+
+
 class FixtureError(Exception):
     """When a fixture is defined or used incorrectly."""
 

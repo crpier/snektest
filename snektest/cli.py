@@ -115,6 +115,7 @@ class CliOptions:
     json_output: bool = False
     pdb_on_failure: bool = False
     mark: str | None = None
+    timeout: float | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,7 @@ Options:
   --example NAME    Print a bundled example
   --json-output     Print machine-readable JSON summary
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
+  --timeout SECONDS Fail any async test that runs longer than SECONDS (async-only)
   --pdb             Drop into post-mortem debugger on first failure
 
 Example commands:
@@ -216,6 +218,29 @@ def _parse_mark_flag(
     return mark_value, value_index
 
 
+def _parse_timeout_flag(
+    argv: list[str], index: int, current_timeout: float | None
+) -> tuple[float, int] | ParseError:
+    """Parse `--timeout` and its value, rejecting repeats and non-positive numbers.
+
+    Returns the timeout in seconds with the index its value was consumed from, or
+    a ParseError.
+    """
+    if current_timeout is not None:
+        return ParseError("Only one --timeout value is supported")
+    consumed = _consume_flag_value(argv, index, "--timeout")
+    if isinstance(consumed, ParseError):
+        return consumed
+    raw_value, value_index = consumed
+    try:
+        timeout = float(raw_value)
+    except ValueError:
+        return ParseError(f"Invalid --timeout value: `{raw_value}`. Expected seconds.")
+    if timeout <= 0:
+        return ParseError(f"Invalid --timeout value: `{raw_value}`. Must be positive.")
+    return timeout, value_index
+
+
 def _print_cli_action(options: CliOptions) -> int:
     output = ""
     if options.action == "help":
@@ -237,7 +262,7 @@ def _print_cli_action(options: CliOptions) -> int:
     return 0
 
 
-def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0912
+def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0911, PLR0912
     """Parse argv into CliOptions, or a ParseError on invalid usage.
 
     Pure: never prints. The caller renders any ParseError once. Value-taking
@@ -255,6 +280,7 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
     json_output = False
     mark: str | None = None
     pdb_on_failure = False
+    timeout: float | None = None
     filters: list[str] = []
     duplicate_action = ParseError("Only one help/docs/examples command is supported")
 
@@ -283,6 +309,11 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
             if isinstance(parsed_mark, ParseError):
                 return parsed_mark
             mark, index = parsed_mark
+        elif arg == "--timeout":
+            parsed_timeout = _parse_timeout_flag(argv, index, timeout)
+            if isinstance(parsed_timeout, ParseError):
+                return parsed_timeout
+            timeout, index = parsed_timeout
         elif arg.startswith("-"):
             return ParseError(f"Invalid option: `{arg}`")
         else:
@@ -304,15 +335,17 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
         json_output=json_output,
         mark=mark,
         pdb_on_failure=pdb_on_failure,
+        timeout=timeout,
     )
 
 
-async def _run_tests_with_producer_thread(
+async def _run_tests_with_producer_thread(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
     capture_output: bool,
     pdb_on_failure: bool,
     mark: str | None = None,
+    timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     queue = TestsQueue()
@@ -336,6 +369,7 @@ async def _run_tests_with_producer_thread(
             queue=queue,
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
+            timeout=timeout,
             collection_failed=lambda: bool(collection_exception),
             reporter=reporter,
         )
@@ -357,12 +391,13 @@ def exit_code_from_summary(summary: TestRunSummary) -> int:
     return 1 if has_failures else 0
 
 
-async def run_tests_programmatic(
+async def run_tests_programmatic(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
     mark: str | None = None,
+    timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
 ) -> TestRunSummary:
     """Run tests and return structured results instead of printing.
@@ -386,6 +421,7 @@ async def run_tests_programmatic(
         capture_output=capture_output,
         pdb_on_failure=pdb_on_failure,
         mark=mark,
+        timeout=timeout,
         reporter=reporter or NullRunReporter(),
     )
 
@@ -436,6 +472,7 @@ async def run_script(
                 capture_output=options.capture_output,
                 pdb_on_failure=options.pdb_on_failure,
                 mark=options.mark,
+                timeout=options.timeout,
                 reporter=reporter,
             ),
         )

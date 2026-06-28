@@ -218,6 +218,9 @@ snektest tests/test_myfeature.py::test_something
 # Run tests with a marker
 snektest --mark fast
 
+# Fail any async test that runs longer than N seconds
+snektest --timeout 5
+
 # Disable stdout/stderr capture
 snektest -s
 
@@ -246,6 +249,13 @@ machine-readable summary with per-test exception messages.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
+
+`--timeout` sets a run-wide ceiling, in seconds, on each test. It is async-only
+and best-effort: the timeout only fires while a test is suspended on an `await`,
+so a hung `await` is reported as an error and the run continues, but a test
+stuck in synchronous or CPU-bound work cannot be interrupted. A timed-out test
+still runs its function-fixture teardown. For property-based `@test_hypothesis`
+tests, prefer Hypothesis's own `deadline`/`max_examples` to bound execution.
 
 ## Execution Model
 

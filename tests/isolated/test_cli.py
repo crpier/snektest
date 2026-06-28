@@ -52,6 +52,50 @@ def test_parse_cli_args_defaults_to_dot() -> None:
 
 
 @test()
+def test_parse_cli_args_timeout_flag_parses_seconds() -> None:
+    options = parse_cli_args(["--timeout", "1.5", "."])
+    assert not isinstance(options, ParseError)
+
+    assert_eq(options.timeout, 1.5)
+
+
+@test()
+def test_parse_cli_args_timeout_defaults_to_none() -> None:
+    options = parse_cli_args(["."])
+    assert not isinstance(options, ParseError)
+
+    assert_eq(options.timeout, None)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_non_numeric() -> None:
+    result = parse_cli_args(["--timeout", "abc"])
+    assert isinstance(result, ParseError)
+    assert_in("Expected seconds", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_non_positive() -> None:
+    result = parse_cli_args(["--timeout", "0"])
+    assert isinstance(result, ParseError)
+    assert_in("Must be positive", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_repeats() -> None:
+    result = parse_cli_args(["--timeout", "1", "--timeout", "2"])
+    assert isinstance(result, ParseError)
+    assert_in("Only one --timeout", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_requires_value() -> None:
+    result = parse_cli_args(["--timeout"])
+    assert isinstance(result, ParseError)
+    assert_in("Missing value for --timeout", result.message)
+
+
+@test()
 def test_parse_cli_args_s_flag_disables_capture() -> None:
     options = parse_cli_args(["-s", "."])
     assert not isinstance(options, ParseError)

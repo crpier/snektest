@@ -63,6 +63,7 @@ Run a strict static type checker (e.g. `pyright`) over test code before running 
 - Tests run sequentially on a single shared event loop; avoid import-time side effects in test modules, and do not leave unawaited background tasks behind.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
+- Bound runaway tests with `snektest --timeout SECONDS`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout; for `@test_hypothesis` use Hypothesis's own `deadline`/`max_examples`.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
 
 ## Copyable examples

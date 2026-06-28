@@ -111,6 +111,18 @@ resources). Marking every test is the recommended public style; filter a run to
 one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
 alias for the three literals; markers are passed as a single literal.
 
+### Timeouts
+
+`--timeout SECONDS` sets a run-wide ceiling on each test, applied in
+`execute_test` by wrapping the awaited test body in `asyncio.timeout`. It is
+async-only and best-effort: the timeout only fires while the test is suspended
+on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported as
+ERROR) and the run continues, while synchronous or CPU-bound work cannot be
+interrupted. A `TimeoutError` the test raised itself is distinguished from a
+fired timeout via `Timeout.expired()` and passes through unchanged. Timed-out
+tests still run function-fixture teardown. There is no per-test timeout; for
+`@test_hypothesis`, prefer Hypothesis's own `deadline`/`max_examples`.
+
 ### Parameterization
 
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
