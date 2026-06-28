@@ -4,11 +4,11 @@ import asyncio
 import pdb  # noqa: T100
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from inspect import iscoroutine
 from pathlib import Path
 from types import TracebackType
-from typing import cast
+from typing import Any, cast
 
 from snektest.collection import TestsQueue
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
@@ -20,16 +20,42 @@ from snektest.models import (
     TeardownFailure,
     TestCase,
     TestResult,
+    TestTimeoutError,
     UnreachableError,
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
 
 
+async def _await_test_body(
+    coro: Coroutine[Any, Any, object],
+    timeout: float | None,  # noqa: ASYNC109
+) -> None:
+    """Await an async test body, optionally bounding it with a timeout.
+
+    The timeout only fires while the body is suspended on an `await`; a test that
+    never yields to the loop (sync work, or a CPU-bound coroutine) cannot be
+    interrupted. A fired timeout raises `TestTimeoutError`; a `TimeoutError` the test
+    raised itself is left to propagate unchanged.
+    """
+    if timeout is None:
+        await coro
+        return
+    cancel_scope = asyncio.timeout(timeout)
+    try:
+        async with cancel_scope:
+            await coro
+    except TimeoutError:
+        if cancel_scope.expired():
+            raise TestTimeoutError(timeout) from None
+        raise
+
+
 async def execute_test(
     test_case: TestCase,
     *,
     capture_output: bool = True,
+    timeout: float | None = None,  # noqa: ASYNC109
     exc_info_provider: Callable[
         [], tuple[object | None, object | None, TracebackType | None]
     ] = sys.exc_info,
@@ -40,7 +66,7 @@ async def execute_test(
         try:
             res = test_case.call()
             if iscoroutine(res):
-                await res
+                await _await_test_body(res, timeout)
             duration = time.monotonic() - test_start
             result = PassedResult()
         except (AssertionFailure, asyncio.CancelledError):
@@ -224,6 +250,7 @@ async def run_tests(  # noqa: PLR0913
     *,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
+    timeout: float | None = None,  # noqa: ASYNC109
     collection_failed: Callable[[], bool] = lambda: False,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
     reporter: RunReporter | None = None,
@@ -242,7 +269,7 @@ async def run_tests(  # noqa: PLR0913
             while True:
                 test_case = await queue.get()
                 test_result = await execute_test(
-                    test_case, capture_output=capture_output
+                    test_case, capture_output=capture_output, timeout=timeout
                 )
                 test_results.append(test_result)
                 reporter.test_finished(test_result)

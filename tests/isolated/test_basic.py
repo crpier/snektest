@@ -360,23 +360,23 @@ def test_assert_not_in_fails() -> None:
 @test()
 def test_assert_isinstance_passes() -> None:
     """Test assert_isinstance with correct type."""
-    assert_isinstance(1, int)
-    assert_isinstance("hello", str)
-    assert_isinstance([1, 2], list)
+    _ = assert_isinstance(1, int)
+    _ = assert_isinstance("hello", str)
+    _ = assert_isinstance([1, 2], list)  # pyright: ignore[reportUnknownVariableType]
 
 
 @test()
 def test_assert_isinstance_fails() -> None:
     """Test assert_isinstance fails with wrong type."""
     with assert_raises(AssertionFailure):
-        assert_isinstance(1, str)
+        _ = assert_isinstance(1, str)
 
 
 @test()
 def test_assert_isinstance_multiple_types() -> None:
     """Test assert_isinstance with tuple of types."""
-    assert_isinstance(1, (int, str))
-    assert_isinstance("hello", (int, str))
+    _ = assert_isinstance(1, (int, str))
+    _ = assert_isinstance("hello", (int, str))
 
 
 @test()

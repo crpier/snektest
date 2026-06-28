@@ -1,5 +1,5 @@
 from types import TracebackType
-from typing import Any, Self, TypeIs, cast
+from typing import Any, Self, cast, overload
 
 from snektest.models import AssertionFailure, BadRequestError
 
@@ -121,8 +121,8 @@ def assert_is_none(value: Any, *, msg: str | None = None) -> None:
         )
 
 
-def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> TypeIs[T]:
-    """Assert that value is not None."""
+def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> T:
+    """Assert that value is not None, returning the narrowed value."""
     if value is None:
         message = msg or "value is None"
         raise AssertionFailure(
@@ -131,7 +131,7 @@ def assert_is_not_none[T](value: T | None, *, msg: str | None = None) -> TypeIs[
             expected="not None",
             operator="is not",
         )
-    return True
+    return value
 
 
 def assert_is(actual: Any, expected: Any, *, msg: str | None = None) -> None:
@@ -230,10 +230,18 @@ def assert_not_in(member: Any, container: Any, *, msg: str | None = None) -> Non
         )
 
 
+@overload
+def assert_isinstance[T](
+    obj: object, classinfo: type[T], *, msg: str | None = None
+) -> T: ...
+@overload
+def assert_isinstance(
+    obj: object, classinfo: tuple[type, ...], *, msg: str | None = None
+) -> object: ...
 def assert_isinstance(
     obj: Any, classinfo: type | tuple[type, ...], *, msg: str | None = None
-) -> None:
-    """Assert that isinstance(obj, classinfo) is True."""
+) -> Any:
+    """Assert that isinstance(obj, classinfo) is True, returning the narrowed value."""
     if not isinstance(obj, classinfo):
         type_name = (
             classinfo.__name__ if isinstance(classinfo, type) else str(classinfo)
@@ -245,6 +253,7 @@ def assert_isinstance(
             expected=type_name,
             operator="isinstance",
         )
+    return obj
 
 
 def assert_not_isinstance(

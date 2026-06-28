@@ -8,6 +8,10 @@ snektest is a Python testing framework with first class support for async and st
 
 ### Guidelines for writing tests
 - Do not use monkeypatching or mocking.
+- Never use bare `assert` in tests; use the `assert_*` helpers from
+  `snektest.assertions`. This is enforced by ruff (`S101` is not ignored for
+  `tests/*`); a genuinely unavoidable bare assert needs an explicit
+  `# noqa: S101`.
 
 ### Running Tests
 ```bash
@@ -121,6 +125,35 @@ resources). Marking every test is the recommended public style; filter a run to
 one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
 alias for the three literals; markers are passed as a single literal.
 
+### Timeouts
+
+`--timeout SECONDS` sets a run-wide ceiling on each test, applied in
+`execute_test` by wrapping the awaited test body in `asyncio.timeout`. It is
+async-only and best-effort: the timeout only fires while the test is suspended
+on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported as
+ERROR) and the run continues, while synchronous or CPU-bound work cannot be
+interrupted. A `TimeoutError` the test raised itself is distinguished from a
+fired timeout via `Timeout.expired()` and passes through unchanged. Timed-out
+tests still run function-fixture teardown. There is no per-test timeout.
+
+Interactions:
+
+- **`@test_hypothesis`.** An async property test runs every example inside a
+  single `await asyncio.to_thread(run_hypothesis)` (`decorators.py`), so the
+  timeout wraps the whole property run, not each example. When it fires,
+  `asyncio.timeout` cancels the `await` but the worker thread keeps running to
+  completion — threads aren't cancellable — so a runaway property test is reported
+  as timed out while still burning CPU in the background. Sync property tests are
+  not coroutines, so the timeout never applies. Prefer Hypothesis's own
+  `deadline`/`max_examples` for per-example bounds.
+- **`--pdb`.** `TestTimeoutError` flows through the normal error path, so
+  `_maybe_debug_test_result` will post-mortem on it. The cancellation unwinds the
+  test's own `await` frame before `TestTimeoutError` is raised (with `from None`)
+  inside `_await_test_body`, so `_traceback_for_file` finds no test-file frame and
+  the debugger opens on snektest's internal timeout machinery rather than the hang
+  site. It works (post-mortem runs after the test returns; no deadlock) but is of
+  limited use for locating a timeout.
+
 ### Parameterization
 
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
@@ -136,12 +169,20 @@ failure details or `--json-output` for exact diagnostics.
 
 ### Assertions
 
-Custom assertion system with rich error reporting. Use `assert_eq()` from
-`snektest.assertions` rather than bare `assert`. Assertion helper argument order
-is intentional: pass the observed/computed value first and the expected/reference
+Custom assertion system with rich error reporting. Use the `assert_*` helpers from
+`snektest.assertions` rather than bare `assert` (bare `assert` is banned in tests;
+see "Guidelines for writing tests"). Assertion helper argument order is
+intentional: pass the observed/computed value first and the expected/reference
 value second, following parameter names like `actual`, `expected`, `member`, and
 `container`. Raises `AssertionFailure` with actual/expected values for better
 error messages.
+
+The narrowing helpers return the narrowed value so a single call both asserts and
+narrows under the strict pyright config: `assert_is_not_none(x)` returns `x`
+typed as non-`None`, and `assert_isinstance(obj, SomeType)` returns `obj` typed as
+`SomeType`. Bind the result (`opts = assert_isinstance(result, CliOptions)`) to
+narrow for later attribute access; for a pure assertion discard it
+(`_ = assert_isinstance(x, int)`), since `reportUnusedCallResult` is an error.
 
 ### Type Checking Configuration
 

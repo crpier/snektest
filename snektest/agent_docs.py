@@ -44,10 +44,14 @@ Run a strict static type checker (e.g. `pyright`) over test code before running 
 
 ## Core patterns
 
-- Import assertions from `snektest`; prefer `assert_eq()` over bare `assert`.
+- Import assertions from `snektest`; use the `assert_*` helpers, never bare
+  `assert` (bare `assert` is banned in this repo's tests).
 - Assertion argument order is intentional: pass the observed/computed value
   first and the expected/reference value second, following names like `actual`,
   `expected`, `member`, and `container`.
+- `assert_is_not_none(x)` and `assert_isinstance(x, SomeType)` return the
+  narrowed value; bind it to narrow for later use, or discard with `_ =` for a
+  pure assertion.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -64,6 +68,8 @@ Run a strict static type checker (e.g. `pyright`) over test code before running 
 - Tests run sequentially on a single shared event loop; avoid import-time side effects in test modules, and do not leave unawaited background tasks behind.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
+- Bound runaway tests with `snektest --timeout SECONDS`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout.
+- Timeout interactions: for async `@test_hypothesis`, `--timeout` bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` instead; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
 
 ## Copyable examples

@@ -11,8 +11,16 @@ from io import StringIO
 from pathlib import Path
 from typing import cast
 
-from snektest import assert_eq, assert_in, assert_raises, test
+from snektest import (
+    assert_eq,
+    assert_in,
+    assert_is_none,
+    assert_isinstance,
+    assert_raises,
+    test,
+)
 from snektest.cli import (
+    CliOptions,
     ParseError,
     main,
     main_inner,
@@ -34,14 +42,14 @@ from snektest.models import (
 @test()
 def test_parse_cli_args_invalid_option_returns_error() -> None:
     result = parse_cli_args(["--nope"])
-    assert isinstance(result, ParseError)
+    result = assert_isinstance(result, ParseError)
     assert_in("Invalid option", result.message)
 
 
 @test()
 def test_parse_cli_args_defaults_to_dot() -> None:
     options = parse_cli_args([])
-    assert not isinstance(options, ParseError)
+    options = assert_isinstance(options, CliOptions)
 
     assert_eq(options.filters, (".",))
     assert_eq(options.action, None)
@@ -52,9 +60,53 @@ def test_parse_cli_args_defaults_to_dot() -> None:
 
 
 @test()
+def test_parse_cli_args_timeout_flag_parses_seconds() -> None:
+    options = parse_cli_args(["--timeout", "1.5", "."])
+    options = assert_isinstance(options, CliOptions)
+
+    assert_eq(options.timeout, 1.5)
+
+
+@test()
+def test_parse_cli_args_timeout_defaults_to_none() -> None:
+    options = parse_cli_args(["."])
+    options = assert_isinstance(options, CliOptions)
+
+    assert_is_none(options.timeout)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_non_numeric() -> None:
+    result = parse_cli_args(["--timeout", "abc"])
+    result = assert_isinstance(result, ParseError)
+    assert_in("Expected seconds", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_non_positive() -> None:
+    result = parse_cli_args(["--timeout", "0"])
+    result = assert_isinstance(result, ParseError)
+    assert_in("Must be positive", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_repeats() -> None:
+    result = parse_cli_args(["--timeout", "1", "--timeout", "2"])
+    result = assert_isinstance(result, ParseError)
+    assert_in("Only one --timeout", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_requires_value() -> None:
+    result = parse_cli_args(["--timeout"])
+    result = assert_isinstance(result, ParseError)
+    assert_in("Missing value for --timeout", result.message)
+
+
+@test()
 def test_parse_cli_args_s_flag_disables_capture() -> None:
     options = parse_cli_args(["-s", "."])
-    assert not isinstance(options, ParseError)
+    options = assert_isinstance(options, CliOptions)
 
     assert_eq(options.capture_output, False)
     assert_eq(options.mark, None)
@@ -63,7 +115,7 @@ def test_parse_cli_args_s_flag_disables_capture() -> None:
 @test()
 def test_parse_cli_args_agent_docs_action() -> None:
     options = parse_cli_args(["--agent-docs"])
-    assert not isinstance(options, ParseError)
+    options = assert_isinstance(options, CliOptions)
 
     assert_eq(options.filters, ())
     assert_eq(options.action, "agent_docs")
@@ -72,7 +124,7 @@ def test_parse_cli_args_agent_docs_action() -> None:
 @test()
 def test_parse_cli_args_example_command_action() -> None:
     options = parse_cli_args(["example", "async"])
-    assert not isinstance(options, ParseError)
+    options = assert_isinstance(options, CliOptions)
 
     assert_eq(options.filters, ())
     assert_eq(options.action, "show_example")
@@ -82,14 +134,14 @@ def test_parse_cli_args_example_command_action() -> None:
 @test()
 def test_parse_cli_args_duplicate_action_returns_error() -> None:
     result = parse_cli_args(["--help", "--examples"])
-    assert isinstance(result, ParseError)
+    result = assert_isinstance(result, ParseError)
     assert_in("Only one help/docs/examples", result.message)
 
 
 @test()
 def test_parse_cli_args_action_with_filter_returns_error() -> None:
     result = parse_cli_args(["--help", "."])
-    assert isinstance(result, ParseError)
+    result = assert_isinstance(result, ParseError)
     assert_in("Cannot combine", result.message)
 
 
@@ -112,7 +164,7 @@ async def test_run_script_prints_agent_docs() -> None:
         result = await run_script(["--llms"])
 
     assert_eq(result, 0)
-    assert "snektest agent guide" in buffer.getvalue()
+    assert_in("snektest agent guide", buffer.getvalue())
 
 
 @test()
@@ -122,7 +174,7 @@ async def test_run_script_prints_help_with_agent_docs_option() -> None:
         result = await run_script(["--help"])
 
     assert_eq(result, 0)
-    assert "--agent-docs" in buffer.getvalue()
+    assert_in("--agent-docs", buffer.getvalue())
 
 
 @test()
@@ -132,8 +184,8 @@ async def test_run_script_lists_examples() -> None:
         result = await run_script(["--examples"])
 
     assert_eq(result, 0)
-    assert "basic" in buffer.getvalue()
-    assert "async" in buffer.getvalue()
+    assert_in("basic", buffer.getvalue())
+    assert_in("async", buffer.getvalue())
 
 
 @test()
@@ -143,7 +195,7 @@ async def test_run_script_prints_named_example() -> None:
         result = await run_script(["--example", "fixtures"])
 
     assert_eq(result, 0)
-    assert '@fixture(scope="session")' in buffer.getvalue()
+    assert_in('@fixture(scope="session")', buffer.getvalue())
 
 
 @test()
