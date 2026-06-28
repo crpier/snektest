@@ -80,7 +80,6 @@ ignore = [
   "N999",    # Don't force module names to be snake_case. Useful e.g. when writing tests for classes.
   "PLR2004", # Allow magic numbers.
   "RUF029",  # Allow async functions without async features.
-  "S101",    # Allow use of assert.
   "S105",    # Allow hardcoded password strings.
   "S106",    # Allow hardcoded password strings.
   "S107",    # Allow hardcoded password strings.

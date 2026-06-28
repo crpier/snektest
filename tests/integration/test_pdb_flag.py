@@ -6,7 +6,7 @@ import subprocess
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.assertions import assert_eq
+from snektest.assertions import assert_eq, assert_is_not_none
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file
 
@@ -50,8 +50,8 @@ def test_pdb_stops_on_failure() -> None:
     summary_duration_match = re.search(
         r"1 failed, 0 passed in (\d+\.\d+)s", combined_output
     )
-    assert test_duration_match is not None
-    assert summary_duration_match is not None
+    test_duration_match = assert_is_not_none(test_duration_match)
+    summary_duration_match = assert_is_not_none(summary_duration_match)
     test_duration = test_duration_match.group(1)
     summary_duration = summary_duration_match.group(1)
 
@@ -116,8 +116,8 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
     summary_duration_match = re.search(
         r"1 fixture teardown failed, 1 passed in (\d+\.\d+)s", combined_output
     )
-    assert test_duration_match is not None
-    assert summary_duration_match is not None
+    test_duration_match = assert_is_not_none(test_duration_match)
+    summary_duration_match = assert_is_not_none(summary_duration_match)
     test_duration = test_duration_match.group(1)
     summary_duration = summary_duration_match.group(1)
 

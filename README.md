@@ -254,8 +254,23 @@ failure or fixture error (setup/teardown), and stops executing further tests.
 and best-effort: the timeout only fires while a test is suspended on an `await`,
 so a hung `await` is reported as an error and the run continues, but a test
 stuck in synchronous or CPU-bound work cannot be interrupted. A timed-out test
-still runs its function-fixture teardown. For property-based `@test_hypothesis`
-tests, prefer Hypothesis's own `deadline`/`max_examples` to bound execution.
+still runs its function-fixture teardown.
+
+Interactions to know about:
+
+- **`@test_hypothesis`.** For an async property test, the whole Hypothesis run
+  (every example) executes inside one `await asyncio.to_thread(...)`, so
+  `--timeout` bounds the *entire* property run, not each example. Worse, when it
+  fires the worker thread running Hypothesis keeps going in the background — a
+  thread can't be cancelled — so a runaway property test is reported as timed out
+  but still consumes CPU until it finishes on its own. Sync property tests never
+  yield to the loop and so are not bounded at all. For per-example limits, use
+  Hypothesis's own `deadline`/`max_examples` instead of `--timeout`.
+- **`--pdb`.** A timed-out test surfaces as a normal error, so `--pdb` will open a
+  post-mortem on it. By the time the timeout fires the test's own `await` frame has
+  already been unwound by cancellation, so the debugger lands on snektest's
+  internal timeout machinery, not the line in your test that hung. `--pdb` is of
+  limited help for locating a timeout; use it for ordinary failures.
 
 ## Execution Model
 
@@ -361,13 +376,13 @@ Use Hypothesis's `@settings()` decorator to configure test behavior. Apply it ab
 
 ```python
 from hypothesis import settings, strategies as st
-from snektest import assert_isinstance, test_hypothesis
+from snektest import assert_eq, test_hypothesis
 
 @settings(max_examples=500, deadline=None)
 @test_hypothesis(st.lists(st.integers()), mark="fast")
 async def test_list_operations(numbers: list[int]) -> None:
     reversed_twice = list(reversed(list(reversed(numbers))))
-    assert_isinstance(reversed_twice, list)
+    assert_eq(reversed_twice, numbers)
 ```
 
 ### Type Safety
@@ -433,7 +448,7 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 - `assert_true(value)` — assert that `value is True`
 - `assert_false(value)` — assert that `value is False`
 - `assert_is_none(value)` — assert that `value is None`
-- `assert_is_not_none(value)` — assert that `value is not None`
+- `assert_is_not_none(value)` — assert that `value is not None`; returns `value` narrowed to its non-`None` type
 - `assert_is(actual, expected)` — assert that `actual is expected`
 - `assert_is_not(actual, expected)` — assert that `actual is not expected`
 - `assert_lt(actual, expected)` — assert that `actual < expected`
@@ -442,7 +457,7 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 - `assert_ge(actual, expected)` — assert that `actual >= expected`
 - `assert_in(member, container)` — assert that `member in container`
 - `assert_not_in(member, container)` — assert that `member not in container`
-- `assert_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is true; `classinfo` may be a tuple of types
+- `assert_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is true; `classinfo` may be a tuple of types. When `classinfo` is a single type, returns `obj` narrowed to that type (bind it to narrow for later use; discard with `_ =` for a pure assertion)
 - `assert_not_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is false
 - `assert_len(obj, expected_length)` — assert that `len(obj) == expected_length`
 

@@ -6,7 +6,7 @@ from types import TracebackType
 
 from rich.console import Console
 
-from snektest import assert_eq, assert_in, assert_not_in, test
+from snektest import assert_eq, assert_in, assert_is_not_none, assert_not_in, test
 from snektest.models import (
     ErrorResult,
     FailedResult,
@@ -24,9 +24,7 @@ def _traceback_from_exception(exc: BaseException) -> TracebackType:
     try:
         raise exc
     except type(exc) as e:
-        tb = e.__traceback__
-        assert tb is not None
-        return tb
+        return assert_is_not_none(e.__traceback__)
 
 
 @test()
@@ -135,7 +133,7 @@ def test_print_test_result_soft_wraps_long_names() -> None:
         text,
     )
     assert_in("OK (0.00s)", text)
-    assert text.count("\n") == 1
+    assert_eq(text.count("\n"), 1)
 
 
 @test()

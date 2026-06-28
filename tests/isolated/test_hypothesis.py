@@ -6,7 +6,12 @@ from typing import Any, cast
 from hypothesis import strategies as st
 
 from snektest import test
-from snektest.assertions import assert_in, assert_raises, assert_true
+from snektest.assertions import (
+    assert_in,
+    assert_is_not_none,
+    assert_raises,
+    assert_true,
+)
 from snektest.decorators import test_hypothesis
 from snektest.utils import get_test_function_markers, is_test_function
 
@@ -58,7 +63,7 @@ async def test_test_hypothesis_async_schedule_and_on_done_errors() -> None:
     run_bad = wrapper(fake_marked)
 
     res = run_bad()
-    assert res is not None
+    res = assert_is_not_none(res)
     with assert_raises(Exception) as exc_info:
         await res
 
@@ -70,6 +75,6 @@ async def test_test_hypothesis_async_schedule_and_on_done_errors() -> None:
         raise RuntimeError(msg)
 
     res2 = run_raises()
-    assert res2 is not None
+    res2 = assert_is_not_none(res2)
     with assert_raises(Exception):
         await res2
