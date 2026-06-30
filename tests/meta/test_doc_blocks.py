@@ -12,7 +12,12 @@ finding, and enforces the "never hand-write sample output" rule in AGENTS.md.
 
 from snektest import Param, assert_in, assert_ne, fail, test
 from snektest.assertions import assert_eq
-from testutils.doc_verify import normalize_output, run_block, typecheck_blocks
+from testutils.doc_verify import (
+    check_block_diagnostics,
+    normalize_output,
+    run_block,
+    typecheck_blocks,
+)
 from testutils.docblocks import CodeBlock, doc_python_blocks
 
 _BLOCKS = doc_python_blocks()
@@ -27,15 +32,7 @@ def test_doc_blocks_typecheck() -> None:
 
     problems: list[str] = []
     for block in blocks:
-        result = results[block.slug]
-        expects_error = "expect-type-error" in block.directives
-        where = f"{block.slug} ({block.source}:{block.line})"
-        if expects_error and result.error_count == 0:
-            msg = f"{where} is marked expect-type-error but pyright found none."
-            problems.append(msg)
-        elif not expects_error and result.error_count:
-            joined = "\n  ".join(result.messages)
-            problems.append(f"{where} failed pyright:\n  {joined}")
+        problems.extend(check_block_diagnostics(block, results[block.slug]))
 
     if problems:
         fail("\n\n".join(problems))

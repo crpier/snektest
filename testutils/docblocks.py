@@ -17,6 +17,16 @@ Recognized directives:
 - ``skip-typecheck``   do not run pyright over the block
 - ``expect-fail``      executing the block must fail (a test fails / errors)
 - ``expect-type-error`` pyright must report at least one error for the block
+
+``expect-type-error`` also takes an optional argument that pins a *specific*
+diagnostic instead of merely "≥1 error somewhere"::
+
+    expect-type-error=reportArgumentType      # ≥1 error with this rule
+    expect-type-error=reportCallIssue@4        # that rule at block line 4
+
+Block lines are counted from 1 at the line *after* the opening fence. These
+pinned expectations are collected into ``CodeBlock.expected_diagnostics`` rather
+than the ``directives`` flag set.
 """
 
 from __future__ import annotations
@@ -36,6 +46,19 @@ VALID_DIRECTIVES = frozenset(
 
 
 @dataclass(frozen=True)
+class ExpectedDiagnostic:
+    """A pyright diagnostic a block asserts pyright must report."""
+
+    rule: str
+    """Pyright rule name, e.g. ``reportArgumentType``."""
+    line: int | None
+    """1-based line within the block, or ``None`` to match the rule anywhere."""
+
+    def __str__(self) -> str:
+        return self.rule if self.line is None else f"{self.rule}@{self.line}"
+
+
+@dataclass(frozen=True)
 class CodeBlock:
     """A fenced code block extracted from a documentation surface."""
 
@@ -50,7 +73,9 @@ class CodeBlock:
     index: int
     """0-based position of this block among all blocks from the source."""
     directives: frozenset[str] = frozenset()
-    """Parsed ``snektest-doc`` directives attached to the block."""
+    """Parsed ``snektest-doc`` bare-flag directives attached to the block."""
+    expected_diagnostics: tuple[ExpectedDiagnostic, ...] = ()
+    """Pinned ``expect-type-error=rule[@line]`` expectations for the block."""
     following_text: str | None = None
     """Contents of the immediately-following ```text block, if any."""
 
@@ -60,12 +85,42 @@ class CodeBlock:
         return f"{self.source}:block-{self.index:02d}"
 
 
-def _parse_directives(pending: list[str]) -> frozenset[str]:
+def _parse_expected_diagnostic(arg: str) -> ExpectedDiagnostic:
+    """Parse the ``rule[@line]`` payload of an ``expect-type-error=`` token."""
+    rule, sep, line_part = arg.partition("@")
+    rule = rule.strip()
+    if not rule:
+        msg = (
+            "expect-type-error= requires a rule name, "
+            "e.g. expect-type-error=reportArgumentType"
+        )
+        raise ValueError(msg)
+    line: int | None = None
+    if sep:
+        try:
+            line = int(line_part)
+        except ValueError:
+            msg = f"expect-type-error line must be an integer, got {line_part!r}"
+            raise ValueError(msg) from None
+        if line < 1:
+            msg = f"expect-type-error line must be >= 1, got {line}"
+            raise ValueError(msg)
+    return ExpectedDiagnostic(rule=rule, line=line)
+
+
+def _parse_directives(
+    pending: list[str],
+) -> tuple[frozenset[str], tuple[ExpectedDiagnostic, ...]]:
     directives: set[str] = set()
+    expected: list[ExpectedDiagnostic] = []
     for body in pending:
         for raw in body.split(","):
             name = raw.strip()
             if not name:
+                continue
+            base, sep, arg = name.partition("=")
+            if base == "expect-type-error" and sep:
+                expected.append(_parse_expected_diagnostic(arg))
                 continue
             if name not in VALID_DIRECTIVES:
                 msg = (
@@ -74,7 +129,7 @@ def _parse_directives(pending: list[str]) -> frozenset[str]:
                 )
                 raise ValueError(msg)
             directives.add(name)
-    return frozenset(directives)
+    return frozenset(directives), tuple(expected)
 
 
 def extract_blocks(text: str, source: str) -> list[CodeBlock]:
@@ -110,6 +165,7 @@ def extract_blocks(text: str, source: str) -> list[CodeBlock]:
             i += 1
         i += 1  # consume closing fence
 
+        directives, expected = _parse_directives(pending_directives)
         blocks.append(
             CodeBlock(
                 source=source,
@@ -117,7 +173,8 @@ def extract_blocks(text: str, source: str) -> list[CodeBlock]:
                 code="\n".join(body_lines) + ("\n" if body_lines else ""),
                 line=fence_line,
                 index=index,
-                directives=_parse_directives(pending_directives),
+                directives=directives,
+                expected_diagnostics=expected,
             )
         )
         index += 1
@@ -142,6 +199,7 @@ def _attach_following_text(blocks: list[CodeBlock]) -> list[CodeBlock]:
                 line=block.line,
                 index=block.index,
                 directives=block.directives,
+                expected_diagnostics=block.expected_diagnostics,
                 following_text=following,
             )
         )

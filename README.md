@@ -467,7 +467,7 @@ async def test_list_operations(numbers: list[int]) -> None:
 
 The decorator provides full type safety - strategy types are checked against function parameters:
 
-<!-- snektest-doc: expect-type-error, skip-run -->
+<!-- snektest-doc: expect-type-error=reportArgumentType@10, skip-run -->
 ```python
 from hypothesis import strategies as st
 from snektest import test_hypothesis
