@@ -37,17 +37,75 @@ def _block_filename(block: CodeBlock) -> str:
 
 
 @dataclass(frozen=True)
+class Diagnostic:
+    """A single pyright error reported against a block."""
+
+    rule: str
+    """Pyright rule name, e.g. ``reportArgumentType``; ``""`` for syntax errors."""
+    line: int
+    """1-based line within the block (pyright's 0-based range start + 1)."""
+    message: str
+    """First line of the pyright message."""
+
+
+@dataclass(frozen=True)
 class TypecheckResult:
     """Pyright diagnostics for a single block."""
 
-    error_count: int
-    messages: list[str]
+    diagnostics: list[Diagnostic]
+
+    @property
+    def error_count(self) -> int:
+        return len(self.diagnostics)
+
+    @property
+    def messages(self) -> list[str]:
+        return [
+            f"{d.rule}: {d.message}" if d.rule else d.message for d in self.diagnostics
+        ]
+
+
+def check_block_diagnostics(block: CodeBlock, result: TypecheckResult) -> list[str]:
+    """Compare a block's pyright result against its expectations.
+
+    Returns a list of human-readable problems (empty when the block matches):
+
+    - pinned ``expected_diagnostics``: every one must match a reported
+      diagnostic (rule equal; line equal too when given). Extra unexpected
+      errors are tolerated (cascading diagnostics are common).
+    - a bare ``expect-type-error`` flag: at least one error must be reported.
+    - neither: pyright must report no errors.
+    """
+    where = f"{block.slug} (line {block.line})"
+    bare = "expect-type-error" in block.directives
+    problems: list[str] = []
+
+    if block.expected_diagnostics:
+        found = ", ".join(f"{d.rule}@{d.line}" for d in result.diagnostics) or "none"
+        for exp in block.expected_diagnostics:
+            matched = any(
+                d.rule == exp.rule and (exp.line is None or d.line == exp.line)
+                for d in result.diagnostics
+            )
+            if not matched:
+                problems.append(
+                    f"{where} expected diagnostic {exp} but pyright found: {found}"
+                )
+    elif bare:
+        if result.error_count == 0:
+            problems.append(
+                f"{where} is marked expect-type-error but pyright found none."
+            )
+    elif result.error_count:
+        joined = "\n  ".join(result.messages)
+        problems.append(f"{where} failed pyright:\n  {joined}")
+
+    return problems
 
 
 def typecheck_blocks(blocks: Sequence[CodeBlock]) -> dict[str, TypecheckResult]:
     """Run pyright once over every block; return results keyed by slug."""
-    counts: dict[str, int] = {block.slug: 0 for block in blocks}
-    messages: dict[str, list[str]] = {block.slug: [] for block in blocks}
+    diagnostics: dict[str, list[Diagnostic]] = {block.slug: [] for block in blocks}
     if not blocks:
         return {}
 
@@ -76,15 +134,15 @@ def typecheck_blocks(blocks: Sequence[CodeBlock]) -> dict[str, TypecheckResult]:
         slug = file_to_slug.get(str(Path(diag["file"]).resolve()))
         if slug is None:
             continue
-        counts[slug] += 1
-        rule = diag.get("rule", "")
-        first_line = diag["message"].splitlines()[0]
-        messages[slug].append(f"{rule}: {first_line}" if rule else first_line)
+        diagnostics[slug].append(
+            Diagnostic(
+                rule=diag.get("rule", ""),
+                line=diag["range"]["start"]["line"] + 1,
+                message=diag["message"].splitlines()[0],
+            )
+        )
 
-    return {
-        block.slug: TypecheckResult(counts[block.slug], messages[block.slug])
-        for block in blocks
-    }
+    return {block.slug: TypecheckResult(diagnostics[block.slug]) for block in blocks}
 
 
 def run_block(

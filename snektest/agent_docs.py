@@ -42,6 +42,17 @@ snektest example async
 
 Run a strict static type checker (e.g. `pyright`) over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
 
+<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+```python
+from snektest import test
+
+
+# @test must be *called*: applying it bare is a type error, not a runtime one.
+@test
+def test_needs_parentheses() -> None:
+    pass
+```
+
 ## Core patterns
 
 - Import assertions from `snektest`; use the `assert_*` helpers, never bare
