@@ -76,7 +76,7 @@ def check_block_diagnostics(block: CodeBlock, result: TypecheckResult) -> list[s
     - a bare ``expect-type-error`` flag: at least one error must be reported.
     - neither: pyright must report no errors.
     """
-    where = f"{block.slug} ({block.source}:{block.line})"
+    where = f"{block.slug} (line {block.line})"
     bare = "expect-type-error" in block.directives
     problems: list[str] = []
 

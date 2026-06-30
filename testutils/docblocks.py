@@ -129,6 +129,15 @@ def _parse_directives(
                 )
                 raise ValueError(msg)
             directives.add(name)
+    if "skip-typecheck" in directives and (
+        expected or "expect-type-error" in directives
+    ):
+        msg = (
+            "skip-typecheck cannot be combined with an expect-type-error "
+            "expectation: the block is never type-checked, so the expectation "
+            "would silently never be asserted"
+        )
+        raise ValueError(msg)
     return frozenset(directives), tuple(expected)
 
 

@@ -21,6 +21,17 @@ Runtime validation is reserved for what static checkers cannot see: CLI
 input, file paths, and fixture protocol rules (for example, session fixtures
 must not accept parameters).
 
+<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+```python
+from snektest import test
+
+
+# @test must be *called*: applying it bare is a type error, not a runtime one.
+@test
+def test_needs_parentheses() -> None:
+    pass
+```
+
 ## Quick Start
 
 Create a `test_*.py` file. The recommended style is to mark every test with the resources it may use:

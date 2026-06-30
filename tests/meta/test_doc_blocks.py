@@ -45,7 +45,7 @@ def test_doc_blocks_typecheck() -> None:
 def test_doc_block_runs(block: CodeBlock) -> None:
     """Each runnable block executes as documented; output blocks match."""
     proc = run_block(block)
-    where = f"{block.slug} ({block.source}:{block.line})"
+    where = f"{block.slug} (line {block.line})"
 
     if "expect-fail" in block.directives:
         assert_ne(

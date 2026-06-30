@@ -82,6 +82,22 @@ def test_zero_line_rejected() -> None:
 
 
 @test()
+def test_skip_typecheck_with_pin_rejected() -> None:
+    """A pinned expectation under skip-typecheck would never run, so it raises."""
+    with assert_raises(ValueError) as exc:
+        _ = _block_with("skip-typecheck, expect-type-error=reportCallIssue@5")
+    assert_eq("skip-typecheck cannot be combined" in str(exc.exception), True)
+
+
+@test()
+def test_skip_typecheck_with_bare_flag_rejected() -> None:
+    """The bare expect-type-error flag is equally moot under skip-typecheck."""
+    with assert_raises(ValueError) as exc:
+        _ = _block_with("skip-typecheck, expect-type-error")
+    assert_eq("skip-typecheck cannot be combined" in str(exc.exception), True)
+
+
+@test()
 def test_unknown_directive_rejected() -> None:
     """An unrelated unknown token still raises."""
     with assert_raises(ValueError) as exc:

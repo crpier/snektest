@@ -207,7 +207,7 @@ Rules of thumb:
 - The canonical import style in all examples is top-level: `from snektest import assert_eq, test`.
 - Never hand-write sample test output in `README.md`; run the example with `uv run snektest` and paste the actual output.
 - Code blocks in docs must type-check under this repo's pyright config and run as written.
-- These rules are enforced by `tests/meta/test_doc_blocks.py`, which extracts every ```python block from `README.md` and `AGENT_DOCS`, type-checks them with pyright, runs them with snektest, and diffs each adjacent ```text block against captured output. Annotate exceptions with an HTML comment directive before the fence, e.g. `<!-- snektest-doc: expect-fail -->` or `<!-- snektest-doc: expect-type-error, skip-run -->` (see `testutils/docblocks.py`).
+- These rules are enforced by `tests/meta/test_doc_blocks.py`, which extracts every ```python block from `README.md` and `AGENT_DOCS`, type-checks them with pyright, runs them with snektest, and diffs each adjacent ```text block against captured output. Annotate exceptions with an HTML comment directive before the fence, e.g. `<!-- snektest-doc: expect-fail -->` or `<!-- snektest-doc: expect-type-error, skip-run -->`. `expect-type-error` optionally pins a specific diagnostic — `expect-type-error=reportArgumentType` (that rule anywhere) or `expect-type-error=reportArgumentType@10` (that rule at block line 10) — so a signature regression to a different rule or line still fails the test (see `testutils/docblocks.py`).
 
 ### Code Style Notes
 
