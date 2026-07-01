@@ -52,8 +52,8 @@ def _print_named_summary_entry(
     detail: str = "",
 ) -> None:
     label_text, label_style = label
-    available_detail_width = (
-        console.width - len(label_text) - 1 - len(test_name) - len(detail_prefix)
+    available_detail_width = max(
+        console.width - len(label_text) - 1 - len(detail_prefix), 1
     )
     line = Text.assemble(
         (label_text, label_style),
