@@ -3,6 +3,7 @@ from collections.abc import Callable
 from types import TracebackType
 
 from rich.console import Console
+from rich.markup import escape
 from rich.syntax import Syntax
 
 import snektest
@@ -51,6 +52,7 @@ def render_traceback(  # noqa: PLR0913
                         theme="ansi_dark",
                         line_numbers=False,
                         padding=(0, 0, 0, 4),
+                        word_wrap=True,
                     )
                     console.print(syntax)
             except (OSError, IndexError):
@@ -63,4 +65,4 @@ def render_traceback(  # noqa: PLR0913
 
     exc_name = exc_type.__name__
     exc_msg = str(exc_value)
-    console.print(f"[red bold]{exc_name}[/red bold]: {exc_msg}")
+    console.print(f"[red bold]{exc_name}[/red bold]: {escape(exc_msg)}")
