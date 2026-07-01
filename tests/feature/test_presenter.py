@@ -8,6 +8,7 @@ from rich.console import Console
 
 from snektest import assert_eq, assert_in, assert_is_not_none, assert_not_in, test
 from snektest.models import (
+    AssertionFailure,
     ErrorResult,
     FailedResult,
     PassedResult,
@@ -15,6 +16,7 @@ from snektest.models import (
     TestResult,
 )
 from snektest.presenter import print_test_result_to_console
+from snektest.presenter.diff import render_assertion_failure, render_dict_diff
 from snektest.presenter.errors import print_failures
 from snektest.presenter.summary import print_summary
 from snektest.presenter.traceback import render_traceback
@@ -304,6 +306,118 @@ def test_print_summary_warnings_and_failed_without_message() -> None:
     text = console.export_text()
     assert_in("WARNINGS", text)
     assert_in("SUMMARY", text)
+
+
+# --- Finding 1: markup injection in exception messages (traceback.py) ---
+@test()
+def test_render_traceback_preserves_markup_chars_in_exception_message() -> None:
+    """A message containing Rich markup must render literally, not crash or vanish.
+
+    `[/]` currently raises MarkupError (aborting the whole report) and `[bold red]`
+    is silently swallowed, because the message is interpolated into a
+    markup-enabled `console.print`.
+    """
+    console = Console(record=True, width=80)
+    message = "boom [/] and [bold red] stay literal"
+    tb = _traceback_from_exception(RuntimeError(message))
+
+    render_traceback(console, RuntimeError, RuntimeError(message), tb)
+
+    assert_in(message, console.export_text())
+
+
+# --- Finding 5: long source lines cropped with no ellipsis (traceback.py) ---
+@test()
+def test_render_traceback_does_not_crop_long_source_line() -> None:
+    """The failing source statement must remain fully visible (wrapped), not cropped."""
+    console = Console(record=True, width=40)
+    long_line = "    assert_eq(" + "a" * 60 + ', msg="TAIL_SENTINEL")'
+    tb = _traceback_from_exception(RuntimeError("boom"))
+
+    render_traceback(
+        console,
+        RuntimeError,
+        RuntimeError("boom"),
+        tb,
+        show_exception_line=False,
+        open_path=lambda _: [long_line] * 500,
+    )
+
+    assert_in("TAIL_SENTINEL", console.export_text())
+
+
+# --- Finding 2: summary detail vanishes behind a long name (summary.py) ---
+@test()
+def test_print_summary_keeps_detail_when_name_is_long() -> None:
+    """A short diagnostic must survive even when the test name is very long.
+
+    Budgeting the detail against width-minus-name drives the remaining budget to
+    <=1, collapsing every diagnostic to a bare `…` even at wide terminals.
+    """
+    console = Console(record=True, width=120)
+    long_name = TestName(
+        file_path=Path(
+            "/home/user/projects/deeply/nested/package/subpackage/module/test_a_module.py"
+        ),
+        func_name="test_a_scenario_with_a_fairly_descriptive_and_long_function_name",
+        params_part="",
+    )
+    tb = _traceback_from_exception(RuntimeError("boom"))
+    result = TestResult(
+        name=long_name,
+        duration=0.0,
+        result=FailedResult(
+            exc_type=RuntimeError,
+            exc_value=RuntimeError("SENTINEL_DETAIL"),
+            traceback=tb,
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_summary(console, [result], 0.0, session_teardown_failures=[])
+
+    assert_in("SENTINEL_DETAIL", console.export_text())
+
+
+# --- Finding 4: diff ignores console width, hardcodes pprint width=80 (diff.py) ---
+@test()
+def test_render_dict_diff_uses_console_width() -> None:
+    """Diffs must reflow to the actual terminal width, not a hardcoded 80 columns."""
+    console = Console(record=True, width=120)
+    actual = {f"key{i}": i for i in range(8)}
+    expected = {f"key{i}": i + 1 for i in range(8)}
+
+    render_dict_diff(console, actual, expected)
+
+    # At width=120 this 88-char dict fits one line; hardcoded width=80 wraps it.
+    one_line = "{'key0': 0, 'key1': 1, 'key2': 2, 'key3': 3, 'key4': 4, 'key5': 5, 'key6': 6, 'key7': 7}"
+    assert_in(one_line, console.export_text())
+
+
+# --- Finding 6: redundant repr blob above multiline string diff (diff.py) ---
+@test()
+def test_render_assertion_failure_omits_repr_blob_for_multiline_strings() -> None:
+    """Multiline string failures show a clean per-line diff, not a `repr != repr` blob.
+
+    The raw blob repeats both values on one line with literal `\\n` separators,
+    duplicating the diff that follows.
+    """
+    console = Console(record=True, width=80)
+    actual = "line one\nline two"
+    expected = "line one\nline three"
+    exc = AssertionFailure(
+        f"{actual!r} != {expected!r}", actual=actual, expected=expected
+    )
+
+    render_assertion_failure(console, exc)
+
+    text = console.export_text()
+    assert_not_in("\\n", text)
+    assert_in("line three", text)
 
 
 @test()
