@@ -27,8 +27,6 @@ def _ellipsize_summary_detail(detail: str, max_width: int) -> str:
     """Shorten only summary diagnostics, never the test name."""
     if not detail or len(detail) <= max_width:
         return detail
-    if max_width <= 1:
-        return "…"
     return f"{detail[: max_width - 1]}…"
 
 

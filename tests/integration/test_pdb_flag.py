@@ -71,7 +71,7 @@ def test_pdb_stops_on_failure() -> None:
         E       1 != 2
 
         ─────────────────────────────────── SUMMARY ────────────────────────────────────
-        FAILED {test_file}::test_failure - AssertionFailure: 1 !…
+        FAILED {test_file}::test_failure - AssertionFailure: 1 != 2
 
         ───────────────────────── 1 failed, 0 passed in {summary_duration}s ──────────────────────────
         """).lstrip()
@@ -139,7 +139,7 @@ def test_pdb_stops_on_fixture_teardown_failure() -> None:
         RuntimeError: fixture teardown failed
 
         ─────────────────────────────────── SUMMARY ────────────────────────────────────
-        FIXTURE TEARDOWN FAILED {test_file}::test_fix - fix: Run…
+        FIXTURE TEARDOWN FAILED {test_file}::test_fix - fix: RuntimeError: fixture teardown failed
 
         ───────────────── 1 fixture teardown failed, 1 passed in {summary_duration}s ─────────────────
         """).lstrip()
