@@ -19,3 +19,6 @@ htmlcov/
 
 # Agents local files
 .opencode
+
+# render_matrix.py output
+render_out/
