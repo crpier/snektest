@@ -13,6 +13,11 @@ check-types:
 # All checks
 check: check-lint check-fmt check-types
 
+# Render console output across terminal shapes for presentation review.
+# Pass snektest filters/flags through, e.g: just render tests/isolated/test_basic.py
+render *ARGS:
+    uv run python -m testutils.render_matrix {{ARGS}}
+
 test:
     uv run coverage erase
     COVERAGE_PROCESS_START=pyproject.toml uv run coverage run -m snektest tests/

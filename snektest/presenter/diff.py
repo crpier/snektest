@@ -18,14 +18,14 @@ def render_assertion_failure(
     actual = exc.actual
     expected = exc.expected
 
-    console.print(f"E       {exc.args[0]}", style="red", markup=False)
-
     if isinstance(actual, list) and isinstance(expected, list):
+        console.print(f"E       {exc.args[0]}", style="red", markup=False)
         # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("list[Any]", actual)
         expected = cast("list[Any]", expected)
         render_list_diff(console, actual, expected, ndiff_func=ndiff_func)
     elif isinstance(actual, dict) and isinstance(expected, dict):
+        console.print(f"E       {exc.args[0]}", style="red", markup=False)
         # I'm just casting dict[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("dict[Any, Any]", actual)
         expected = cast("dict[Any, Any]", expected)
@@ -42,6 +42,7 @@ def render_assertion_failure(
             ndiff_func=ndiff_func,
         )
     else:
+        console.print(f"E       {exc.args[0]}", style="red", markup=False)
         return
 
 
@@ -108,8 +109,9 @@ def render_list_diff(
 
     console.print("E       ", style="red", markup=False)
 
-    expected_lines = pprint.pformat(expected, width=80).splitlines()
-    actual_lines = pprint.pformat(actual, width=80).splitlines()
+    pformat_width = max(console.width - 8, 1)
+    expected_lines = pprint.pformat(expected, width=pformat_width).splitlines()
+    actual_lines = pprint.pformat(actual, width=pformat_width).splitlines()
     _print_ndiff(console, expected_lines, actual_lines, ndiff_func=ndiff_func)
 
 
@@ -123,8 +125,9 @@ def render_dict_diff(
     """Render a pytest-like diff for dicts."""
     console.print()
 
-    expected_lines = pprint.pformat(expected, width=80).splitlines()
-    actual_lines = pprint.pformat(actual, width=80).splitlines()
+    pformat_width = max(console.width - 8, 1)
+    expected_lines = pprint.pformat(expected, width=pformat_width).splitlines()
+    actual_lines = pprint.pformat(actual, width=pformat_width).splitlines()
 
     diff = ndiff_func(expected_lines, actual_lines)
 
