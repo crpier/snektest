@@ -398,6 +398,37 @@ def test_render_dict_diff_uses_console_width() -> None:
     assert_in(one_line, console.export_text())
 
 
+# --- Finding 4: boundary-width diff line must not wrap and detach its marker ---
+@test()
+def test_render_dict_diff_keeps_marker_attached_at_width_boundary() -> None:
+    """ndiff marker/caret lines must stay attached to the content they annotate.
+
+    Each printed line is the 8-char ``E       `` prefix plus ndiff's own 2-char
+    ``- ``/``? `` marker plus the pformat content. Budgeting pformat to
+    ``console.width - 8`` (ignoring the 2-char marker) lets a boundary line print
+    at ``width + 2``; Rich then wraps it and the trailing fragment plus its
+    ``? ^`` caret detach onto lines with no ``E`` prefix. The dict below has a
+    51-char single-line repr at ``width=60`` so it lands exactly in that
+    off-by-2 window.
+    """
+    width = 60
+    console = Console(record=True, width=width)
+    actual = {"k0xxxxxx": 0, "k1": 1, "k2": 2, "k3": 3, "k4": 4}
+    expected = {"k0xxxxxx": 9, "k1": 1, "k2": 2, "k3": 3, "k4": 4}
+
+    render_dict_diff(console, actual, expected)
+
+    # Every non-empty diff line must carry the "E" prefix; an orphaned
+    # continuation line (starting with the wrapped pformat content) means the
+    # marker detached.
+    orphans = [
+        line
+        for line in console.export_text().splitlines()
+        if line and not line.startswith("E")
+    ]
+    assert_eq(orphans, [])
+
+
 # --- Finding 6: redundant repr blob above multiline string diff (diff.py) ---
 @test()
 def test_render_assertion_failure_omits_repr_blob_for_multiline_strings() -> None:

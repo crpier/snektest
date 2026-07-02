@@ -109,7 +109,11 @@ def render_list_diff(
 
     console.print("E       ", style="red", markup=False)
 
-    pformat_width = max(console.width - 8, 1)
+    # Budget the pformat width so the printed line -- the 8-char "E       "
+    # prefix plus ndiff's own 2-char "- "/"+ "/"? " marker plus the content --
+    # fits the terminal. Otherwise a boundary line wraps and detaches ndiff
+    # caret ("? ^^^") lines from the content they annotate (finding 4).
+    pformat_width = max(console.width - 10, 1)
     expected_lines = pprint.pformat(expected, width=pformat_width).splitlines()
     actual_lines = pprint.pformat(actual, width=pformat_width).splitlines()
     _print_ndiff(console, expected_lines, actual_lines, ndiff_func=ndiff_func)
@@ -125,7 +129,9 @@ def render_dict_diff(
     """Render a pytest-like diff for dicts."""
     console.print()
 
-    pformat_width = max(console.width - 8, 1)
+    # See render_list_diff: -10 leaves room for the "E       " prefix and the
+    # 2-char ndiff marker so boundary lines don't wrap and detach carets.
+    pformat_width = max(console.width - 10, 1)
     expected_lines = pprint.pformat(expected, width=pformat_width).splitlines()
     actual_lines = pprint.pformat(actual, width=pformat_width).splitlines()
 
