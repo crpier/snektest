@@ -27,8 +27,6 @@ def _ellipsize_summary_detail(detail: str, max_width: int) -> str:
     """Shorten only summary diagnostics, never the test name."""
     if not detail or len(detail) <= max_width:
         return detail
-    if max_width <= 1:
-        return "…"
     return f"{detail[: max_width - 1]}…"
 
 
@@ -52,8 +50,8 @@ def _print_named_summary_entry(
     detail: str = "",
 ) -> None:
     label_text, label_style = label
-    available_detail_width = (
-        console.width - len(label_text) - 1 - len(test_name) - len(detail_prefix)
+    available_detail_width = max(
+        console.width - len(label_text) - 1 - len(detail_prefix), 1
     )
     line = Text.assemble(
         (label_text, label_style),
