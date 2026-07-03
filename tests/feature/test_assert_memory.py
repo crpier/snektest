@@ -54,6 +54,43 @@ async def test_flat_usage_passes_slope_budget() -> None:
 
 
 @test(mark="fast")
+async def test_leak_does_not_inflate_per_round_peak() -> None:
+    """A leak retained across rounds must not inflate the per-round peak.
+
+    Each round appends 128KB to a list held for the whole block; peak is reset
+    per round, so the reported peak is one round's allocation (~128KB), well
+    under a 300KB budget, even though 12 rounds retain ~1.5MB in total.
+    """
+    with assert_memory(peak_below=300 * 1024, rounds=12) as measurement:
+        _leaked = [bytearray(128 * 1024) for _ in measurement.rounds]
+    assert_lt(measurement.peak_bytes, 300 * 1024)
+
+
+@test(mark="fast")
+async def test_leak_still_caught_by_slope_budget() -> None:
+    """The same leak that no longer inflates peak still trips the slope budget."""
+    with (
+        assert_raises(AssertionFailure),
+        assert_memory(slope_below=1024, rounds=12) as measurement,
+    ):
+        _leaked = [bytearray(128 * 1024) for _ in measurement.rounds]
+
+
+@test(mark="fast")
+async def test_flat_body_slope_stays_near_zero() -> None:
+    """An empty round body must not manufacture growth from measurement machinery.
+
+    The retained-samples list is preallocated and only plain ints are kept per
+    round, so a flat body reports a near-zero slope rather than the machinery's
+    own per-round allocation.
+    """
+    with assert_memory(slope_below=64, rounds=30) as measurement:
+        for _ in measurement.rounds:
+            pass
+    assert_lt(measurement.growth_slope, 64)
+
+
+@test(mark="fast")
 async def test_slope_budget_requires_ten_rounds() -> None:
     """A slope budget under ten rounds has no meaningful fit and is rejected."""
     with assert_raises(BadRequestError), assert_memory(slope_below=1024, rounds=3):

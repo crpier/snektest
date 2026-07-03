@@ -51,6 +51,27 @@ def test_reset_peak_drops_the_watermark() -> None:
 
 
 @test()
+def test_reset_peak_rebaselines_against_retained() -> None:
+    """After reset_peak, peak excludes memory still retained across the reset.
+
+    Unlike the freed-spike case, the 500KB here stays live through the reset;
+    peak must be measured above that retained level, so a leak carried between
+    rounds cannot inflate a later round's peak.
+    """
+    backend = TracemallocBackend()
+    backend.start()
+    try:
+        retained = bytearray(500 * _KB)
+        backend.reset_peak()
+        transient = bytearray(_KB)
+        del transient
+        assert_lt(backend.sample().peak_bytes, 100 * _KB)
+        del retained
+    finally:
+        backend.stop()
+
+
+@test()
 def test_owned_tracing_is_stopped() -> None:
     """A backend that started tracing stops it on stop()."""
     backend = TracemallocBackend()

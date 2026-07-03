@@ -28,10 +28,12 @@ type BackendName = Literal["tracemalloc"]
 class Sample:
     """One point-in-time memory reading, relative to the backend baseline.
 
-    `retained_bytes` is live memory still held at sample time; `peak_bytes` is
-    the high-water mark since the last `reset_peak()`. Both are measured above
-    the baseline captured when the backend started, so the tracer's own
-    bookkeeping does not leak into the numbers.
+    `retained_bytes` is live memory still held at sample time, measured above
+    the baseline captured when the backend started. `peak_bytes` is the
+    high-water mark since the last `reset_peak()`, measured above the retained
+    total at that reset, so a leak retained across rounds does not inflate it.
+    Both subtract the tracer's own bookkeeping so it does not leak into the
+    numbers.
     """
 
     retained_bytes: int
@@ -42,8 +44,10 @@ class MemoryBackend(Protocol):
     """Thread-inclusive memory tracer used by `assert_memory`.
 
     `start()` establishes a baseline; `reset_peak()` drops the peak watermark to
-    the current level so each round measures its own transient allocation;
-    `sample()` reads retained and peak bytes above the baseline; `stop()` undoes
+    the current level and re-baselines the peak against it, so each round's peak
+    measures only that round's transient allocation and a leak retained from
+    earlier rounds cannot inflate it; `sample()` reads retained bytes above the
+    start baseline and peak bytes above the last `reset_peak()`; `stop()` undoes
     `start()`, never tearing down tracing the backend did not itself begin.
     """
 
@@ -62,11 +66,18 @@ class TracemallocBackend:
     tracemalloc's own allocations are subtracted out. `stop()` stops tracing
     only when the backend started it, leaving a caller's pre-existing tracing
     session untouched.
+
+    `reset_peak()` re-baselines the peak against the current retained total, so
+    `sample().peak_bytes` reports the peak above the *most recent* reset rather
+    than above the start baseline. In rounds mode this makes each round's peak
+    its own transient allocation; in whole-block mode the single reset at
+    `__enter__` sits at the start baseline, preserving whole-block semantics.
     """
 
     def __init__(self) -> None:
         self._owns_tracing: bool = False
         self._baseline_bytes: int = 0
+        self._peak_baseline_bytes: int = 0
 
     def start(self) -> None:
         if tracemalloc.is_tracing():
@@ -75,15 +86,17 @@ class TracemallocBackend:
             tracemalloc.start(1)
             self._owns_tracing = True
         self._baseline_bytes = tracemalloc.get_traced_memory()[0]
+        self._peak_baseline_bytes = self._baseline_bytes
 
     def reset_peak(self) -> None:
         tracemalloc.reset_peak()
+        self._peak_baseline_bytes = tracemalloc.get_traced_memory()[0]
 
     def sample(self) -> Sample:
         current_bytes, peak_bytes = tracemalloc.get_traced_memory()
         return Sample(
             retained_bytes=current_bytes - self._baseline_bytes,
-            peak_bytes=peak_bytes - self._baseline_bytes,
+            peak_bytes=max(0, peak_bytes - self._peak_baseline_bytes),
         )
 
     def stop(self) -> None:

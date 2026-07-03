@@ -7,7 +7,6 @@ from typing import Any, Self, cast, overload
 from snektest.memory import (
     BackendName,
     MemoryBackend,
-    Sample,
     create_backend,
     enter_measurement,
     exit_measurement,
@@ -179,7 +178,8 @@ class MemoryContext:
         self._rounds: int = rounds
         self._warmup: int = warmup
         self._backend: MemoryBackend = create_backend(backend)
-        self._samples: list[Sample] = []
+        self._retained_samples: list[int] = []
+        self._peak_max: int = 0
         self._rounds_iter: Generator[int] | None = None
         self._exhausted: bool = False
         self._guard_token: Token[bool] | None = None
@@ -253,7 +253,13 @@ class MemoryContext:
         return self._growth_slope
 
     def _run_rounds(self) -> Generator[int]:
-        """Yield each round index, sampling the round on resume after the body."""
+        """Yield each round index, sampling the round on resume after the body.
+
+        The retained-samples list is preallocated to its final size before any
+        measured round so per-round list growth does not masquerade as leaked
+        memory in the slope fit.
+        """
+        self._retained_samples = [0] * self._rounds
         for index in range(self._warmup + self._rounds):
             self._backend.reset_peak()
             yield index
@@ -261,10 +267,16 @@ class MemoryContext:
         self._exhausted = True
 
     def _record_round(self, index: int) -> None:
-        """Sample a finished round, keeping only post-warmup rounds for the fit."""
+        """Sample a finished round, keeping only post-warmup rounds for the fit.
+
+        Only plain ints are retained (into a preallocated slot and a running
+        peak max), so the machinery's own per-round allocation stays negligible
+        and does not contaminate the growth slope.
+        """
         sample = self._backend.sample()
         if index >= self._warmup:
-            self._samples.append(sample)
+            self._retained_samples[index - self._warmup] = sample.retained_bytes
+            self._peak_max = max(self._peak_max, sample.peak_bytes)
 
     def _finalize(self) -> None:
         """Reduce samples to peak/slope, guarding misuse of the rounds iterator."""
@@ -285,14 +297,14 @@ class MemoryContext:
                 "`for _ in m.rounds:` run to completion (do not break early)."
             )
             raise BadRequestError(msg)
-        self._peak_bytes = max(sample.peak_bytes for sample in self._samples)
-        retained_bytes = [sample.retained_bytes for sample in self._samples]
+        self._peak_bytes = self._peak_max
+        retained_bytes = self._retained_samples
         self._growth_slope = (
             _theil_sen_slope(retained_bytes)
             if len(retained_bytes) >= _MIN_SLOPE_POINTS
             else None
         )
-        self._assert_budgets(measured_rounds=len(self._samples))
+        self._assert_budgets(measured_rounds=len(self._retained_samples))
 
     def _assert_budgets(self, *, measured_rounds: int) -> None:
         """Compare measured numbers to budgets, recording the result on pass."""
