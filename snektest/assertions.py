@@ -1,7 +1,21 @@
-from types import TracebackType
-from typing import Any, Self, cast, overload
+from __future__ import annotations
 
-from snektest.models import AssertionFailure, BadRequestError
+from collections.abc import Iterator
+from statistics import median
+from types import TracebackType
+from typing import Any, Literal, Self, cast, overload
+
+from snektest.memory import (
+    MemoryBackend,
+    TracemallocBackend,
+    append_memory_measurement,
+    mark_memory_active,
+    memory_is_active,
+)
+from snektest.models import AssertionFailure, BadRequestError, MemoryMeasurement
+
+MIN_SLOPE_ROUNDS = 10
+MIN_SLOPE_SAMPLE_COUNT = 2
 
 
 def assert_raises[T](
@@ -59,6 +73,226 @@ class RaisesContex[T]:
             msg = "Exception under assert_raises was accessed before exiting the context manager"
             raise BadRequestError(msg)
         return cast("T", self._exception)
+
+
+class MemoryRounds:
+    def __init__(self, context: MemoryContext) -> None:
+        self._context: MemoryContext = context
+        self._yielded_count: int = 0
+
+    def __iter__(self) -> Iterator[int]:
+        return self
+
+    def __next__(self) -> int:
+        self._context.mark_rounds_touched()
+        if self._yielded_count > 0:
+            self._context.record_completed_round(self._yielded_count - 1)
+            self._context.reset_round_peak()
+        if self._yielded_count >= self._context.total_rounds:
+            self._context.mark_rounds_exhausted()
+            raise StopIteration
+        round_index = self._yielded_count
+        self._yielded_count += 1
+        return round_index
+
+
+class MemoryContext:
+    def __init__(
+        self,
+        *,
+        peak_below: int | None,
+        slope_below: int | None,
+        rounds: int,
+        warmup: int,
+        backend: Literal["tracemalloc"],
+    ) -> None:
+        self.peak_below: int | None = peak_below
+        self.slope_below: int | None = slope_below
+        self.rounds_count: int = rounds
+        self.warmup: int = warmup
+        self._backend: MemoryBackend = self._build_backend(backend)
+        self._active_context: Any = None
+        self._growth_slope: float | None = None
+        self._has_exited: bool = False
+        self._peak_bytes: int | None = None
+        self._retained_bytes_by_round: list[int] = []
+        self._rounds_exhausted: bool = False
+        self._rounds_touched: bool = False
+        self._total_rounds: int = warmup + rounds
+        self.rounds: MemoryRounds = MemoryRounds(self)
+
+    def __enter__(self) -> Self:
+        if memory_is_active():
+            msg = "assert_memory blocks cannot be nested"
+            raise BadRequestError(msg)
+        if self.peak_below is None and self.slope_below is None:
+            msg = "assert_memory requires peak_below or slope_below"
+            raise BadRequestError(msg)
+        if self.slope_below is not None and self.rounds_count < MIN_SLOPE_ROUNDS:
+            msg = "assert_memory with slope_below requires rounds >= 10"
+            raise BadRequestError(msg)
+        self._active_context = mark_memory_active()
+        self._active_context.__enter__()
+        self._backend.start()
+        self._backend.reset_peak()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        try:
+            if exc_type is not None:
+                return False
+            self._finish_measurement()
+            self._has_exited = True
+            self._assert_budgets()
+            append_memory_measurement(
+                MemoryMeasurement(
+                    growth_slope=self._growth_slope,
+                    peak_budget=self.peak_below,
+                    peak_bytes=self.peak_bytes,
+                    rounds=self.rounds_count,
+                    slope_budget=self.slope_below,
+                )
+            )
+            return False
+        finally:
+            self._has_exited = True
+            self._backend.stop()
+            if self._active_context is not None:
+                self._active_context.__exit__(exc_type, exc_value, traceback)
+                self._active_context = None
+
+    @property
+    def growth_slope(self) -> float | None:
+        if not self._has_exited:
+            msg = "Memory growth slope was accessed before exiting the context manager"
+            raise BadRequestError(msg)
+        return self._growth_slope
+
+    @property
+    def peak_bytes(self) -> int:
+        if not self._has_exited:
+            msg = "Memory peak bytes were accessed before exiting the context manager"
+            raise BadRequestError(msg)
+        return cast("int", self._peak_bytes)
+
+    @property
+    def total_rounds(self) -> int:
+        return self._total_rounds
+
+    @staticmethod
+    def _build_backend(backend: Literal["tracemalloc"]) -> MemoryBackend:
+        if backend != "tracemalloc":
+            msg = f"Unknown memory backend: {backend}"
+            raise BadRequestError(msg)
+        return TracemallocBackend()
+
+    def mark_rounds_touched(self) -> None:
+        self._rounds_touched = True
+
+    def mark_rounds_exhausted(self) -> None:
+        self._rounds_exhausted = True
+
+    def record_completed_round(self, round_index: int) -> None:
+        sample = self._backend.sample()
+        if round_index < self.warmup:
+            return
+        self._retained_bytes_by_round.append(sample.retained_bytes)
+        self._peak_bytes = max(self._peak_bytes or 0, sample.peak_bytes)
+
+    def reset_round_peak(self) -> None:
+        self._backend.reset_peak()
+
+    def _finish_measurement(self) -> None:
+        if self.rounds_count > 1 and not self._rounds_exhausted:
+            msg = "assert_memory rounds must be fully consumed when rounds > 1"
+            raise BadRequestError(msg)
+        if not self._rounds_touched:
+            sample = self._backend.sample()
+            self._peak_bytes = sample.peak_bytes
+            if self.rounds_count == 1:
+                self._retained_bytes_by_round = [sample.retained_bytes]
+        if self._peak_bytes is None:
+            self._peak_bytes = 0
+        self._growth_slope = self._calculate_growth_slope()
+
+    def _calculate_growth_slope(self) -> float | None:
+        if len(self._retained_bytes_by_round) < MIN_SLOPE_SAMPLE_COUNT:
+            return None
+        slopes: list[float] = []
+        for start_index, start_bytes in enumerate(self._retained_bytes_by_round):
+            slopes.extend(
+                (self._retained_bytes_by_round[end_index] - start_bytes)
+                / (end_index - start_index)
+                for end_index in range(
+                    start_index + 1, len(self._retained_bytes_by_round)
+                )
+            )
+        return float(median(slopes))
+
+    def _assert_budgets(self) -> None:
+        if self.peak_below is not None and self.peak_bytes >= self.peak_below:
+            message = f"memory peak {self.peak_bytes} >= {self.peak_below}"
+            raise AssertionFailure(
+                message,
+                actual=self.peak_bytes,
+                expected=self.peak_below,
+                operator="<",
+            )
+        if self.slope_below is None:
+            return
+        if self._growth_slope is None:
+            msg = "assert_memory could not calculate growth slope"
+            raise BadRequestError(msg)
+        if self._growth_slope >= self.slope_below:
+            message = (
+                f"memory growth slope {self._growth_slope:g} >= {self.slope_below}"
+            )
+            raise AssertionFailure(
+                message,
+                actual=self._growth_slope,
+                expected=self.slope_below,
+                operator="<",
+            )
+
+
+@overload
+def assert_memory(
+    *,
+    peak_below: int,
+    slope_below: int | None = None,
+    rounds: int = 1,
+    warmup: int = 1,
+    backend: Literal["tracemalloc"] = "tracemalloc",
+) -> MemoryContext: ...
+@overload
+def assert_memory(
+    *,
+    slope_below: int,
+    peak_below: int | None = None,
+    rounds: int = 1,
+    warmup: int = 1,
+    backend: Literal["tracemalloc"] = "tracemalloc",
+) -> MemoryContext: ...
+def assert_memory(
+    *,
+    peak_below: int | None = None,
+    slope_below: int | None = None,
+    rounds: int = 1,
+    warmup: int = 1,
+    backend: Literal["tracemalloc"] = "tracemalloc",
+) -> MemoryContext:
+    return MemoryContext(
+        peak_below=peak_below,
+        slope_below=slope_below,
+        rounds=rounds,
+        warmup=warmup,
+        backend=backend,
+    )
 
 
 def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:

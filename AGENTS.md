@@ -125,6 +125,24 @@ resources). Marking every test is the recommended public style; filter a run to
 one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
 alias for the three literals; markers are passed as a single literal.
 
+### Memory Assertions
+
+`assert_memory(peak_below=..., slope_below=..., rounds=1, warmup=1)` is a plain
+context-manager assertion around only the code region being measured. Budgets are
+bytes as `int`; at least one budget is required. The tracemalloc backend measures
+Python-object allocations, baselines tracer overhead, and preserves a tracer it
+did not start. Nested `assert_memory` blocks raise `BadRequestError` because
+`reset_peak()` would corrupt the outer measurement. Passing measurements are
+attached to `PassedResult.measurements` and rendered on green result lines and in
+JSON output; failed/error results do not carry measurements.
+
+Peak mode asserts `peak_bytes < peak_below`. Leak mode requires `rounds >= 10`
+when `slope_below` is set. Tests must iterate `m.rounds`; it yields
+`warmup + rounds` iterations, records each completed iteration, drops warmup
+samples from the fit, and computes `growth_slope` as the signed Theil–Sen median
+slope of retained bytes per round. Whole-block `rounds=1` mode does not use
+warmup. `m.peak_bytes` and `m.growth_slope` are readable only after context exit.
+
 ### Timeouts
 
 `--timeout SECONDS` sets a run-wide ceiling on each test, applied in

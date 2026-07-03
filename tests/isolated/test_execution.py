@@ -10,6 +10,7 @@ from snektest import (
     assert_is,
     assert_is_not_none,
     assert_isinstance,
+    assert_memory,
     assert_raises,
     fail,
     fixture,
@@ -335,3 +336,33 @@ async def test_timeout_does_not_affect_fast_async_test() -> None:
     result = await execute_test(_test_case(name, quick), timeout=10)
 
     _ = assert_isinstance(result.result, PassedResult)
+
+
+@test()
+async def test_execute_test_attaches_memory_measurements_to_passed_result() -> None:
+    name = TestName(file_path=Path("x.py"), func_name="measured", params_part="")
+
+    def measured() -> None:
+        with assert_memory(peak_below=1024 * 1024):
+            buffer = bytearray(1024)
+            assert_eq(len(buffer), 1024)
+
+    result = await execute_test(_test_case(name, measured))
+
+    passed = assert_isinstance(result.result, PassedResult)
+    assert_eq(len(passed.measurements), 1)
+    assert_eq(passed.measurements[0].peak_budget, 1024 * 1024)
+
+
+@test()
+async def test_execute_test_does_not_attach_failed_memory_measurements() -> None:
+    name = TestName(file_path=Path("x.py"), func_name="measured", params_part="")
+
+    def measured() -> None:
+        with assert_memory(peak_below=1):
+            buffer = bytearray(1024)
+            assert_eq(len(buffer), 1024)
+
+    result = await execute_test(_test_case(name, measured))
+
+    _ = assert_isinstance(result.result, FailedResult)

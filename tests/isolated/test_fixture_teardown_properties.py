@@ -19,9 +19,7 @@ from snektest.decorators import test_hypothesis
 from snektest.fixtures import FixtureRegistry
 
 
-def _recording_fixture(
-    label: int, events: list[tuple[str, int]]
-) -> Fixture[int]:
+def _recording_fixture(label: int, events: list[tuple[str, int]]) -> Fixture[int]:
     """A function fixture that records its own setup and teardown."""
 
     def gen() -> Generator[int]:

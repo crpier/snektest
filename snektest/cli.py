@@ -58,8 +58,18 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
             entry["exception"] = _json_exception(exc_type, exc_value)
         case ErrorResult(exc_type=exc_type, exc_value=exc_value):
             entry["exception"] = _json_exception(exc_type, exc_value)
-        case PassedResult():
-            pass
+        case PassedResult(measurements=measurements):
+            if measurements:
+                entry["memory_measurements"] = [
+                    {
+                        "growth_slope": measurement.growth_slope,
+                        "peak_budget": measurement.peak_budget,
+                        "peak_bytes": measurement.peak_bytes,
+                        "rounds": measurement.rounds,
+                        "slope_budget": measurement.slope_budget,
+                    }
+                    for measurement in measurements
+                ]
     if result.fixture_teardown_failures:
         entry["fixture_teardown_failures"] = [
             {

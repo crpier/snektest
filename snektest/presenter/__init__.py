@@ -11,6 +11,41 @@ from snektest.presenter.errors import print_failures as _print_failures
 from snektest.presenter.summary import print_summary as _print_summary
 
 console = Console()
+BYTE_UNIT = 1024
+
+
+def _format_bytes(byte_count: float, *, sign: bool = False) -> str:
+    absolute_bytes = abs(byte_count)
+    units = ("B", "KB", "MB", "GB", "TB")
+    unit_index = 0
+    scaled_bytes = byte_count
+    while absolute_bytes >= BYTE_UNIT and unit_index < len(units) - 1:
+        absolute_bytes /= BYTE_UNIT
+        scaled_bytes /= BYTE_UNIT
+        unit_index += 1
+    prefix = "+" if sign and scaled_bytes >= 0 else ""
+    if unit_index == 0:
+        return f"{prefix}{scaled_bytes:.0f}{units[unit_index]}"
+    return f"{prefix}{scaled_bytes:.1f}{units[unit_index]}"
+
+
+def _format_memory_measurements(result: PassedResult) -> str:
+    parts: list[str] = []
+    for measurement in result.measurements:
+        if measurement.peak_budget is not None:
+            parts.append(
+                f"peak={_format_bytes(measurement.peak_bytes)} (<{_format_bytes(measurement.peak_budget)})"
+            )
+        if (
+            measurement.slope_budget is not None
+            and measurement.growth_slope is not None
+        ):
+            parts.append(
+                f"slope={_format_bytes(measurement.growth_slope, sign=True)}/round (<{_format_bytes(measurement.slope_budget)}, {measurement.rounds} rounds)"
+            )
+    if not parts:
+        return ""
+    return "  " + "  ".join(parts)
 
 
 def print_error(exc: str) -> None:
@@ -27,9 +62,9 @@ def print_test_result_to_console(console: Console, result: TestResult) -> None:
         soft_wrap=True,
     )
     match result.result:
-        case PassedResult():
+        case PassedResult() as passed:
             console.print(
-                f"OK ({result.duration:.2f}s)",
+                f"OK ({result.duration:.2f}s){_format_memory_measurements(passed)}",
                 highlight=False,
                 style="green",
                 markup=False,

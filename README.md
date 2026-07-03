@@ -232,6 +232,42 @@ def test_show_in_assertion() -> None:
 E       'qux' not found in ['foo', 'bar', 'baz']
 ```
 
+### Memory Assertions
+
+Use `assert_memory` as a plain context manager around the code region you want to
+measure. Budgets are bytes as `int`; at least one of `peak_below` or
+`slope_below` is required. For leak checks, set `rounds >= 10` and iterate
+`memory.rounds`; `warmup` rounds run first and are excluded from the retained
+memory slope.
+
+```python
+from snektest import assert_lt, assert_memory, test
+
+ONE_MEGABYTE = 1024 * 1024
+
+
+@test(mark="fast")
+def test_peak_allocation_budget() -> None:
+    with assert_memory(peak_below=10 * ONE_MEGABYTE) as memory:
+        buffer = bytearray(ONE_MEGABYTE)
+        assert_lt(len(buffer), 2 * ONE_MEGABYTE)
+
+    assert_lt(memory.peak_bytes, 10 * ONE_MEGABYTE)
+
+
+@test(mark="fast")
+def test_no_retained_growth() -> None:
+    with assert_memory(slope_below=50_000, rounds=10) as memory:
+        for _ in memory.rounds:
+            buffer = bytearray(100_000)
+            assert_lt(len(buffer), 200_000)
+
+    assert_lt(memory.growth_slope, 50_000)
+```
+
+Passing memory assertions are shown on the green result line, e.g.
+`peak=1.0MB (<10.0MB)` or `slope=+8B/round (<48.8KB, 10 rounds)`.
+
 ### Async Support
 
 Write async tests as naturally as sync ones:
@@ -323,6 +359,7 @@ python -m snektest --agent-docs
 # List or print bundled examples
 snektest --examples
 snektest --example async
+snektest --example memory
 
 # Drop into post-mortem debugging on first failure
 snektest --pdb
@@ -549,6 +586,25 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 - `assert_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is true; `classinfo` may be a tuple of types. When `classinfo` is a single type, returns `obj` narrowed to that type (bind it to narrow for later use; discard with `_ =` for a pure assertion)
 - `assert_not_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is false
 - `assert_len(obj, expected_length)` — assert that `len(obj) == expected_length`
+
+### Memory Assertions
+
+**`assert_memory(peak_below=..., slope_below=..., rounds=1, warmup=1)`** —
+assert on peak traced Python allocations and/or retained-memory growth.
+
+- Uses `tracemalloc` by default.
+- Budgets are bytes as `int`.
+- `slope_below` requires `rounds >= 10` and uses a Theil–Sen median slope in bytes per round.
+- `memory.peak_bytes` and `memory.growth_slope` are readable after the context exits for custom assertions.
+- `assert_memory` blocks cannot be nested.
+
+<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+```python
+from snektest import assert_memory
+
+with assert_memory():
+    pass
+```
 
 ### Exception Assertions
 

@@ -136,7 +136,20 @@ class TestName:
         return result
 
 
-class PassedResult: ...
+@dataclass(frozen=True)
+class MemoryMeasurement:
+    """Memory assertion measurement attached to a passing test."""
+
+    growth_slope: float | None
+    peak_budget: int | None
+    peak_bytes: int
+    rounds: int
+    slope_budget: int | None
+
+
+@dataclass(frozen=True)
+class PassedResult:
+    measurements: tuple[MemoryMeasurement, ...] = ()
 
 
 type TestFunction = Callable[..., Coroutine[None] | None]

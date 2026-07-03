@@ -32,6 +32,7 @@ from snektest.models import (
     BadRequestError,
     CollectionError,
     FilterItem,
+    MemoryMeasurement,
     PassedResult,
     TestName,
     TestResult,
@@ -323,6 +324,57 @@ async def test_run_script_json_output_includes_markers() -> None:
     assert_eq(result, 0)
     payload = json.loads(buffer.getvalue())
     assert_eq(payload["tests"][0]["markers"], ["fast"])
+
+
+@test()
+async def test_run_script_json_output_includes_memory_measurements() -> None:
+    async def fake_run(*args: object, **kwargs: object) -> object:
+        _ = (args, kwargs)
+        test_result = TestResult(
+            name=TestName(
+                file_path=Path("tests/test_fake.py"), func_name="t", params_part=""
+            ),
+            duration=0.0,
+            result=PassedResult(
+                measurements=(
+                    MemoryMeasurement(
+                        growth_slope=12.0,
+                        peak_budget=100,
+                        peak_bytes=50,
+                        rounds=10,
+                        slope_budget=20,
+                    ),
+                )
+            ),
+            markers=(),
+            captured_output=StringIO(""),
+            fixture_teardown_failures=[],
+            fixture_teardown_output=None,
+            warnings=[],
+        )
+        return type(
+            "Summary",
+            (),
+            {
+                "passed": 1,
+                "failed": 0,
+                "errors": 0,
+                "fixture_teardown_failed": 0,
+                "session_teardown_failed": 0,
+                "session_teardown_failures": [],
+                "test_results": [test_result],
+            },
+        )()
+
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(
+            ["--json-output"],
+            run_tests_programmatic_fn=fake_run,
+        )
+    assert_eq(result, 0)
+    payload = json.loads(buffer.getvalue())
+    assert_eq(payload["tests"][0]["memory_measurements"][0]["peak_bytes"], 50)
 
 
 @test()

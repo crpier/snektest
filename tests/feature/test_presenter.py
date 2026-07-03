@@ -11,6 +11,7 @@ from snektest.models import (
     AssertionFailure,
     ErrorResult,
     FailedResult,
+    MemoryMeasurement,
     PassedResult,
     TestName,
     TestResult,
@@ -107,6 +108,37 @@ def test_print_failures_separates_multiple_failed_tests_with_blank_line() -> Non
         "RuntimeError: one\n\nx.py::second ... FAIL (0.00s)",
         console.export_text(),
     )
+
+
+@test()
+def test_print_test_result_includes_memory_measurements_on_pass() -> None:
+    console = Console(record=True)
+    result = TestResult(
+        name=TestName(file_path=Path("x.py"), func_name="measured", params_part=""),
+        duration=0.0,
+        result=PassedResult(
+            measurements=(
+                MemoryMeasurement(
+                    growth_slope=12.0,
+                    peak_budget=10 * 1024 * 1024,
+                    peak_bytes=8 * 1024 * 1024,
+                    rounds=50,
+                    slope_budget=1024,
+                ),
+            )
+        ),
+        markers=(),
+        captured_output=StringIO(""),
+        fixture_teardown_failures=[],
+        fixture_teardown_output=None,
+        warnings=[],
+    )
+
+    print_test_result_to_console(console, result)
+
+    text = console.export_text()
+    assert_in("peak=8.0MB (<10.0MB)", text)
+    assert_in("slope=+12B/round (<1.0KB, 50 rounds)", text)
 
 
 @test()

@@ -63,6 +63,10 @@ def test_needs_parentheses() -> None:
 - `assert_is_not_none(x)` and `assert_isinstance(x, SomeType)` return the
   narrowed value; bind it to narrow for later use, or discard with `_ =` for a
   pure assertion.
+- Use `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)`
+  as a plain context manager around only the code being measured. Budgets are
+  bytes as `int`; at least one budget is required. `slope_below` requires
+  `rounds >= 10`; iterate `memory.rounds` to run warmup plus measured rounds.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -98,6 +102,7 @@ snektest --example basic
 snektest --example fixtures
 snektest --example async
 snektest --example parametrize
+snektest --example memory
 ```
 """
 
@@ -105,6 +110,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "async": "async_tests.py",
     "basic": "basic_test.py",
     "fixtures": "fixtures.py",
+    "memory": "memory.py",
     "parametrize": "parametrize.py",
 }
 
