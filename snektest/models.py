@@ -136,7 +136,26 @@ class TestName:
         return result
 
 
-class PassedResult: ...
+@dataclass(frozen=True)
+class MemoryMeasurement:
+    """One `assert_memory` result: measured numbers plus the budgets that gated them.
+
+    `growth_slope` is bytes-per-round (Theil-Sen), `None` for a whole-block
+    single sample. `rounds` is the count of measured (post-warmup) rounds.
+    Budgets are `None` when the corresponding check was not requested; the
+    presenter renders only the budgets that were set.
+    """
+
+    peak_bytes: int
+    growth_slope: float | None
+    rounds: int
+    peak_budget: int | None
+    slope_budget: int | None
+
+
+@dataclass(frozen=True)
+class PassedResult:
+    measurements: tuple[MemoryMeasurement, ...] = ()
 
 
 type TestFunction = Callable[..., Coroutine[None] | None]

@@ -579,6 +579,59 @@ def test_access_exception() -> None:
     assert_eq(exc_info.exception.args[0], "custom message")
 ```
 
+### Memory Assertions
+
+**`assert_memory(*, peak_below=None, slope_below=None, rounds=1, warmup=1, backend="tracemalloc")`**
+— Assert on a region's memory behavior. Budgets are bytes-as-`int` (no size
+strings). At least one of `peak_below` (max transient allocation) or
+`slope_below` (per-round leak growth) is required; a budgetless call is a type
+error. Budgets are checked on exit, raising `AssertionFailure`.
+
+For a whole-block peak budget, wrap the region directly. For leak detection,
+loop your work over `m.rounds` — a stateful iterator running `warmup + rounds`
+iterations; a `slope_below` budget needs `rounds >= 10`. The slope is a
+Theil–Sen fit of retained bytes per round (resistant to a single-round GC
+spike), and `peak_bytes` is the max single-round peak. `m.peak_bytes` and
+`m.growth_slope` stay readable after the block for custom assertions. On a pass,
+the measured numbers are shown on the result line (e.g.
+`peak=1.0MB (<8.0MB)`). `assert_memory` cannot be nested.
+
+```python
+from snektest import assert_memory, test
+
+
+@test(mark="fast")
+def test_peak_allocation_budget() -> None:
+    with assert_memory(peak_below=8 * 1024 * 1024):
+        payload = bytearray(1024 * 1024)
+        del payload
+
+
+@test(mark="fast")
+def test_no_leak_across_rounds() -> None:
+    scratch: list[bytearray] = []
+    with assert_memory(slope_below=64 * 1024, rounds=20) as m:
+        for _ in m.rounds:
+            scratch.clear()
+            scratch.append(bytearray(32 * 1024))
+    _ = m.peak_bytes
+    _ = m.growth_slope
+```
+
+A budgetless call is rejected by the type checker:
+
+<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+```python
+from snektest import assert_memory, test
+
+
+@test(mark="fast")
+def test_needs_a_budget() -> None:
+    # Type error: no overload matches a call with neither budget set.
+    with assert_memory():
+        pass
+```
+
 ### Unconditional Failure
 
 **`fail(msg=None)`** - Raise an AssertionFailure unconditionally

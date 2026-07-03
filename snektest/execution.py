@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from snektest.collection import TestsQueue
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
+from snektest.memory import collect_measurements
 from snektest.models import (
     AssertionFailure,
     ErrorResult,
@@ -61,14 +62,17 @@ async def execute_test(
     ] = sys.exc_info,
 ) -> TestResult:
     """Execute a collected test case with fixtures and output capture."""
-    with maybe_capture_output(capture_output) as (output_buffer, captured_warnings):
+    with (
+        maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
+        collect_measurements() as measurements,
+    ):
         test_start = time.monotonic()
         try:
             res = test_case.call()
             if iscoroutine(res):
                 await _await_test_body(res, timeout)
             duration = time.monotonic() - test_start
-            result = PassedResult()
+            result = PassedResult(measurements=tuple(measurements))
         except (AssertionFailure, asyncio.CancelledError):
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()

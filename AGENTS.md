@@ -184,6 +184,29 @@ typed as non-`None`, and `assert_isinstance(obj, SomeType)` returns `obj` typed 
 narrow for later attribute access; for a pure assertion discard it
 (`_ = assert_isinstance(x, int)`), since `reportUnusedCallResult` is an error.
 
+### Memory Assertions
+
+`assert_memory` (`assertions.py`) is a context-manager assertion, in the
+`assert_raises` family, for peak-allocation budgets and leak detection. Budgets
+are bytes-as-`int`; overloads make a budgetless call a type error. It measures
+through a pluggable `MemoryBackend` (`memory.py`) — a thread-inclusive seam that
+does not assume a synchronous `int` return, so a future memray backend slots in
+behind the same protocol. Only `TracemallocBackend` exists today; it baselines
+out tracemalloc's own allocations and never stops tracing it did not start.
+
+- Whole-block mode (`rounds=1`, `m.rounds` untouched) takes one peak sample over
+  the block; there is no warmup in this mode.
+- Rounds mode loops work over `m.rounds` (a stateful iterator of
+  `warmup + rounds` iterations). `peak_bytes` is the max single-round peak;
+  `growth_slope` is a Theil–Sen fit of retained bytes per round (bytes/round).
+  A `slope_below` budget requires `rounds >= 10` (`BadRequestError` otherwise).
+- Guarded misuse (all `BadRequestError`): nesting, a `slope_below` budget under
+  ten rounds, and a rounds iterator left unconsumed or partially consumed.
+- Passing measurements flow through a run-scoped contextvar sink
+  (`memory.py`) into `PassedResult.measurements`, are rendered on the green
+  result line by the presenter, and appear under `memory_measurements` in
+  `--json-output`.
+
 ### Type Checking Configuration
 
 Extremely strict pyright configuration (all checks set to "error"). When adding new code, expect to fully type-annotate everything. See pyproject.toml:69-174 for complete settings.

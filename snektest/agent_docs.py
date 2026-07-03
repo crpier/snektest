@@ -63,6 +63,12 @@ def test_needs_parentheses() -> None:
 - `assert_is_not_none(x)` and `assert_isinstance(x, SomeType)` return the
   narrowed value; bind it to narrow for later use, or discard with `_ =` for a
   pure assertion.
+- `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)` is a
+  context-manager assertion for memory budgets (bytes as `int`). Wrap a region
+  for a whole-block peak budget, or loop work over `m.rounds` (needs
+  `rounds >= 10` for a `slope_below` leak check). At least one budget is
+  required — a budgetless call is a type error. `m.peak_bytes` /
+  `m.growth_slope` stay readable after the block. Cannot be nested.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -83,6 +89,31 @@ def test_needs_parentheses() -> None:
 - Timeout interactions: for async `@test_hypothesis`, `--timeout` bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` instead; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
 
+## Memory budgets
+
+Assert peak allocation and leak-free growth with `assert_memory`:
+
+```python
+from snektest import assert_memory, test
+
+
+@test(mark="fast")
+def test_peak_budget() -> None:
+    with assert_memory(peak_below=8 * 1024 * 1024):
+        payload = bytearray(1024 * 1024)
+        del payload
+
+
+@test(mark="fast")
+def test_no_leak() -> None:
+    scratch: list[bytearray] = []
+    with assert_memory(slope_below=64 * 1024, rounds=20) as m:
+        for _ in m.rounds:
+            scratch.clear()
+            scratch.append(bytearray(32 * 1024))
+    _ = m.peak_bytes
+```
+
 ## Copyable examples
 
 List bundled examples:
@@ -97,6 +128,7 @@ Print one example:
 snektest --example basic
 snektest --example fixtures
 snektest --example async
+snektest --example memory
 snektest --example parametrize
 ```
 """
@@ -105,6 +137,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "async": "async_tests.py",
     "basic": "basic_test.py",
     "fixtures": "fixtures.py",
+    "memory": "memory.py",
     "parametrize": "parametrize.py",
 }
 
