@@ -52,6 +52,35 @@ async def _await_test_body(
         raise
 
 
+async def _await_test_body_with_task_check(
+    coro: Coroutine[Any, Any, object],
+    timeout: float | None,  # noqa: ASYNC109
+    *,
+    tasks_before: set[asyncio.Task[Any]],
+) -> None:
+    """Await an async test and cancel tasks it leaves pending."""
+    body_completed = False
+    leaked_tasks: set[asyncio.Task[Any]] = set()
+    try:
+        await _await_test_body(coro, timeout)
+        body_completed = True
+    finally:
+        leaked_tasks = {
+            task
+            for task in asyncio.all_tasks()
+            if task not in tasks_before and not task.done()
+        }
+        for task in leaked_tasks:
+            _ = task.cancel()
+        if leaked_tasks:
+            _ = await asyncio.gather(*leaked_tasks, return_exceptions=True)
+
+    if body_completed and leaked_tasks:
+        task_word = "task" if len(leaked_tasks) == 1 else "tasks"
+        message = f"async test leaked {len(leaked_tasks)} pending {task_word}"
+        raise AssertionFailure(message)
+
+
 async def execute_test(
     test_case: TestCase,
     *,
@@ -68,9 +97,12 @@ async def execute_test(
     ):
         test_start = time.monotonic()
         try:
+            tasks_before = asyncio.all_tasks()
             res = test_case.call()
             if iscoroutine(res):
-                await _await_test_body(res, timeout)
+                await _await_test_body_with_task_check(
+                    res, timeout, tasks_before=tasks_before
+                )
             duration = time.monotonic() - test_start
             result = PassedResult(measurements=tuple(measurements))
         except (AssertionFailure, asyncio.CancelledError):

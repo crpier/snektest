@@ -19,6 +19,7 @@ from snektest import (
 from snektest.execution import execute_test, run_tests
 from snektest.fixtures import FixtureRegistry, teardown_fixture, use_registry
 from snektest.models import (
+    AssertionFailure,
     BadRequestError,
     ErrorResult,
     FailedResult,
@@ -274,6 +275,26 @@ async def test_run_tests_continues_after_cancelled_test() -> None:
     _ = assert_isinstance(results[0].result, FailedResult)
     _ = assert_isinstance(results[1].result, PassedResult)
     assert_eq(len(session_failures), 0)
+
+
+@test()
+async def test_execute_test_fails_and_cancels_pending_task() -> None:
+    leaked_tasks: list[asyncio.Task[None]] = []
+
+    async def waits_forever() -> None:
+        _ = await asyncio.Event().wait()
+
+    async def leaks_task() -> None:
+        leaked_tasks.append(asyncio.create_task(waits_forever()))
+        await asyncio.sleep(0)
+
+    name = TestName(file_path=Path("x.py"), func_name="leaks_task", params_part="")
+    result = await execute_test(_test_case(name, leaks_task))
+
+    failure = assert_isinstance(result.result, FailedResult)
+    assert_is(failure.exc_type, AssertionFailure)
+    assert_eq(str(failure.exc_value), "async test leaked 1 pending task")
+    assert_eq([task.cancelled() for task in leaked_tasks], [True])
 
 
 @test()

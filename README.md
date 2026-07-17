@@ -257,6 +257,10 @@ async def test_async_operation() -> None:
     assert_eq(result, "completed")
 ```
 
+Async tests fail if they finish with tasks they created still pending. Snektest
+cancels and awaits those tasks so they cannot contaminate later tests. Await
+background work before returning from a test.
+
 ### Parameterized Tests
 
 Run the same test with different inputs:

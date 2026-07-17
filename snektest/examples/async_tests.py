@@ -13,6 +13,6 @@ async def fetch_username() -> str:
 
 @test(mark="fast")
 async def test_async_code() -> None:
-    """Async tests can await application code directly."""
+    """Async tests await all work so no pending tasks leak into later tests."""
     username = await fetch_username()
     assert_eq(username.upper(), "ADA")

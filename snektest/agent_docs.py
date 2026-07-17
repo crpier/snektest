@@ -73,7 +73,7 @@ def test_needs_parentheses() -> None:
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
 - Use `mark="slow"` for tests that use network IO, subprocesses, or expensive external resources.
-- Async tests are regular `async def` functions decorated with `@test(mark=...)`.
+- Async tests are regular `async def` functions decorated with `@test(mark=...)`. An async test fails if it leaves a task it created pending; snektest cancels and awaits leaked tasks to isolate later tests.
 - Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
 - Define fixtures as generator functions decorated with `@fixture`, annotated `Generator[T]` or `AsyncGenerator[T]`. Load them with `load_fixture(fixture())` — call the decorated fixture and pass the returned handle.
 - `@fixture` (default) is function-scoped: set up and torn down for each test. `@fixture(scope="session")` is set up once and reused across the run.
