@@ -125,6 +125,13 @@ resources). Marking every test is the recommended public style; filter a run to
 one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
 alias for the three literals; markers are passed as a single literal.
 
+### Async Hygiene
+
+After a successful async test body, `execute_test` compares event-loop task
+snapshots. Newly created tasks still pending are cancelled and awaited, and the
+test becomes a failure. Pending tasks are also cancelled when the body fails or
+errors, but the original result is preserved. Sync tests are not checked.
+
 ### Timeouts
 
 `--timeout SECONDS` sets a run-wide ceiling on each test, applied in
