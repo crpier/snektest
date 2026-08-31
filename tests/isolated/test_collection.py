@@ -1,6 +1,9 @@
+"""Tests for test-module discovery and collection."""
+
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import cast
@@ -9,8 +12,29 @@ from pydantic import TypeAdapter
 
 from snektest import assert_eq, assert_raises, test
 from snektest.annotations import PyFilePath
-from snektest.collection import TestsQueue, load_tests_from_file
+from snektest.collection import TestsQueue, generate_file_list, load_tests_from_file
 from snektest.models import CollectionError, FilterItem
+
+
+@test(mark="slow")
+def test_generate_file_list_excludes_gitignored_files() -> None:
+    """Recursive discovery leaves ignored generated tests out of a run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repository = Path(tmp)
+        _ = subprocess.run(
+            ["git", "init", "--quiet", str(repository)],
+            check=True,
+            capture_output=True,
+        )
+        _ = (repository / ".gitignore").write_text("ignored/\n")
+        _ = (repository / "test_included.py").write_text("")
+        ignored_directory = repository / "ignored"
+        ignored_directory.mkdir()
+        _ = (ignored_directory / "test_generated.py").write_text("")
+
+        file_paths = generate_file_list(FilterItem(str(repository)))
+
+    assert_eq([path.name for path in file_paths], ["test_included.py"])
 
 
 @test()

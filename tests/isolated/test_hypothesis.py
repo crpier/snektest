@@ -35,9 +35,9 @@ def test_test_hypothesis_requires_strategies() -> None:
 @test()
 def test_test_hypothesis_rejects_invalid_markers() -> None:
     with assert_raises(TypeError):
-        _ = test_hypothesis(st.just(0), mark="needs-s3")  # pyright: ignore[reportArgumentType]
+        _ = test_hypothesis(st.just(0), mark="needs-s3")  # ty: ignore[invalid-argument-type]
     with assert_raises(TypeError):
-        _ = test_hypothesis(st.just(0), mark=("fast",))  # pyright: ignore[reportArgumentType]
+        _ = test_hypothesis(st.just(0), mark=("fast",))  # ty: ignore[invalid-argument-type]
 
 
 @test()

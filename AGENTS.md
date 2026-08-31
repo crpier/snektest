@@ -37,7 +37,7 @@ requested test or case does not exist.
 ### Type Checking & Linting
 ```bash
 # Type check
-uv run pyright
+uv run ty check
 
 # Lint/format
 uv run ruff check
@@ -62,7 +62,7 @@ This project uses `uv` for dependency management. The project requires Python >=
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
 2. **Producer-Consumer Pattern**:
-   - Producer thread (`load_tests_from_filters`) walks filesystem, imports test modules, adds tests to async queue
+   - Producer thread (`load_tests_from_filters`) walks the filesystem, excludes Git-ignored candidates for directory filters, imports test modules, and adds tests to the async queue. Explicit file filters bypass Git ignore checks.
    - Consumer coroutine (`run_tests`) awaits tests from the queue one at a time, on a single event loop, while collection continues in the producer thread
 3. **Test Discovery** (`load_tests_from_file`): Import modules, find functions decorated with `@test()`, expand parameterized tests
 4. **Test Execution** (`execute_test`): Capture stdout/stderr, execute test function (sync or async), teardown function fixtures, return `TestResult`
@@ -134,14 +134,17 @@ errors, but the original result is preserved. Sync tests are not checked.
 
 ### Timeouts
 
-`--timeout SECONDS` sets a run-wide ceiling on each test, applied in
-`execute_test` by wrapping the awaited test body in `asyncio.timeout`. It is
-async-only and best-effort: the timeout only fires while the test is suspended
-on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported as
-ERROR) and the run continues, while synchronous or CPU-bound work cannot be
-interrupted. A `TimeoutError` the test raised itself is distinguished from a
-fired timeout via `Timeout.expired()` and passes through unchanged. Timed-out
-tests still run function-fixture teardown. There is no per-test timeout.
+CLI runs apply a 60-second timeout to every async test by default.
+`--timeout SECONDS` overrides it, while `--no-timeout` disables it. The CLI
+passes that run-wide ceiling to `execute_test`, which wraps the awaited test body
+in `asyncio.timeout`. It is async-only and best-effort: the timeout only fires
+while the test is suspended on an `await`, so a hung `await` becomes an error
+(`TestTimeoutError`, reported as ERROR) and the run continues, while synchronous
+or CPU-bound work cannot be interrupted. A `TimeoutError` the test raised itself
+is distinguished from a fired timeout via `Timeout.expired()` and passes through
+unchanged. Timed-out tests still run function-fixture teardown. There is no
+per-test timeout. Direct programmatic runner calls remain unbounded unless they
+pass `timeout`.
 
 Interactions:
 
@@ -152,7 +155,8 @@ Interactions:
   completion — threads aren't cancellable — so a runaway property test is reported
   as timed out while still burning CPU in the background. Sync property tests are
   not coroutines, so the timeout never applies. Prefer Hypothesis's own
-  `deadline`/`max_examples` for per-example bounds.
+  `deadline`/`max_examples` for per-example bounds; use `--no-timeout` if the
+  complete property run must remain unbounded.
 - **`--pdb`.** `TestTimeoutError` flows through the normal error path, so
   `_maybe_debug_test_result` will post-mortem on it. The cancellation unwinds the
   test's own `await` frame before `TestTimeoutError` is raised (with `from None`)
@@ -237,11 +241,11 @@ value second, following parameter names like `actual`, `expected`, `member`, and
 error messages.
 
 The narrowing helpers return the narrowed value so a single call both asserts and
-narrows under the strict pyright config: `assert_is_not_none(x)` returns `x`
+narrows under the strict ty config: `assert_is_not_none(x)` returns `x`
 typed as non-`None`, and `assert_isinstance(obj, SomeType)` returns `obj` typed as
 `SomeType`. Bind the result (`opts = assert_isinstance(result, CliOptions)`) to
 narrow for later attribute access; for a pure assertion discard it
-(`_ = assert_isinstance(x, int)`), since `reportUnusedCallResult` is an error.
+(`_ = assert_isinstance(x, int)`) to make that intent explicit.
 
 ### Memory Assertions
 
@@ -266,14 +270,30 @@ out tracemalloc's own allocations and never stops tracing it did not start.
   result line by the presenter, and appear under `memory_measurements` in
   `--json-output`.
 
+### Performance Benchmarks
+
+`assert_benchmark(median_below=..., p95_below=..., rounds=100, warmup=10)` is a
+context-manager assertion for sync or async timing budgets in seconds. At least
+one of the median or p95 budgets is required. Setup goes before the context;
+timed work loops over `timing.rounds`, a stateful iterator of warmup plus
+measured iterations. It reports min, median, nearest-rank p95, mean, and
+population standard deviation, and uses strict `<` for each configured budget.
+GC is suspended only during measured rounds by default. Optional `name=` values
+identify multiple timed regions in console and JSON output. Benchmark contexts
+cannot overlap because concurrent regions distort timings and process-wide GC
+state.
+
+The normal `--timeout` bounds the complete async test, not an individual round;
+it cannot interrupt synchronous or CPU-bound work. Passing measurements flow
+through `benchmark.py` into `PassedResult.benchmarks`, the console result line,
+and `benchmark_measurements` in JSON output. Stored baselines and cross-machine
+normalization are deferred.
+
 ### Type Checking Configuration
 
-Extremely strict pyright configuration (all checks set to "error"). When adding new code, expect to fully type-annotate everything. See pyproject.toml:69-174 for complete settings.
-
-Notable exceptions to pyright rules:
-- `reportIncompatibleVariableOverride = false`: Allow subclasses to override with different types
-- `reportMissingSuperCall = false`: Don't require calling parent methods
-- `reportImplicitOverride = false`: Don't require explicit `@override` decorator
+The project uses ty with every available rule set to `error`, plus strict equality
+semantics and strict generic narrowing. No rules are disabled. When adding code,
+expect to fully annotate it and run `uv run ty check`.
 
 ## Documentation Surfaces
 
@@ -288,8 +308,8 @@ public behavior or recommendations, update all of them in the same change:
 Rules of thumb:
 - The canonical import style in all examples is top-level: `from snektest import assert_eq, test`.
 - Never hand-write sample test output in `README.md`; run the example with `uv run snektest` and paste the actual output.
-- Code blocks in docs must type-check under this repo's pyright config and run as written.
-- These rules are enforced by `tests/meta/test_doc_blocks.py`, which extracts every ```python block from `README.md` and `AGENT_DOCS`, type-checks them with pyright, runs them with snektest, and diffs each adjacent ```text block against captured output. Annotate exceptions with an HTML comment directive before the fence, e.g. `<!-- snektest-doc: expect-fail -->` or `<!-- snektest-doc: expect-type-error, skip-run -->`. `expect-type-error` optionally pins a specific diagnostic — `expect-type-error=reportArgumentType` (that rule anywhere) or `expect-type-error=reportArgumentType@10` (that rule at block line 10) — so a signature regression to a different rule or line still fails the test (see `testutils/docblocks.py`).
+- Code blocks in docs must type-check under this repo's strict ty config and run as written.
+- These rules are enforced by `tests/meta/test_doc_blocks.py`, which extracts every ```python block from `README.md` and `AGENT_DOCS`, type-checks them with ty, runs them with snektest, and diffs each adjacent ```text block against captured output. Annotate exceptions with an HTML comment directive before the fence, e.g. `<!-- snektest-doc: expect-fail -->` or `<!-- snektest-doc: expect-type-error, skip-run -->`. `expect-type-error` optionally pins a specific diagnostic — `expect-type-error=invalid-argument-type` (that rule anywhere) or `expect-type-error=invalid-argument-type@10` (that rule at block line 10) — so a signature regression to a different rule or line still fails the test (see `testutils/docblocks.py`).
 
 ### Code Style Notes
 

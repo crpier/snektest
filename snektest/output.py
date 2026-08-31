@@ -1,3 +1,5 @@
+"""Output capture with debugger-aware standard-stream proxies."""
+
 from __future__ import annotations
 
 import inspect
@@ -8,7 +10,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 
 class StdinProxy:
@@ -71,7 +73,7 @@ class StdinProxy:
 
     @property
     def name(self) -> str:
-        return self._original_stdin.name
+        return cast("str", self._original_stdin.name)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._original_stdin, name)
@@ -137,10 +139,13 @@ def _maybe_run_inline_pdb_breakpoint(
     if set(kwargs) - {"header", "commands"}:
         return system_breakpointhook(*args, **kwargs)
 
-    debugger: pdb.Pdb = pdb_factory(
-        mode="inline",
-        backend="monitoring",
-        colorize=True,
+    debugger = cast(
+        "pdb.Pdb",
+        pdb_factory(
+            mode="inline",
+            backend="monitoring",
+            colorize=True,
+        ),
     )
     if header is not None:
         _ = debugger.message(header)

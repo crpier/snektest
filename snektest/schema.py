@@ -195,7 +195,7 @@ async def _resolve_runtime_value[T](
 ) -> T:
     """Resolve a literal or fixture-backed decorator argument on the test loop."""
     if isinstance(value, AsyncFixture):
-        return await load_fixture(cast("AsyncFixture[T]", value))
+        return await load_fixture(value)
     if isinstance(value, Fixture):
         return load_fixture(cast("Fixture[T]", value))
     return value
@@ -433,6 +433,6 @@ def test_schema_workflow(  # noqa: C901, PLR0913
                 raise AssertionFailure(message) from None
 
         mark_test_function(wrapper, (), markers)
-        return wrapper
+        return cast("Callable[[], Coroutine[None]]", wrapper)
 
     return decorator

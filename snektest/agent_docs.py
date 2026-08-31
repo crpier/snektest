@@ -40,9 +40,9 @@ snektest example async
 
 ## Type checking is part of the contract
 
-Run a strict static type checker (e.g. `pyright`) over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
+Run the strict `ty` type checker over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
 
-<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
@@ -69,6 +69,13 @@ def test_needs_parentheses() -> None:
   `rounds >= 10` for a `slope_below` leak check). At least one budget is
   required — a budgetless call is a type error. `m.peak_bytes` /
   `m.growth_slope` stay readable after the block. Cannot be nested.
+- `assert_benchmark(median_below=..., p95_below=..., rounds=..., warmup=...)`
+  asserts a sync or async region's typical and/or tail duration in seconds. At
+  least one budget is required. Put setup before the context and loop timed work
+  over `timing.rounds`. It reports min/median/p95/mean/stddev; GC is suspended
+  during measured rounds unless `disable_gc=False`. Use `name=` to distinguish
+  multiple timed regions in one test. Benchmark contexts cannot overlap because
+  concurrent regions distort timings and process-wide GC state.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -85,11 +92,12 @@ def test_needs_parentheses() -> None:
 - Tests run sequentially on a single shared event loop; avoid import-time side effects in test modules, and do not leave unawaited background tasks behind.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
-- Bound runaway tests with `snektest --timeout SECONDS`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout.
-- Timeout interactions: for async `@test_hypothesis`, `--timeout` bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` instead; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
+- CLI runs bound every async test to 60 seconds by default. Override the limit with `snektest --timeout SECONDS` or disable it with `snektest --no-timeout`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout.
+- Timeout interactions: for async `@test_hypothesis`, the timeout bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` for per-example limits and `--no-timeout` if the complete run must remain unbounded; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
 - Install `snektest[schema]` and use `@test_schema("openapi.json", base_url=..., mark="slow")` for positive OpenAPI contract tests. It collects one test per operation and checks for server errors and response-schema violations. Native Schemathesis auth providers and custom checks may be passed through `auth=` and `checks=`. Use `@test_schema_workflow` for linked stateful sequences. Decorated function bodies are declarative and are not called; `base_url` and `headers` may be fixture handles.
 - Set `generation="negative"` on `@test_schema` to generate schema-violating requests. A passing response must use an allowed, documented 4xx status; `expected_statuses` defaults to all 4xx responses. Accepted 2xx responses and all 5xx responses fail. Negative stateful workflows are not supported.
+- Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked.
 
 ## Memory budgets
 
@@ -185,6 +193,25 @@ method, tag, and operation-ID fields with AND semantics; selector tuples are OR
 alternatives, excludes win, and `exclude_deprecated=True` removes deprecated
 operations. Workflow filters must retain both ends of at least one link.
 
+## Benchmarks
+
+Assert async latency without starting another event loop:
+
+```python
+import asyncio
+
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+async def test_async_checkpoint_latency() -> None:
+    with assert_benchmark(
+        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            await asyncio.sleep(0)
+```
+
 ## Copyable examples
 
 List bundled examples:
@@ -199,6 +226,7 @@ Print one example:
 snektest --example basic
 snektest --example fixtures
 snektest --example async
+snektest --example benchmark
 snektest --example memory
 snektest --example parametrize
 snektest --example schema
@@ -208,6 +236,7 @@ snektest --example schema
 EXAMPLE_FILES: dict[str, str] = {
     "async": "async_tests.py",
     "basic": "basic_test.py",
+    "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
     "memory": "memory.py",
     "parametrize": "parametrize.py",

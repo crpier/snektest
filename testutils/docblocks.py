@@ -1,7 +1,7 @@
 """Extract fenced code blocks and their directives from doc surfaces.
 
 Used by the meta test that keeps documentation code blocks self-verifying:
-every ```python block in the docs is type-checked under this repo's pyright
+every ```python block in the docs is type-checked under this repo's ty
 config and executed with snektest, and any adjacent ```text block is diffed
 against the captured output.
 
@@ -14,15 +14,15 @@ opening fence (blank lines between are allowed)::
 Recognized directives:
 
 - ``skip-run``         do not execute the block with snektest
-- ``skip-typecheck``   do not run pyright over the block
+- ``skip-typecheck``   do not run ty over the block
 - ``expect-fail``      executing the block must fail (a test fails / errors)
-- ``expect-type-error`` pyright must report at least one error for the block
+- ``expect-type-error`` ty must report at least one error for the block
 
 ``expect-type-error`` also takes an optional argument that pins a *specific*
 diagnostic instead of merely "≥1 error somewhere"::
 
-    expect-type-error=reportArgumentType      # ≥1 error with this rule
-    expect-type-error=reportCallIssue@4        # that rule at block line 4
+    expect-type-error=invalid-argument-type      # ≥1 error with this rule
+    expect-type-error=no-matching-overload@4     # that rule at block line 4
 
 Block lines are counted from 1 at the line *after* the opening fence. These
 pinned expectations are collected into ``CodeBlock.expected_diagnostics`` rather
@@ -34,6 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import override
 
 from snektest.agent_docs import AGENT_DOCS
 
@@ -47,13 +48,14 @@ VALID_DIRECTIVES = frozenset(
 
 @dataclass(frozen=True)
 class ExpectedDiagnostic:
-    """A pyright diagnostic a block asserts pyright must report."""
+    """A ty diagnostic a block asserts ty must report."""
 
     rule: str
-    """Pyright rule name, e.g. ``reportArgumentType``."""
+    """ty rule name, e.g. ``invalid-argument-type``."""
     line: int | None
     """1-based line within the block, or ``None`` to match the rule anywhere."""
 
+    @override
     def __str__(self) -> str:
         return self.rule if self.line is None else f"{self.rule}@{self.line}"
 
@@ -92,7 +94,7 @@ def _parse_expected_diagnostic(arg: str) -> ExpectedDiagnostic:
     if not rule:
         msg = (
             "expect-type-error= requires a rule name, "
-            "e.g. expect-type-error=reportArgumentType"
+            "e.g. expect-type-error=invalid-argument-type"
         )
         raise ValueError(msg)
     line: int | None = None

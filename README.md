@@ -16,8 +16,8 @@ uv add 'snektest[schema]'
 
 ## Type checking is part of the contract
 
-snektest expects your test code to pass a strict static type checker (such as
-pyright) before tests run — typically continuously, via your editor's language
+snektest expects your test code to pass the strict `ty` type checker before
+tests run — typically continuously, via your editor's language
 server. The API is designed around this: signatures are exact, and snektest
 does not re-validate at runtime what a type checker already rejects. If you
 skip type checking, misuse that a checker would flag — such as applying
@@ -27,7 +27,7 @@ Runtime validation is reserved for what static checkers cannot see: CLI
 input, file paths, and fixture protocol rules (for example, session fixtures
 must not accept parameters).
 
-<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
@@ -267,6 +267,68 @@ Async tests fail if they finish with tasks they created still pending. Snektest
 cancels and awaits those tasks so they cannot contaminate later tests. Await
 background work before returning from a test.
 
+### Performance Benchmarks
+
+Use `assert_benchmark(median_below=..., p95_below=...)` to assert the typical
+and/or tail latency of a sync or async operation. At least one budget is
+required. Put one-time setup before the context, then loop the timed operation
+over `timing.rounds`. Snektest discards warmups and reports min, median,
+nearest-rank p95, mean, and population standard deviation. Durations and budgets
+are seconds. GC is suspended during measured rounds by default; pass
+`disable_gc=False` to retain normal GC behavior. Benchmark contexts cannot
+overlap because concurrent regions would distort both timings and process-wide
+GC state.
+
+Pass `name=` when a test contains multiple timed regions. Names appear in the
+console and JSON output and give each region a stable identity for external
+result tracking.
+
+```python
+import asyncio
+
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_list_copy_latency() -> None:
+    with assert_benchmark(
+        name="list copy", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            _ = list(range(100))
+
+
+@test(mark="fast")
+async def test_async_checkpoint_latency() -> None:
+    with assert_benchmark(
+        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            await asyncio.sleep(0)
+```
+
+Set only the statistic that should gate the test, or set both. Budgets are
+checked with strict `<` on context exit, raising `AssertionFailure`.
+Statistics remain readable afterwards as `timing.min_seconds`,
+`timing.median_seconds`, `timing.p95_seconds`, `timing.mean_seconds`, and
+`timing.stddev_seconds`. `--timeout` bounds a complete async test, not an
+individual benchmark round; it cannot interrupt synchronous or CPU-bound work.
+Stored baselines are intentionally deferred because timing files produced on a
+different machine are not a meaningful default regression gate.
+
+A budgetless call is rejected by the type checker:
+
+<!-- snektest-doc: expect-type-error=no-matching-overload, skip-run -->
+```python
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_needs_a_timing_budget() -> None:
+    with assert_benchmark():
+        pass
+```
+
 ### Parameterized Tests
 
 Run the same test with different inputs:
@@ -299,7 +361,7 @@ def test_concatenation(greeting: str, target: str) -> None:
 ### Static Type Checking
 
 Snektest's public decorators and helpers are typed so test parameters, fixtures,
-and Hypothesis strategies can be checked by tools such as pyright.
+and Hypothesis strategies can be checked by `ty`.
 
 ## Running Tests
 
@@ -317,8 +379,11 @@ snektest tests/test_myfeature.py::test_something
 # Run tests with a marker
 snektest --mark fast
 
-# Fail any async test that runs longer than N seconds
+# Override the default 60-second async-test timeout
 snektest --timeout 5
+
+# Disable the default timeout
+snektest --no-timeout
 
 # Disable stdout/stderr capture
 snektest -s
@@ -341,6 +406,10 @@ snektest --pdb
 coverage run -m snektest
 ```
 
+Recursive directory discovery excludes files ignored by Git, including generated
+test-shaped files under ignored output directories. An explicitly named test file
+still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
+
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output. Use `--json-output` for a pure
@@ -349,22 +418,24 @@ machine-readable summary with per-test exception messages.
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
 
-`--timeout` sets a run-wide ceiling, in seconds, on each test. It is async-only
-and best-effort: the timeout only fires while a test is suspended on an `await`,
-so a hung `await` is reported as an error and the run continues, but a test
-stuck in synchronous or CPU-bound work cannot be interrupted. A timed-out test
-still runs its function-fixture teardown.
+The CLI applies a 60-second timeout to every async test by default. Use
+`--timeout SECONDS` to override it or `--no-timeout` to disable it. The timeout
+is best-effort: it only fires while a test is suspended on an `await`, so a hung
+`await` is reported as an error and the run continues, but a test stuck in
+synchronous or CPU-bound work cannot be interrupted. A timed-out test still
+runs its function-fixture teardown.
 
 Interactions to know about:
 
 - **`@test_hypothesis`.** For an async property test, the whole Hypothesis run
   (every example) executes inside one `await asyncio.to_thread(...)`, so
-  `--timeout` bounds the *entire* property run, not each example. Worse, when it
+  the timeout bounds the *entire* property run, not each example. Worse, when it
   fires the worker thread running Hypothesis keeps going in the background — a
   thread can't be cancelled — so a runaway property test is reported as timed out
   but still consumes CPU until it finishes on its own. Sync property tests never
   yield to the loop and so are not bounded at all. For per-example limits, use
-  Hypothesis's own `deadline`/`max_examples` instead of `--timeout`.
+  Hypothesis's own `deadline`/`max_examples`; use `--no-timeout` if the complete
+  property run legitimately needs to remain unbounded.
 - **`--pdb`.** A timed-out test surfaces as a normal error, so `--pdb` will open a
   post-mortem on it. By the time the timeout fires the test's own `await` frame has
   already been unwound by cancellation, so the debugger lands on snektest's
@@ -488,7 +559,7 @@ async def test_list_operations(numbers: list[int]) -> None:
 
 The decorator provides full type safety - strategy types are checked against function parameters:
 
-<!-- snektest-doc: expect-type-error=reportArgumentType@10, skip-run -->
+<!-- snektest-doc: expect-type-error=invalid-argument-type@10, skip-run -->
 ```python
 from hypothesis import strategies as st
 from snektest import test_hypothesis
@@ -788,7 +859,7 @@ from snektest import assert_eq, assert_raises, test
 @test(mark="fast")
 def test_division_by_zero() -> None:
     with assert_raises(ZeroDivisionError):
-        _ = 1 / 0
+        _ = 1 / 0  # ty: ignore[division-by-zero]
 
 @test(mark="fast")
 def test_multiple_exception_types() -> None:
@@ -846,7 +917,7 @@ def test_no_leak_across_rounds() -> None:
 
 A budgetless call is rejected by the type checker:
 
-<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload, skip-run -->
 ```python
 from snektest import assert_memory, test
 

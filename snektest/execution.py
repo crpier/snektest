@@ -10,6 +10,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
 
+from snektest.benchmark import collect_benchmarks
 from snektest.collection import TestsQueue
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
 from snektest.memory import collect_measurements
@@ -93,6 +94,7 @@ async def execute_test(
     """Execute a collected test case with fixtures and output capture."""
     with (
         maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
+        collect_benchmarks() as benchmarks,
         collect_measurements() as measurements,
     ):
         test_start = time.monotonic()
@@ -104,7 +106,9 @@ async def execute_test(
                     res, timeout, tasks_before=tasks_before
                 )
             duration = time.monotonic() - test_start
-            result = PassedResult(measurements=tuple(measurements))
+            result = PassedResult(
+                measurements=tuple(measurements), benchmarks=tuple(benchmarks)
+            )
         except (AssertionFailure, asyncio.CancelledError):
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()

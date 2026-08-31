@@ -1,3 +1,5 @@
+"""Public decorators and fixture-loading APIs."""
+
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator
 from concurrent.futures import Future
@@ -45,7 +47,7 @@ VALID_MARKERS: tuple[Marker, ...] = ("slow", "medium", "fast")
 
 
 def _normalize_marker_entry(entry: object) -> str:
-    if entry in VALID_MARKERS:
+    if isinstance(entry, str) and entry in VALID_MARKERS:
         return entry
     msg = "Markers must be Marker literals"
     raise TypeError(msg)
@@ -111,7 +113,7 @@ def _run_hypothesis(
             for i in range(len(strategies))
         ]
     )
-    hypothesis_runner.__signature__ = signature  # pyright: ignore[reportFunctionMemberAccess]
+    hypothesis_runner.__signature__ = signature  # ty: ignore[unresolved-attribute]
 
     hypothesis_runner_wrapped = _given(*strategies)(hypothesis_runner)
 
@@ -305,5 +307,5 @@ def load_fixture[R](fix: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
     """
     registry = current_registry()
     if fix.scope == "session":
-        return registry.load_session(fix)
-    return registry.load_function(fix)
+        return cast("R | Coroutine[R]", registry.load_session(fix))
+    return cast("R | Coroutine[R]", registry.load_function(fix))

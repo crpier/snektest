@@ -188,7 +188,7 @@ def test_schema_rejects_invalid_marker() -> None:
             _ = test_schema(
                 schema_path,
                 base_url="http://127.0.0.1:8000",
-                mark="network",  # pyright: ignore[reportArgumentType]
+                mark="network",  # ty: ignore[invalid-argument-type]
             )
 
 

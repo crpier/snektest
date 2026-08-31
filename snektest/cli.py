@@ -58,7 +58,7 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
             entry["exception"] = _json_exception(exc_type, exc_value)
         case ErrorResult(exc_type=exc_type, exc_value=exc_value):
             entry["exception"] = _json_exception(exc_type, exc_value)
-        case PassedResult(measurements=measurements):
+        case PassedResult(measurements=measurements, benchmarks=benchmarks):
             if measurements:
                 entry["memory_measurements"] = [
                     {
@@ -69,6 +69,22 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
                         "slope_budget": measurement.slope_budget,
                     }
                     for measurement in measurements
+                ]
+            if benchmarks:
+                entry["benchmark_measurements"] = [
+                    {
+                        "name": benchmark.name,
+                        "rounds": benchmark.rounds,
+                        "warmup": benchmark.warmup,
+                        "min_seconds": benchmark.min_seconds,
+                        "median_seconds": benchmark.median_seconds,
+                        "p95_seconds": benchmark.p95_seconds,
+                        "mean_seconds": benchmark.mean_seconds,
+                        "stddev_seconds": benchmark.stddev_seconds,
+                        "median_budget_seconds": benchmark.median_budget_seconds,
+                        "p95_budget_seconds": benchmark.p95_budget_seconds,
+                    }
+                    for benchmark in benchmarks
                 ]
     if result.fixture_teardown_failures:
         entry["fixture_teardown_failures"] = [
@@ -115,6 +131,8 @@ class TestRunSummary:
 
 type CliAction = Literal["agent_docs", "help", "list_examples", "show_example"]
 
+_DEFAULT_TIMEOUT_SECONDS = 60.0
+
 
 @dataclass(frozen=True)
 class CliOptions:
@@ -125,7 +143,7 @@ class CliOptions:
     json_output: bool = False
     pdb_on_failure: bool = False
     mark: str | None = None
-    timeout: float | None = None
+    timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -160,7 +178,8 @@ Options:
   --example NAME    Print a bundled example
   --json-output     Print machine-readable JSON summary
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
-  --timeout SECONDS Fail any async test that runs longer than SECONDS (async-only)
+  --timeout SECONDS Override the 60-second async-test timeout
+  --no-timeout      Disable the default async-test timeout
   --pdb             Drop into post-mortem debugger on first failure
 
 Example commands:
@@ -229,15 +248,15 @@ def _parse_mark_flag(
 
 
 def _parse_timeout_flag(
-    argv: list[str], index: int, current_timeout: float | None
+    argv: list[str], index: int, *, timeout_option_seen: bool
 ) -> tuple[float, int] | ParseError:
     """Parse `--timeout` and its value, rejecting repeats and non-positive numbers.
 
     Returns the timeout in seconds with the index its value was consumed from, or
     a ParseError.
     """
-    if current_timeout is not None:
-        return ParseError("Only one --timeout value is supported")
+    if timeout_option_seen:
+        return ParseError("Only one --timeout or --no-timeout option is supported")
     consumed = _consume_flag_value(argv, index, "--timeout")
     if isinstance(consumed, ParseError):
         return consumed
@@ -290,7 +309,8 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
     json_output = False
     mark: str | None = None
     pdb_on_failure = False
-    timeout: float | None = None
+    timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
+    timeout_option_seen = False
     filters: list[str] = []
     duplicate_action = ParseError("Only one help/docs/examples command is supported")
 
@@ -320,10 +340,20 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
                 return parsed_mark
             mark, index = parsed_mark
         elif arg == "--timeout":
-            parsed_timeout = _parse_timeout_flag(argv, index, timeout)
+            parsed_timeout = _parse_timeout_flag(
+                argv, index, timeout_option_seen=timeout_option_seen
+            )
             if isinstance(parsed_timeout, ParseError):
                 return parsed_timeout
             timeout, index = parsed_timeout
+            timeout_option_seen = True
+        elif arg == "--no-timeout":
+            if timeout_option_seen:
+                return ParseError(
+                    "Only one --timeout or --no-timeout option is supported"
+                )
+            timeout = None
+            timeout_option_seen = True
         elif arg.startswith("-"):
             return ParseError(f"Invalid option: `{arg}`")
         else:

@@ -1,5 +1,7 @@
+"""Metadata helpers for decorated test functions."""
+
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from snektest.models import Param
 
@@ -35,4 +37,4 @@ def get_test_function_params(
 
 def get_test_function_markers(func: Callable[..., Any]) -> tuple[str, ...]:
     """Get the markers tuple for a test function."""
-    return getattr(func, MARKERS_ATTR_NAME, ())
+    return cast("tuple[str, ...]", getattr(func, MARKERS_ATTR_NAME, ()))

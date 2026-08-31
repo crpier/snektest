@@ -30,6 +30,7 @@ _KNOWN_TOKENS = [
     "--json-output",
     "--pdb",
     "--mark",
+    "--no-timeout",
     "--timeout",
     "fast",
     "medium",
