@@ -134,14 +134,17 @@ errors, but the original result is preserved. Sync tests are not checked.
 
 ### Timeouts
 
-`--timeout SECONDS` sets a run-wide ceiling on each test, applied in
-`execute_test` by wrapping the awaited test body in `asyncio.timeout`. It is
-async-only and best-effort: the timeout only fires while the test is suspended
-on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported as
-ERROR) and the run continues, while synchronous or CPU-bound work cannot be
-interrupted. A `TimeoutError` the test raised itself is distinguished from a
-fired timeout via `Timeout.expired()` and passes through unchanged. Timed-out
-tests still run function-fixture teardown. There is no per-test timeout.
+CLI runs apply a 60-second timeout to every async test by default.
+`--timeout SECONDS` overrides it, while `--no-timeout` disables it. The CLI
+passes that run-wide ceiling to `execute_test`, which wraps the awaited test body
+in `asyncio.timeout`. It is async-only and best-effort: the timeout only fires
+while the test is suspended on an `await`, so a hung `await` becomes an error
+(`TestTimeoutError`, reported as ERROR) and the run continues, while synchronous
+or CPU-bound work cannot be interrupted. A `TimeoutError` the test raised itself
+is distinguished from a fired timeout via `Timeout.expired()` and passes through
+unchanged. Timed-out tests still run function-fixture teardown. There is no
+per-test timeout. Direct programmatic runner calls remain unbounded unless they
+pass `timeout`.
 
 Interactions:
 
@@ -152,7 +155,8 @@ Interactions:
   completion — threads aren't cancellable — so a runaway property test is reported
   as timed out while still burning CPU in the background. Sync property tests are
   not coroutines, so the timeout never applies. Prefer Hypothesis's own
-  `deadline`/`max_examples` for per-example bounds.
+  `deadline`/`max_examples` for per-example bounds; use `--no-timeout` if the
+  complete property run must remain unbounded.
 - **`--pdb`.** `TestTimeoutError` flows through the normal error path, so
   `_maybe_debug_test_result` will post-mortem on it. The cancellation unwinds the
   test's own `await` frame before `TestTimeoutError` is raised (with `from None`)

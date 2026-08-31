@@ -68,8 +68,16 @@ def test_parse_cli_args_timeout_flag_parses_seconds() -> None:
 
 
 @test()
-def test_parse_cli_args_timeout_defaults_to_none() -> None:
+def test_parse_cli_args_timeout_defaults_to_sixty_seconds() -> None:
     options = parse_cli_args(["."])
+    options = assert_isinstance(options, CliOptions)
+
+    assert_eq(options.timeout, 60.0)
+
+
+@test()
+def test_parse_cli_args_no_timeout_disables_default() -> None:
+    options = parse_cli_args(["--no-timeout", "."])
     options = assert_isinstance(options, CliOptions)
 
     assert_is_none(options.timeout)
@@ -92,6 +100,13 @@ def test_parse_cli_args_timeout_rejects_non_positive() -> None:
 @test()
 def test_parse_cli_args_timeout_rejects_repeats() -> None:
     result = parse_cli_args(["--timeout", "1", "--timeout", "2"])
+    result = assert_isinstance(result, ParseError)
+    assert_in("Only one --timeout", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_rejects_no_timeout_conflict() -> None:
+    result = parse_cli_args(["--timeout", "1", "--no-timeout"])
     result = assert_isinstance(result, ParseError)
     assert_in("Only one --timeout", result.message)
 
@@ -212,6 +227,20 @@ async def test_run_script_returns_2_on_cancelled_error() -> None:
 
     result = await run_script(["."], run_tests_programmatic_fn=raise_cancelled)
     assert_eq(result, 2)
+
+
+@test()
+async def test_run_script_forwards_default_timeout() -> None:
+    received_timeouts: list[object] = []
+
+    async def record_timeout(*args: object, **kwargs: object) -> object:
+        _ = args
+        received_timeouts.append(kwargs["timeout"])
+        raise asyncio.CancelledError
+
+    _ = await run_script(["."], run_tests_programmatic_fn=record_timeout)
+
+    assert_eq(received_timeouts, [60.0])
 
 
 @test()

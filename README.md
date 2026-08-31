@@ -311,8 +311,11 @@ snektest tests/test_myfeature.py::test_something
 # Run tests with a marker
 snektest --mark fast
 
-# Fail any async test that runs longer than N seconds
+# Override the default 60-second async-test timeout
 snektest --timeout 5
+
+# Disable the default timeout
+snektest --no-timeout
 
 # Disable stdout/stderr capture
 snektest -s
@@ -343,22 +346,24 @@ machine-readable summary with per-test exception messages.
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
 
-`--timeout` sets a run-wide ceiling, in seconds, on each test. It is async-only
-and best-effort: the timeout only fires while a test is suspended on an `await`,
-so a hung `await` is reported as an error and the run continues, but a test
-stuck in synchronous or CPU-bound work cannot be interrupted. A timed-out test
-still runs its function-fixture teardown.
+The CLI applies a 60-second timeout to every async test by default. Use
+`--timeout SECONDS` to override it or `--no-timeout` to disable it. The timeout
+is best-effort: it only fires while a test is suspended on an `await`, so a hung
+`await` is reported as an error and the run continues, but a test stuck in
+synchronous or CPU-bound work cannot be interrupted. A timed-out test still
+runs its function-fixture teardown.
 
 Interactions to know about:
 
 - **`@test_hypothesis`.** For an async property test, the whole Hypothesis run
   (every example) executes inside one `await asyncio.to_thread(...)`, so
-  `--timeout` bounds the *entire* property run, not each example. Worse, when it
+  the timeout bounds the *entire* property run, not each example. Worse, when it
   fires the worker thread running Hypothesis keeps going in the background — a
   thread can't be cancelled — so a runaway property test is reported as timed out
   but still consumes CPU until it finishes on its own. Sync property tests never
   yield to the loop and so are not bounded at all. For per-example limits, use
-  Hypothesis's own `deadline`/`max_examples` instead of `--timeout`.
+  Hypothesis's own `deadline`/`max_examples`; use `--no-timeout` if the complete
+  property run legitimately needs to remain unbounded.
 - **`--pdb`.** A timed-out test surfaces as a normal error, so `--pdb` will open a
   post-mortem on it. By the time the timeout fires the test's own `await` frame has
   already been unwound by cancellation, so the debugger lands on snektest's
