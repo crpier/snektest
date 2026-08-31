@@ -40,9 +40,9 @@ snektest example async
 
 ## Type checking is part of the contract
 
-Run a strict static type checker (e.g. `pyright`) over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
+Run the strict `ty` type checker over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
 
-<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
@@ -88,6 +88,7 @@ def test_needs_parentheses() -> None:
 - CLI runs bound every async test to 60 seconds by default. Override the limit with `snektest --timeout SECONDS` or disable it with `snektest --no-timeout`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout.
 - Timeout interactions: for async `@test_hypothesis`, the timeout bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` for per-example limits and `--no-timeout` if the complete run must remain unbounded; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
+- Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked.
 
 ## Memory budgets
 

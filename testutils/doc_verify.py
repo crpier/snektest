@@ -1,11 +1,11 @@
 """Type-check and run the code blocks extracted from documentation surfaces.
 
-This spawns ``pyright`` and ``snektest`` subprocesses, so it is kept separate
+This spawns ``ty`` and ``snektest`` subprocesses, so it is kept separate
 from the pure extraction logic in :mod:`testutils.docblocks`.
 
-Type-checking happens in a single batched ``pyright`` invocation: every block
+Type-checking happens in a single batched ``ty`` invocation: every block
 is written to its own file inside a temporary directory under the repo root
-(so ``pyright`` discovers this repo's strict config and resolves ``snektest``),
+(so ``ty`` discovers this repo's strict config and resolves ``snektest``),
 then diagnostics are mapped back to each block by file name.
 """
 
@@ -38,19 +38,19 @@ def _block_filename(block: CodeBlock) -> str:
 
 @dataclass(frozen=True)
 class Diagnostic:
-    """A single pyright error reported against a block."""
+    """A single ty error reported against a block."""
 
     rule: str
-    """Pyright rule name, e.g. ``reportArgumentType``; ``""`` for syntax errors."""
+    """ty rule name, e.g. ``invalid-argument-type``."""
     line: int
-    """1-based line within the block (pyright's 0-based range start + 1)."""
+    """1-based line within the block."""
     message: str
-    """First line of the pyright message."""
+    """First line of the ty message."""
 
 
 @dataclass(frozen=True)
 class TypecheckResult:
-    """Pyright diagnostics for a single block."""
+    """ty diagnostics for a single block."""
 
     diagnostics: list[Diagnostic]
 
@@ -66,7 +66,7 @@ class TypecheckResult:
 
 
 def check_block_diagnostics(block: CodeBlock, result: TypecheckResult) -> list[str]:
-    """Compare a block's pyright result against its expectations.
+    """Compare a block's ty result against its expectations.
 
     Returns a list of human-readable problems (empty when the block matches):
 
@@ -74,7 +74,7 @@ def check_block_diagnostics(block: CodeBlock, result: TypecheckResult) -> list[s
       diagnostic (rule equal; line equal too when given). Extra unexpected
       errors are tolerated (cascading diagnostics are common).
     - a bare ``expect-type-error`` flag: at least one error must be reported.
-    - neither: pyright must report no errors.
+    - neither: ty must report no errors.
     """
     where = f"{block.slug} (line {block.line})"
     bare = "expect-type-error" in block.directives
@@ -89,22 +89,20 @@ def check_block_diagnostics(block: CodeBlock, result: TypecheckResult) -> list[s
             )
             if not matched:
                 problems.append(
-                    f"{where} expected diagnostic {exp} but pyright found: {found}"
+                    f"{where} expected diagnostic {exp} but ty found: {found}"
                 )
     elif bare:
         if result.error_count == 0:
-            problems.append(
-                f"{where} is marked expect-type-error but pyright found none."
-            )
+            problems.append(f"{where} is marked expect-type-error but ty found none.")
     elif result.error_count:
         joined = "\n  ".join(result.messages)
-        problems.append(f"{where} failed pyright:\n  {joined}")
+        problems.append(f"{where} failed ty:\n  {joined}")
 
     return problems
 
 
 def typecheck_blocks(blocks: Sequence[CodeBlock]) -> dict[str, TypecheckResult]:
-    """Run pyright once over every block; return results keyed by slug."""
+    """Run ty once over every block; return results keyed by slug."""
     diagnostics: dict[str, list[Diagnostic]] = {block.slug: [] for block in blocks}
     if not blocks:
         return {}
@@ -120,7 +118,15 @@ def typecheck_blocks(blocks: Sequence[CodeBlock]) -> dict[str, TypecheckResult]:
             paths.append(str(block_path))
 
         proc = subprocess.run(
-            [sys.executable, "-m", "pyright", "--outputjson", *paths],
+            [
+                sys.executable,
+                "-m",
+                "ty",
+                "check",
+                "--output-format",
+                "gitlab",
+                *paths,
+            ],
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
@@ -128,17 +134,20 @@ def typecheck_blocks(blocks: Sequence[CodeBlock]) -> dict[str, TypecheckResult]:
         )
         data = json.loads(proc.stdout)
 
-    for diag in data["generalDiagnostics"]:
-        if diag.get("severity") != "error":
-            continue
-        slug = file_to_slug.get(str(Path(diag["file"]).resolve()))
+    for diag in data:
+        diagnostic_path = Path(diag["location"]["path"])
+        if not diagnostic_path.is_absolute():
+            diagnostic_path = REPO_ROOT / diagnostic_path
+        slug = file_to_slug.get(str(diagnostic_path.resolve()))
         if slug is None:
             continue
+        rule = diag["check_name"]
+        message = diag["description"].removeprefix(f"{rule}: ")
         diagnostics[slug].append(
             Diagnostic(
-                rule=diag.get("rule", ""),
-                line=diag["range"]["start"]["line"] + 1,
-                message=diag["message"].splitlines()[0],
+                rule=rule,
+                line=diag["location"]["positions"]["begin"]["line"],
+                message=message.splitlines()[0],
             )
         )
 

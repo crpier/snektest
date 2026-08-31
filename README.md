@@ -10,8 +10,8 @@ uv add snektest
 
 ## Type checking is part of the contract
 
-snektest expects your test code to pass a strict static type checker (such as
-pyright) before tests run — typically continuously, via your editor's language
+snektest expects your test code to pass the strict `ty` type checker before
+tests run — typically continuously, via your editor's language
 server. The API is designed around this: signatures are exact, and snektest
 does not re-validate at runtime what a type checker already rejects. If you
 skip type checking, misuse that a checker would flag — such as applying
@@ -21,7 +21,7 @@ Runtime validation is reserved for what static checkers cannot see: CLI
 input, file paths, and fixture protocol rules (for example, session fixtures
 must not accept parameters).
 
-<!-- snektest-doc: expect-type-error=reportCallIssue@5, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
@@ -293,7 +293,7 @@ def test_concatenation(greeting: str, target: str) -> None:
 ### Static Type Checking
 
 Snektest's public decorators and helpers are typed so test parameters, fixtures,
-and Hypothesis strategies can be checked by tools such as pyright.
+and Hypothesis strategies can be checked by `ty`.
 
 ## Running Tests
 
@@ -337,6 +337,10 @@ snektest --pdb
 # Run with coverage.py
 coverage run -m snektest
 ```
+
+Recursive directory discovery excludes files ignored by Git, including generated
+test-shaped files under ignored output directories. An explicitly named test file
+still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
 
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
@@ -487,7 +491,7 @@ async def test_list_operations(numbers: list[int]) -> None:
 
 The decorator provides full type safety - strategy types are checked against function parameters:
 
-<!-- snektest-doc: expect-type-error=reportArgumentType@10, skip-run -->
+<!-- snektest-doc: expect-type-error=invalid-argument-type@10, skip-run -->
 ```python
 from hypothesis import strategies as st
 from snektest import test_hypothesis
@@ -571,7 +575,7 @@ from snektest import assert_eq, assert_raises, test
 @test(mark="fast")
 def test_division_by_zero() -> None:
     with assert_raises(ZeroDivisionError):
-        _ = 1 / 0
+        _ = 1 / 0  # ty: ignore[division-by-zero]
 
 @test(mark="fast")
 def test_multiple_exception_types() -> None:
@@ -629,7 +633,7 @@ def test_no_leak_across_rounds() -> None:
 
 A budgetless call is rejected by the type checker:
 
-<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload, skip-run -->
 ```python
 from snektest import assert_memory, test
 

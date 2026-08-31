@@ -1,7 +1,7 @@
 """Keep documentation code blocks self-verifying.
 
 Every ```python block in ``README.md`` and ``snektest/agent_docs.py`` is
-type-checked under this repo's strict pyright config and executed with
+type-checked under this repo's strict ty config and executed with
 snektest; any adjacent ```text block is diffed against the captured output.
 Blocks opt out or flip expectations with ``snektest-doc`` directives (see
 :mod:`testutils.docblocks`).
@@ -26,7 +26,7 @@ _RUNNABLE = [block for block in _BLOCKS if "skip-run" not in block.directives]
 
 @test(mark="slow")
 def test_doc_blocks_typecheck() -> None:
-    """Every documented block matches its pyright expectation in one run."""
+    """Every documented block matches its ty expectation in one run."""
     blocks = [b for b in _BLOCKS if "skip-typecheck" not in b.directives]
     results = typecheck_blocks(blocks)
 

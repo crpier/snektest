@@ -1,12 +1,15 @@
 """Test discovery and collection into executable test cases."""
 
 import asyncio
-from collections.abc import Callable
+import os
+import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import getmembers, isfunction
 from pathlib import Path
+from shutil import which
 from sys import modules
 from typing import TypeGuard, cast
 
@@ -31,6 +34,32 @@ class _CollectionMatchStats:
 
     function_matched: bool
     params_matched: bool
+
+
+def _git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Path]:
+    """Return ignored candidates according to Git, or none when Git is unavailable."""
+    git_executable = which("git")
+    if git_executable is None or not file_paths:
+        return frozenset[Path]()
+
+    encoded_paths = b"\0".join(os.fsencode(path.resolve()) for path in file_paths)
+    try:
+        process: subprocess.CompletedProcess[bytes] = subprocess.run(  # noqa: S603
+            [git_executable, "check-ignore", "--stdin", "-z"],
+            cwd=cwd,
+            input=encoded_paths + b"\0",
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return frozenset[Path]()
+    if process.returncode not in {0, 1}:
+        return frozenset[Path]()
+    return frozenset(
+        Path(os.fsdecode(path)).resolve()
+        for path in process.stdout.split(b"\0")
+        if path
+    )
 
 
 def load_tests_from_file(  # noqa: PLR0913
@@ -115,16 +144,23 @@ def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
             return False
         return True
 
-    if filter_item.file_path.is_dir():
-        paths = [
+    if not filter_item.file_path.is_dir():
+        return (
+            [filter_item.file_path] if path_is_runnable(filter_item.file_path) else []
+        )
+
+    paths = [
+        path
+        for path in (
             dirpath / name
             for dirpath, _, filenames in filter_item.file_path.walk()
             for name in filenames
-        ]
-    else:
-        paths = [filter_item.file_path]
+        )
+        if path_is_runnable(path)
+    ]
+    ignored_paths = _git_ignored_files(paths, cwd=filter_item.file_path)
 
-    return [path for path in paths if path_is_runnable(path)]
+    return [path for path in paths if path.resolve() not in ignored_paths]
 
 
 def load_tests_from_filters(

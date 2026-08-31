@@ -7,7 +7,7 @@ from io import StringIO
 from itertools import product
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, override
 
 from snektest.annotations import Coroutine
 
@@ -109,6 +109,7 @@ class FilterItem:
         self.function_name = function_name
         self.params = params
 
+    @override
     def __str__(self) -> str:
         result = str(self.file_path)
         if self.function_name is not None:
@@ -117,6 +118,7 @@ class FilterItem:
             result += f"[{self.params}]"
         return result
 
+    @override
     def __repr__(self) -> str:
         return f"FilterItem(file_path={self.file_path!r}, function_name={self.function_name!r}, params={self.params!r})"
 
@@ -128,6 +130,7 @@ class TestName:
     func_name: str
     params_part: str
 
+    @override
     def __str__(self) -> str:
         result = str(self.file_path)
         result += f"::{self.func_name}"
