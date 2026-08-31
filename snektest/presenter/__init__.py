@@ -1,6 +1,7 @@
 from rich.console import Console
 
 from snektest.models import (
+    BenchmarkComparison,
     BenchmarkMeasurement,
     ErrorResult,
     FailedResult,
@@ -77,7 +78,10 @@ def _humanize_seconds(seconds: float) -> str:
     return f"{seconds:.2f}s"
 
 
-def _format_benchmark(benchmark: BenchmarkMeasurement) -> str:
+def _format_benchmark(
+    benchmark: BenchmarkMeasurement,
+    comparison: BenchmarkComparison | None = None,
+) -> str:
     """Render one benchmark's statistics and configured budgets."""
     label = "benchmark" if benchmark.name is None else f"benchmark[{benchmark.name}]"
     median = f"median={_humanize_seconds(benchmark.median_seconds)}"
@@ -88,24 +92,42 @@ def _format_benchmark(benchmark: BenchmarkMeasurement) -> str:
         p95 += f" (<{_humanize_seconds(benchmark.p95_budget_seconds)})"
     round_word = "round" if benchmark.rounds == 1 else "rounds"
     warmup_word = "warmup" if benchmark.warmup == 1 else "warmups"
-    return " ".join(
-        (
-            label,
-            f"min={_humanize_seconds(benchmark.min_seconds)}",
-            median,
-            p95,
-            f"mean={_humanize_seconds(benchmark.mean_seconds)}",
-            f"stddev={_humanize_seconds(benchmark.stddev_seconds)}",
-            f"({benchmark.rounds} {round_word}, {benchmark.warmup} {warmup_word})",
+    parts = [
+        label,
+        f"min={_humanize_seconds(benchmark.min_seconds)}",
+        median,
+        p95,
+        f"mean={_humanize_seconds(benchmark.mean_seconds)}",
+        f"stddev={_humanize_seconds(benchmark.stddev_seconds)}",
+        f"({benchmark.rounds} {round_word}, {benchmark.warmup} {warmup_word})",
+    ]
+    if comparison is not None:
+        floor = ""
+        if comparison.noise_floor_seconds > 0:
+            floor = f" or {_humanize_seconds(comparison.noise_floor_seconds)}"
+        parts.append(
+            f"baseline={_humanize_seconds(comparison.baseline_median_seconds)} "
+            f"delta={comparison.change_ratio:+.1%} "
+            f"(<+{comparison.regression_below:.1%}{floor}) {comparison.verdict.upper()}"
         )
-    )
+    return " ".join(parts)
 
 
-def _format_benchmarks(benchmarks: tuple[BenchmarkMeasurement, ...]) -> str:
+def _format_benchmarks(
+    benchmarks: tuple[BenchmarkMeasurement, ...],
+    comparisons: tuple[BenchmarkComparison, ...] = (),
+) -> str:
     """Join benchmark statistics into an OK-line suffix."""
     if not benchmarks:
         return ""
-    return "  " + "  ".join(_format_benchmark(benchmark) for benchmark in benchmarks)
+    comparisons_by_index = {
+        comparison.measurement_index: comparison for comparison in comparisons
+    }
+    formatted: list[str] = []
+    for index, benchmark in enumerate(benchmarks):
+        comparison = comparisons_by_index.get(index)
+        formatted.append(_format_benchmark(benchmark, comparison))
+    return "  " + "  ".join(formatted)
 
 
 def print_error(exc: str) -> None:
@@ -122,25 +144,35 @@ def print_test_result_to_console(console: Console, result: TestResult) -> None:
         soft_wrap=True,
     )
     match result.result:
-        case PassedResult(measurements=measurements, benchmarks=benchmarks):
+        case PassedResult(
+            measurements=measurements,
+            benchmarks=benchmarks,
+            benchmark_comparisons=benchmark_comparisons,
+        ):
             console.print(
-                f"OK ({result.duration:.2f}s){_format_measurements(measurements)}{_format_benchmarks(benchmarks)}",
+                f"OK ({result.duration:.2f}s){_format_measurements(measurements)}{_format_benchmarks(benchmarks, benchmark_comparisons)}",
                 highlight=False,
                 style="green",
                 markup=False,
                 soft_wrap=True,
             )
-        case FailedResult():
+        case FailedResult(
+            benchmarks=benchmarks,
+            benchmark_comparisons=benchmark_comparisons,
+        ):
             console.print(
-                f"FAIL ({result.duration:.2f}s)",
+                f"FAIL ({result.duration:.2f}s){_format_benchmarks(benchmarks, benchmark_comparisons)}",
                 highlight=False,
                 style="red",
                 markup=False,
                 soft_wrap=True,
             )
-        case ErrorResult():
+        case ErrorResult(
+            benchmarks=benchmarks,
+            benchmark_comparisons=benchmark_comparisons,
+        ):
             console.print(
-                f"ERROR ({result.duration:.2f}s)",
+                f"ERROR ({result.duration:.2f}s){_format_benchmarks(benchmarks, benchmark_comparisons)}",
                 highlight=False,
                 style="dark_orange",
                 markup=False,

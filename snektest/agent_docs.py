@@ -76,6 +76,17 @@ def test_needs_parentheses() -> None:
   during measured rounds unless `disable_gc=False`. Use `name=` to distinguish
   multiple timed regions in one test. Benchmark contexts cannot overlap because
   concurrent regions distort timings and process-wide GC state.
+- Add `median_regression_below=0.10` and an optional
+  `regression_noise_floor=` in seconds to opt a named region into a stored
+  median comparison. Create snapshots with
+  `--update-benchmark-baseline PATH`; enforce them with
+  `--benchmark-baseline PATH`. Snapshots are machine-bound and reject hardware,
+  OS, architecture, CPU-count, or Python-version mismatches. Use the same
+  machine for both runs; on shared CI, generate the base-branch snapshot and
+  compare the change in one job rather than committing hosted-runner timings.
+  Missing current entries fail; stale unselected entries are ignored until an
+  update covering their scope removes them. Updates are atomically replaced and
+  locked so concurrent writers fail rather than lose changes.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -206,10 +217,22 @@ from snektest import assert_benchmark, test
 @test(mark="fast")
 async def test_async_checkpoint_latency() -> None:
     with assert_benchmark(
-        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+        name="async checkpoint",
+        median_below=0.01,
+        median_regression_below=0.10,
+        regression_noise_floor=0.000001,
+        rounds=20,
+        warmup=3,
     ) as timing:
         for _ in timing.rounds:
             await asyncio.sleep(0)
+```
+
+Update or check the machine-bound snapshot:
+
+```bash
+snektest --update-benchmark-baseline .snektest-benchmarks.json tests/performance
+snektest --benchmark-baseline .snektest-benchmarks.json tests/performance
 ```
 
 ## Copyable examples

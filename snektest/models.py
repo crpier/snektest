@@ -7,7 +7,7 @@ from io import StringIO
 from itertools import product
 from pathlib import Path
 from types import TracebackType
-from typing import Any, override
+from typing import Any, Literal, override
 
 from snektest.annotations import Coroutine
 
@@ -129,6 +129,7 @@ class TestName:
     file_path: Path
     func_name: str
     params_part: str
+    resolved_file_path: Path | None = None
 
     @override
     def __str__(self) -> str:
@@ -143,7 +144,8 @@ class TestName:
 class BenchmarkMeasurement:
     """Timing statistics for the measured rounds of one benchmark test.
 
-    Durations and optional budgets are seconds. `p95_seconds` uses the
+    Durations, optional budgets, and the regression noise floor are seconds.
+    `median_regression_below` is a fractional increase. `p95_seconds` uses the
     nearest-rank percentile, and `stddev_seconds` is the population standard
     deviation across measured rounds.
     """
@@ -158,6 +160,25 @@ class BenchmarkMeasurement:
     stddev_seconds: float
     median_budget_seconds: float | None
     p95_budget_seconds: float | None
+    disable_gc: bool = True
+    median_regression_below: float | None = None
+    regression_noise_floor_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class BenchmarkComparison:
+    """One current median compared with its machine-bound stored baseline."""
+
+    allowed_increase_seconds: float
+    baseline_median_seconds: float
+    change_ratio: float
+    limit_seconds: float
+    measurement_index: int
+    name: str
+    noise_floor_seconds: float
+    observed_median_seconds: float
+    regression_below: float
+    verdict: Literal["passed", "regressed"]
 
 
 @dataclass(frozen=True)
@@ -181,6 +202,7 @@ class MemoryMeasurement:
 class PassedResult:
     measurements: tuple[MemoryMeasurement, ...] = ()
     benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
 
 
 type TestFunction = Callable[..., Coroutine[None] | None]
@@ -238,6 +260,8 @@ class FailedResult:
     exc_type: type[BaseException]
     exc_value: BaseException
     traceback: TracebackType
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -245,6 +269,8 @@ class ErrorResult:
     exc_type: type[BaseException]
     exc_value: BaseException
     traceback: TracebackType
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
 
 
 @dataclass(frozen=True)

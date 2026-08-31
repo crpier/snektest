@@ -36,7 +36,7 @@ class _CollectionMatchStats:
     params_matched: bool
 
 
-def _git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Path]:
+def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Path]:
     """Return ignored candidates according to Git, or none when Git is unavailable."""
     git_executable = which("git")
     if git_executable is None or not file_paths:
@@ -70,10 +70,18 @@ def load_tests_from_file(  # noqa: PLR0913
     *,
     mark: str | None = None,
     spec_loader: Callable[..., object] = spec_from_file_location,
+    collection_root: Path | None = None,
+    seen_test_cases: set[tuple[Path, str, str]] | None = None,
 ) -> _CollectionMatchStats:
     """Load and queue tests from a single Python file."""
-    module_name = ".".join(file_path.with_suffix("").parts)
-    if module_name in modules:
+    path_root = collection_root or Path.cwd()
+    canonical_file_path = (
+        file_path.resolve()
+        if file_path.is_absolute()
+        else (path_root / file_path).resolve()
+    )
+    module_name = ".".join(canonical_file_path.with_suffix("").parts)
+    if spec_loader is spec_from_file_location and module_name in modules:
         module = modules[module_name]
     else:
         spec = spec_loader(module_name, file_path)
@@ -115,8 +123,16 @@ def load_tests_from_file(  # noqa: PLR0913
         for param_names, params in get_test_function_params(func).items():
             if filter_item.params and filter_item.params != param_names:
                 continue
+            if seen_test_cases is not None:
+                test_identity = (canonical_file_path, func.__name__, param_names)
+                if test_identity in seen_test_cases:
+                    continue
+                seen_test_cases.add(test_identity)
             test_name = TestName(
-                file_path=file_path, func_name=func.__name__, params_part=param_names
+                file_path=file_path,
+                func_name=func.__name__,
+                params_part=param_names,
+                resolved_file_path=canonical_file_path,
             )
             test_case = TestCase(
                 function=func,
@@ -158,7 +174,7 @@ def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
         )
         if path_is_runnable(path)
     ]
-    ignored_paths = _git_ignored_files(paths, cwd=filter_item.file_path)
+    ignored_paths = git_ignored_files(paths, cwd=filter_item.file_path)
 
     return [path for path in paths if path.resolve() not in ignored_paths]
 
@@ -179,6 +195,8 @@ def load_tests_from_filters(
         loop: Event loop for thread-safe queue operations
         exception_holder: Optional list to store exception if one occurs during collection
     """
+    collection_root = Path.cwd().resolve()
+    seen_test_cases: set[tuple[Path, str, str]] = set()
     try:
         for filter_item in filter_items:
             file_paths = generate_file_list(filter_item)
@@ -191,6 +209,8 @@ def load_tests_from_filters(
                     queue=queue,
                     loop=loop,
                     mark=mark,
+                    collection_root=collection_root,
+                    seen_test_cases=seen_test_cases,
                 )
                 function_matched = function_matched or stats.function_matched
                 params_matched = params_matched or stats.params_matched

@@ -292,7 +292,12 @@ from snektest import assert_benchmark, test
 @test(mark="fast")
 def test_list_copy_latency() -> None:
     with assert_benchmark(
-        name="list copy", median_below=0.01, rounds=20, warmup=3
+        name="list copy",
+        median_below=0.01,
+        median_regression_below=0.10,
+        regression_noise_floor=0.000001,
+        rounds=20,
+        warmup=3,
     ) as timing:
         for _ in timing.rounds:
             _ = list(range(100))
@@ -313,8 +318,62 @@ Statistics remain readable afterwards as `timing.min_seconds`,
 `timing.median_seconds`, `timing.p95_seconds`, `timing.mean_seconds`, and
 `timing.stddev_seconds`. `--timeout` bounds a complete async test, not an
 individual benchmark round; it cannot interrupt synchronous or CPU-bound work.
-Stored baselines are intentionally deferred because timing files produced on a
-different machine are not a meaningful default regression gate.
+
+To catch changes relative to a stored median, set
+`median_regression_below=` to the maximum fractional increase. For example,
+`0.10` allows an increase below 10%. `regression_noise_floor=` adds an absolute
+allowance in seconds for timings where a small fixed change would look like a
+large percentage. The allowed increase is
+`max(baseline median * median_regression_below, regression_noise_floor)`.
+
+The observed median must be strictly below the baseline plus that allowance.
+Regression-gated regions require a unique `name=`. The relative gate is active
+only in baseline comparison mode; ordinary runs still enforce the existing
+absolute `median_below` and `p95_below` budgets.
+
+Create or update a machine-bound snapshot after a passing run, then compare:
+
+```bash
+snektest --update-benchmark-baseline .snektest-benchmarks.json tests/performance
+snektest --benchmark-baseline .snektest-benchmarks.json tests/performance
+```
+
+Only regions with `median_regression_below=` are stored. The identity combines
+the path relative to the nearest `pyproject.toml`, test function, parameter case,
+and region name. Changing rounds, warmup, or `disable_gc` requires an update.
+A filtered update replaces matching entries and preserves unselected entries;
+a `--mark` update conservatively replaces only tests it observed. Snektest never
+writes a baseline when the run, fixture teardown, or collection fails.
+Comparison ignores stored entries outside the current run. A renamed opted-in
+region therefore fails as a missing current baseline; an update over the old and
+new scope removes the stale identity and records the new one.
+Updates use a sidecar lock and atomic replacement. Concurrent writers fail
+instead of overwriting one another; if a process is killed during an update,
+remove the reported stale `.lock` file before retrying.
+
+The JSON file records the Python implementation/version, operating system,
+architecture, CPU model, and logical CPU count. Comparison and update refuse a
+machine mismatch. This metadata detects incompatible environments; it does not
+normalize timings. On a shared hosted CI pool, generate the baseline from the
+base branch and compare the proposed change earlier and later in the same job,
+using a file outside the checkout so it survives the branch switch. Commit raw
+snapshots only when a dedicated runner keeps the machine class fixed. Stored
+p95 regression gates, history, statistical significance tests, and cross-machine
+normalization remain out of scope.
+
+For example, a pull-request job can use a second worktree while keeping both runs
+on one allocated machine:
+
+```bash
+git fetch origin "$GITHUB_BASE_REF"
+git worktree add "$RUNNER_TEMP/snektest-base" "origin/$GITHUB_BASE_REF"
+(cd "$RUNNER_TEMP/snektest-base" && uv run snektest \
+  --update-benchmark-baseline "$RUNNER_TEMP/snektest-benchmarks.json" \
+  tests/performance)
+uv run snektest \
+  --benchmark-baseline "$RUNNER_TEMP/snektest-benchmarks.json" \
+  tests/performance
+```
 
 A budgetless call is rejected by the type checker:
 

@@ -11,11 +11,13 @@ from types import TracebackType
 from typing import Any, cast
 
 from snektest.benchmark import collect_benchmarks
+from snektest.benchmark_baseline import BenchmarkBaseline
 from snektest.collection import TestsQueue
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
 from snektest.memory import collect_measurements
 from snektest.models import (
     AssertionFailure,
+    BadRequestError,
     ErrorResult,
     FailedResult,
     PassedResult,
@@ -82,19 +84,27 @@ async def _await_test_body_with_task_check(
         raise AssertionFailure(message)
 
 
-async def execute_test(
+async def execute_test(  # noqa: C901
     test_case: TestCase,
     *,
     capture_output: bool = True,
     timeout: float | None = None,  # noqa: ASYNC109
+    benchmark_baseline: BenchmarkBaseline | None = None,
     exc_info_provider: Callable[
         [], tuple[object | None, object | None, TracebackType | None]
     ] = sys.exc_info,
 ) -> TestResult:
     """Execute a collected test case with fixtures and output capture."""
+    compare_benchmark = (
+        benchmark_baseline.comparator(test_case.name)
+        if benchmark_baseline is not None
+        else None
+    )
+    bad_request: BadRequestError | None = None
+    result: PassedResult | FailedResult | ErrorResult | None = None
     with (
         maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
-        collect_benchmarks() as benchmarks,
+        collect_benchmarks(compare=compare_benchmark) as benchmark_capture,
         collect_measurements() as measurements,
     ):
         test_start = time.monotonic()
@@ -107,7 +117,9 @@ async def execute_test(
                 )
             duration = time.monotonic() - test_start
             result = PassedResult(
-                measurements=tuple(measurements), benchmarks=tuple(benchmarks)
+                measurements=tuple(measurements),
+                benchmarks=tuple(benchmark_capture.measurements),
+                benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
         except (AssertionFailure, asyncio.CancelledError):
             duration = time.monotonic() - test_start
@@ -119,6 +131,8 @@ async def execute_test(
                 exc_type=cast("type[BaseException]", exc_type),
                 exc_value=cast("BaseException", exc_value),
                 traceback=traceback,
+                benchmarks=tuple(benchmark_capture.measurements),
+                benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
         except Exception:
             duration = time.monotonic() - test_start
@@ -130,7 +144,12 @@ async def execute_test(
                 exc_type=cast("type[BaseException]", exc_type),
                 exc_value=cast("BaseException", exc_value),
                 traceback=traceback,
+                benchmarks=tuple(benchmark_capture.measurements),
+                benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
+        except BadRequestError as error:
+            duration = time.monotonic() - test_start
+            bad_request = error
 
     with maybe_capture_output(capture_output) as (
         fixture_teardown_buffer,
@@ -141,6 +160,24 @@ async def execute_test(
         )
 
     fixture_teardown_output_value = fixture_teardown_buffer.getvalue() or None
+
+    if bad_request is not None and fixture_teardown_failures:
+        traceback = bad_request.__traceback__
+        if traceback is None:
+            msg = "Baseline configuration error had no traceback. This shouldn't be possible!"
+            raise UnreachableError(msg)
+        result = ErrorResult(
+            exc_type=type(bad_request),
+            exc_value=bad_request,
+            traceback=traceback,
+            benchmarks=tuple(benchmark_capture.measurements),
+            benchmark_comparisons=tuple(benchmark_capture.comparisons),
+        )
+    elif bad_request is not None:
+        raise bad_request
+    if result is None:
+        msg = "Test execution completed without a result. This shouldn't be possible!"
+        raise UnreachableError(msg)
 
     return TestResult(
         name=test_case.name,
@@ -295,6 +332,7 @@ async def run_tests(  # noqa: PLR0913
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
     reporter: RunReporter | None = None,
     resolver: Callable[[Path], Path] = Path.resolve,
+    benchmark_baseline: BenchmarkBaseline | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     """Run all tests from the queue and report progress through a small seam."""
     if reporter is None:
@@ -309,7 +347,10 @@ async def run_tests(  # noqa: PLR0913
             while True:
                 test_case = await queue.get()
                 test_result = await execute_test(
-                    test_case, capture_output=capture_output, timeout=timeout
+                    test_case,
+                    capture_output=capture_output,
+                    timeout=timeout,
+                    benchmark_baseline=benchmark_baseline,
                 )
                 test_results.append(test_result)
                 reporter.test_finished(test_result)

@@ -1,5 +1,6 @@
 """Adapters for reporting test run progress and completion."""
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from snektest.models import TeardownFailure, TestResult
@@ -76,8 +77,55 @@ class NullRunReporter:
         )
 
 
+@dataclass(frozen=True)
+class _DeferredRunFinished:
+    test_results: list[TestResult]
+    session_teardown_failures: list[TeardownFailure]
+    session_teardown_output: str | None
+    total_duration: float
+
+
+class DeferredRunReporter:
+    """Show test progress immediately but delay the final run summary."""
+
+    def __init__(self, reporter: RunReporter) -> None:
+        self._reporter: RunReporter = reporter
+        self._run_finished: _DeferredRunFinished | None = None
+
+    def test_finished(self, test_result: TestResult) -> None:
+        self._reporter.test_finished(test_result)
+
+    def run_finished(
+        self,
+        *,
+        test_results: list[TestResult],
+        session_teardown_failures: list[TeardownFailure],
+        session_teardown_output: str | None,
+        total_duration: float,
+    ) -> None:
+        self._run_finished = _DeferredRunFinished(
+            test_results=test_results,
+            session_teardown_failures=session_teardown_failures,
+            session_teardown_output=session_teardown_output,
+            total_duration=total_duration,
+        )
+
+    def finish(self) -> None:
+        """Emit the final summary after any post-run persistence succeeds."""
+        run_finished = self._run_finished
+        if run_finished is None:
+            return
+        self._reporter.run_finished(
+            test_results=run_finished.test_results,
+            session_teardown_failures=run_finished.session_teardown_failures,
+            session_teardown_output=run_finished.session_teardown_output,
+            total_duration=run_finished.total_duration,
+        )
+
+
 __all__ = [
     "ConsoleRunReporter",
+    "DeferredRunReporter",
     "NullRunReporter",
     "RunReporter",
 ]
