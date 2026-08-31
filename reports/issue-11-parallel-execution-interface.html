@@ -1,0 +1,1383 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Issue 11: parallel execution interface review</title>
+  <style>
+    :root {
+      --paper: #f2efe6;
+      --paper-raised: #fbfaf5;
+      --ink: #18231d;
+      --muted: #607067;
+      --line: #c8cec5;
+      --line-dark: #8e9b92;
+      --green: #176b4c;
+      --green-pale: #dcecdf;
+      --orange: #d65f2e;
+      --orange-pale: #f7dfd2;
+      --yellow: #e1b84b;
+      --yellow-pale: #f8edc9;
+      --red: #a63d32;
+      --red-pale: #f4d9d3;
+      --navy: #17324d;
+      --code: #102019;
+      --shadow: 0 18px 50px rgba(24, 35, 29, 0.09);
+      --radius: 18px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(23, 107, 76, 0.035) 1px, transparent 1px),
+        linear-gradient(rgba(23, 107, 76, 0.035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.62;
+    }
+
+    a { color: var(--green); text-underline-offset: 3px; }
+    a:hover { color: var(--orange); }
+    code, pre { font-family: var(--mono); }
+    code {
+      padding: 0.12rem 0.3rem;
+      border-radius: 5px;
+      background: rgba(23, 107, 76, 0.08);
+      font-size: 0.91em;
+    }
+
+    pre {
+      margin: 0;
+      padding: 1rem 1.1rem;
+      overflow-x: auto;
+      border: 1px solid #294238;
+      border-radius: 12px;
+      color: #e8f3eb;
+      background: var(--code);
+      font-size: 0.86rem;
+      line-height: 1.65;
+    }
+
+    pre code { padding: 0; color: inherit; background: transparent; }
+    h1, h2, h3, h4 { line-height: 1.13; letter-spacing: -0.025em; }
+    h1 { margin: 0; font-size: clamp(2.8rem, 7vw, 6.4rem); max-width: 11ch; }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.8rem, 3.4vw, 3.1rem); }
+    h3 { margin: 0 0 0.7rem; font-size: 1.25rem; }
+    h4 { margin: 0 0 0.4rem; font-size: 1rem; }
+    p { margin: 0 0 1rem; }
+    ul, ol { margin: 0.4rem 0 1rem; padding-left: 1.25rem; }
+    li + li { margin-top: 0.45rem; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .rail {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.6rem 1.3rem;
+      color: #edf4ef;
+      background: var(--ink);
+      border-right: 5px solid var(--orange);
+    }
+
+    .rail-mark {
+      display: grid;
+      place-items: center;
+      width: 58px;
+      height: 58px;
+      margin-bottom: 1.2rem;
+      border: 2px solid #edf4ef;
+      border-radius: 50%;
+      font: 700 1.3rem var(--mono);
+    }
+
+    .rail-title {
+      margin-bottom: 1.5rem;
+      color: #9fc7ad;
+      font: 700 0.74rem var(--mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .rail nav { display: grid; gap: 0.12rem; }
+    .rail nav a {
+      padding: 0.42rem 0.55rem;
+      border-left: 2px solid transparent;
+      color: #c5d3ca;
+      text-decoration: none;
+      font-size: 0.86rem;
+    }
+
+    .rail nav a:hover {
+      border-left-color: var(--orange);
+      color: #fff;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .rail-meta {
+      position: absolute;
+      right: 1.3rem;
+      bottom: 1.5rem;
+      left: 1.3rem;
+      padding-top: 1rem;
+      border-top: 1px solid #405047;
+      color: #98aaa0;
+      font: 0.7rem/1.6 var(--mono);
+    }
+
+    main { min-width: 0; }
+
+    .hero {
+      min-height: 94vh;
+      padding: clamp(3rem, 8vw, 7rem) clamp(1.5rem, 7vw, 7rem) 3rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background:
+        radial-gradient(circle at 85% 15%, rgba(214, 95, 46, 0.17), transparent 25rem),
+        radial-gradient(circle at 55% 85%, rgba(23, 107, 76, 0.14), transparent 28rem);
+    }
+
+    .eyebrow {
+      margin-bottom: 1rem;
+      color: var(--orange);
+      font: 700 0.78rem var(--mono);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .hero-bottom {
+      display: grid;
+      grid-template-columns: 1.35fr 0.65fr;
+      gap: 2rem;
+      align-items: end;
+      margin-top: 4rem;
+    }
+
+    .hero-deck {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(1.15rem, 2vw, 1.6rem);
+      line-height: 1.45;
+    }
+
+    .stamp {
+      justify-self: end;
+      width: min(100%, 270px);
+      padding: 1rem;
+      border: 2px solid var(--green);
+      box-shadow: 7px 7px 0 var(--green);
+      background: var(--paper-raised);
+      transform: rotate(-1.5deg);
+      font: 0.77rem/1.6 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .section {
+      padding: clamp(4rem, 8vw, 7rem) clamp(1.5rem, 7vw, 7rem);
+      border-top: 1px solid var(--line-dark);
+      background: rgba(251, 250, 245, 0.72);
+    }
+
+    .section:nth-of-type(even) { background: rgba(237, 239, 230, 0.82); }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.75fr) minmax(280px, 1.25fr);
+      gap: 2rem;
+      align-items: start;
+      margin-bottom: 2.2rem;
+    }
+
+    .section-number {
+      color: var(--orange);
+      font: 700 0.75rem var(--mono);
+      letter-spacing: 0.12em;
+    }
+
+    .lead { max-width: 760px; color: #34483d; font-size: 1.08rem; }
+
+    .verdict {
+      padding: clamp(1.4rem, 3vw, 2.4rem);
+      border: 2px solid var(--ink);
+      border-left: 12px solid var(--green);
+      background: var(--paper-raised);
+      box-shadow: var(--shadow);
+    }
+
+    .verdict strong { color: var(--green); }
+    .verdict .big { margin-bottom: 0.7rem; font-size: clamp(1.35rem, 2.5vw, 2.1rem); line-height: 1.35; }
+
+    .grid-2, .grid-3, .grid-4 {
+      display: grid;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      padding: 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper-raised);
+      box-shadow: 0 7px 25px rgba(24, 35, 29, 0.05);
+    }
+
+    .card p:last-child, .callout p:last-child { margin-bottom: 0; }
+    .card.recommended { border: 2px solid var(--green); }
+    .card.rejected { background: #f0eee7; }
+
+    .tag {
+      display: inline-block;
+      margin-bottom: 0.7rem;
+      padding: 0.2rem 0.48rem;
+      border-radius: 999px;
+      color: var(--navy);
+      background: #dce6ed;
+      font: 700 0.68rem var(--mono);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .tag.good { color: #0d4d35; background: var(--green-pale); }
+    .tag.warn { color: #664910; background: var(--yellow-pale); }
+    .tag.bad { color: #7a2921; background: var(--red-pale); }
+
+    .callout {
+      margin: 1.2rem 0;
+      padding: 1rem 1.15rem;
+      border-left: 5px solid var(--yellow);
+      background: var(--yellow-pale);
+    }
+
+    .callout.danger { border-left-color: var(--red); background: var(--red-pale); }
+    .callout.good { border-left-color: var(--green); background: var(--green-pale); }
+
+    .command {
+      margin: 1rem 0;
+      padding: 1rem 1.2rem;
+      border-radius: 10px;
+      color: #f6faf7;
+      background: var(--ink);
+      font: 700 clamp(0.9rem, 1.8vw, 1.15rem)/1.5 var(--mono);
+      overflow-x: auto;
+    }
+
+    .command .prompt { color: #73c894; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; background: var(--paper-raised); font-size: 0.9rem; }
+    th, td { padding: 0.8rem 0.9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { color: #f5f8f6; background: var(--ink); font: 700 0.72rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #f2f6ef; }
+
+    .score { white-space: nowrap; font: 700 0.77rem var(--mono); }
+    .score.high { color: var(--green); }
+    .score.mid { color: #8b6614; }
+    .score.low { color: var(--red); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 54px 1.15fr 54px 1.3fr;
+      gap: 0.5rem;
+      align-items: stretch;
+      margin: 1.5rem 0;
+    }
+
+    .flow-box {
+      display: grid;
+      align-content: center;
+      min-height: 130px;
+      padding: 1rem;
+      border: 2px solid var(--ink);
+      background: var(--paper-raised);
+    }
+
+    .flow-box.accent { color: #f4f8f5; background: var(--green); border-color: var(--green); }
+    .flow-arrow { display: grid; place-items: center; font: 700 1.4rem var(--mono); }
+    .flow small { display: block; margin-top: 0.35rem; opacity: 0.78; }
+
+    .fit-row {
+      display: grid;
+      grid-template-columns: 145px 110px minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .fit-row:last-child { border-bottom: 0; }
+    .fit-file { font: 700 0.84rem var(--mono); }
+
+    .evidence {
+      counter-reset: evidence;
+      display: grid;
+      gap: 0;
+      border-top: 2px solid var(--ink);
+    }
+
+    .evidence-item {
+      counter-increment: evidence;
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1.15rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .evidence-item::before {
+      content: counter(evidence, decimal-leading-zero);
+      color: var(--orange);
+      font: 700 0.9rem var(--mono);
+    }
+
+    .risk {
+      display: grid;
+      grid-template-columns: 92px minmax(150px, 0.7fr) minmax(220px, 1.3fr);
+      gap: 1rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .risk:last-child { border-bottom: 0; }
+    .risk-level { font: 700 0.72rem var(--mono); text-transform: uppercase; }
+    .risk-level.blocker, .risk-level.high { color: var(--red); }
+    .risk-level.medium { color: #8b6614; }
+
+    details {
+      margin: 0.7rem 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper-raised);
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 0.8rem 1rem;
+      font-weight: 700;
+    }
+
+    details > div { padding: 0 1rem 1rem; }
+
+    .source-list { columns: 2; column-gap: 2rem; padding-left: 1.1rem; }
+    .source-list li { break-inside: avoid; margin-bottom: 0.5rem; }
+
+    .footer {
+      padding: 2rem clamp(1.5rem, 7vw, 7rem);
+      color: #b9c8bf;
+      background: var(--ink);
+      font: 0.75rem/1.7 var(--mono);
+    }
+
+    @media (max-width: 1050px) {
+      .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: 1fr; }
+      .flow-arrow { min-height: 35px; transform: rotate(90deg); }
+    }
+
+    @media (max-width: 780px) {
+      .layout { grid-template-columns: 1fr; }
+      .rail { position: relative; height: auto; padding: 1rem; border-right: 0; border-bottom: 5px solid var(--orange); }
+      .rail-mark, .rail-title, .rail-meta { display: none; }
+      .rail nav { grid-template-columns: repeat(3, 1fr); }
+      .rail nav a { padding: 0.4rem; text-align: center; font-size: 0.73rem; }
+      .hero { min-height: auto; }
+      .hero-bottom, .section-head, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .stamp { justify-self: start; }
+      .fit-row { grid-template-columns: 1fr; gap: 0.35rem; }
+      .risk { grid-template-columns: 80px 1fr; }
+      .risk > div:last-child { grid-column: 1 / -1; }
+      .source-list { columns: 1; }
+    }
+
+    @media (max-width: 500px) {
+      .rail nav { grid-template-columns: repeat(2, 1fr); }
+      .grid-4 { grid-template-columns: 1fr; }
+      .section, .hero { padding-right: 1rem; padding-left: 1rem; }
+      th, td { padding: 0.65rem; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .layout { display: block; }
+      .rail { display: none; }
+      .hero { min-height: auto; padding: 2rem; }
+      .section { padding: 2rem; break-inside: avoid; }
+      .card, .verdict { box-shadow: none; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="rail">
+      <div class="rail-mark">11</div>
+      <div class="rail-title">Interface review</div>
+      <nav aria-label="Report sections">
+        <a href="#verdict">Verdict</a>
+        <a href="#interface">Interface</a>
+        <a href="#contract">Contract</a>
+        <a href="#alternatives">Alternatives</a>
+        <a href="#fit">Library fit</a>
+        <a href="#downstream">Downstream fit</a>
+        <a href="#precedents">Precedents</a>
+        <a href="#validation">Validation</a>
+        <a href="#implementation">Implementation</a>
+        <a href="#risks">Risks</a>
+        <a href="#sources">Sources</a>
+      </nav>
+      <div class="rail-meta">
+        SNEKTEST 0.16.0<br>
+        HEAD 425af98<br>
+        2026-08-31<br>
+        STATUS: REVISED
+      </div>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <div>
+          <div class="eyebrow">Issue 11 / second-pass interface review</div>
+          <h1>Parallel execution with explicit resource ownership</h1>
+        </div>
+        <div class="hero-bottom">
+          <p class="hero-deck">
+            Add one worker-count option, one named per-test mutex, and one honest
+            run-owned fixture scope. Keep session fixtures worker-local. Make
+            cross-process resource ownership and value transport explicit contracts.
+          </p>
+          <div class="stamp">
+            Recommendation<br>
+            <strong>-n / --workers</strong><br>
+            <strong>@test(mutex=...)</strong><br>
+            session scope stays worker-local<br>
+            <strong>@fixture(scope="run")</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="section" id="verdict">
+        <div class="section-head">
+          <div>
+            <div class="section-number">01 / Verdict</div>
+            <h2>Three controls, each earning its place</h2>
+          </div>
+          <p class="lead">
+            The run chooses process capacity. A test may declare one command-local mutex.
+            A fixture may own one external resource for the invocation and distribute a
+            descriptor snapshot. Global barriers, affinity, pool types, and shared mutable
+            Python identity remain unsupported or private.
+          </p>
+        </div>
+
+        <div class="verdict">
+          <div class="tag good">Pick this</div>
+          <p class="big">
+            Add <strong><code>-n COUNT</code></strong> /
+            <strong><code>--workers COUNT</code></strong>, and add
+            <strong><code>mutex: str | None = None</code></strong> to both
+            <code>@test</code> and <code>@test_hypothesis</code>. Add
+            <strong><code>@fixture(scope="run")</code></strong> for fixture-host-owned
+            resources whose yielded descriptor can cross processes. Omit the worker
+            option for in-process sequential execution.
+          </p>
+          <p>
+            Tests with the same non-empty, already-trimmed, case-sensitive mutex never overlap, while the
+            scheduler may skip blocked cases to run unrelated work. The metadata governs
+            this command's test invocations only; it is not cross-command locking, worker
+            affinity, or cleanup of leaked descendants.
+          </p>
+          <p><code>COUNT</code> is a positive integer or <code>auto</code>. The latter uses the exact CPU/selected-case formula below. Issue 11 does not ship until issue 38 proves that full-plan replication stays within its memory budget at that count.</p>
+        </div>
+
+        <div class="grid-4">
+          <div class="card">
+            <div class="tag good">Default</div>
+            <h3>Option omitted</h3>
+            <p>Run sequentially in process, with no child hosts. Issue 28's deterministic precollection applies to both local and worker modes.</p>
+          </div>
+          <div class="card">
+            <div class="tag good">Process mode</div>
+            <h3><code>--workers 1</code></h3>
+            <p>One execution worker plus one persistent collector/fixture host. This reproduces worker-only behavior without concurrent tests.</p>
+          </div>
+          <div class="card">
+            <div class="tag good">Default in worker mode</div>
+            <h3><code>--workers 4</code></h3>
+            <p>Up to four persistent execution workers plus the host. Ordinary selected tests are eligible to overlap.</p>
+          </div>
+          <div class="card">
+            <div class="tag good">Per-test constraint</div>
+            <h3><code>mutex="resource"</code></h3>
+            <p>Tests naming the same command-global mutex run one at a time without forcing unrelated workers idle.</p>
+          </div>
+        </div>
+
+        <div class="callout danger">
+          <h3>Do not call this full test isolation</h3>
+          <p>
+            Workers are persistent lanes. Tests in different workers do not share Python
+            globals or event loops, but later tests in the same worker do. The filesystem,
+            database, network ports, and other external resources remain shared by every
+             worker. A mutex also cannot stop a thread or subprocess that a previous test
+             leaked. A process-per-test feature would be a different contract.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="interface">
+        <div class="section-head">
+          <div>
+            <div class="section-number">02 / Interface</div>
+            <h2>The exact caller interface</h2>
+          </div>
+          <p class="lead">
+             Absence is meaningful. It distinguishes the local runner from a one-worker
+             child process. Mutex metadata stays separate from resource markers.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <div class="command"><span class="prompt">$</span> snektest --workers 4 tests</div>
+            <div class="command"><span class="prompt">$</span> snektest -n auto --mark fast</div>
+            <div class="command"><span class="prompt">$</span> snektest --workers 1 tests/test_orders.py</div>
+          </div>
+          <pre><code>type WorkerCount = int | Literal["auto"]
+
+@dataclass(frozen=True)
+class CliOptions:
+    # Existing fields omitted
+    workers: WorkerCount | None = None
+
+async def run_tests_programmatic(
+    filter_items: list[FilterItem],
+    *,
+    # Existing keyword options retained
+    workers: WorkerCount | None = None,
+) -&gt; TestRunSummary: ...
+
+@test(mark="medium", mutex="mariadb:bulk-user")
+def test_bulk_insert() -&gt; None: ...
+
+@test_hypothesis(strategy, mutex="shared-codec")
+def test_global_invariant(value: object) -&gt; None: ...
+
+@fixture(scope="run")
+async def database_server() -&gt; AsyncGenerator[ServerAddress]:
+    async with start_server() as server:
+        yield server.address</code></pre>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Input</th><th>Meaning</th><th>Reason</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Option omitted / <code>workers=None</code></td><td>In-process sequential adapter</td><td>No child startup; debugger and execution semantics remain local after deterministic collection lands.</td></tr>
+              <tr><td><code>--workers 1</code> / <code>workers=1</code></td><td>One execution worker</td><td>"Worker" remains literal. The persistent collector/fixture host is an additional child and is never included in this count.</td></tr>
+              <tr><td>Positive integer</td><td>Maximum execution workers</td><td>The actual count is capped by selected test count. Process mode always has one additional persistent host.</td></tr>
+              <tr><td><code>auto</code></td><td><code>min(os.process_cpu_count() or 1, selected_count)</code></td><td>Exact formula, with the host additional. Do not apply an undocumented memory-based cap; issue 38's benchmark gates the whole release.</td></tr>
+              <tr><td><code>0</code>, negative, float, bool, other string</td><td>Usage error</td><td>Zero is not a count and the option can simply be omitted. No xdist compatibility is required.</td></tr>
+              <tr><td>Repeated <code>-n</code> / <code>--workers</code></td><td>Usage error</td><td>Matches the parser's handling of other value-taking options.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 2rem;">Decorator and fixture inputs</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Input</th><th>Default</th><th>Validated meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>mutex: str | None</code></td><td><code>None</code></td><td>A non-empty string equal to its own <code>strip()</code> names one exact, case-sensitive, command-global mutex. It does not imply affinity or filtering.</td></tr>
+              <tr><td><code>@fixture(scope="session")</code></td><td>Explicit</td><td>Zero-argument live resource cached once per worker process incarnation.</td></tr>
+              <tr><td><code>@fixture(scope="run")</code></td><td>Explicit</td><td>Zero-argument module-level resource owned once by the run host; yielded descriptor must pickle round-trip.</td></tr>
+              <tr><td><code>parallel</code>, <code>exclusive</code>, affinity, limits, multiple mutexes</td><td>Unsupported</td><td>Reject rather than guess. The selected interface already covers both audited suites.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3>Keep markers orthogonal</h3>
+            <p><code>fast</code>, <code>medium</code>, and <code>slow</code> describe resources. They neither imply nor override a mutex.</p>
+          </div>
+          <div class="card">
+            <h3>One run-owned value model</h3>
+            <p>A run fixture yields a serialized descriptor snapshot. It never promises shared mutable Python identity, live clients, locks, files, or event-loop objects.</p>
+          </div>
+          <div class="card">
+            <h3>No scheduler menu</h3>
+            <p>Other than one named mutex per test, callers should not rely on file, mutex-worker, or repeated-run affinity. Batching remains private.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="contract">
+        <div class="section-head">
+          <div>
+            <div class="section-number">03 / Contract</div>
+            <h2>The complete worker contract</h2>
+          </div>
+          <p class="lead">
+            A small interface works only if scheduling constraints and fixture ownership
+            are precise. These rules should be documented and tested as part of issue 11.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Concern</th><th>Recommended rule</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Process count</td><td><code>workers</code> counts persistent execution workers only. Process mode also keeps one persistent canonical collector/fixture host. Every child owns one event loop; each execution worker runs one test at a time.</td></tr>
+              <tr><td>Ordinary scheduling</td><td>Choose the earliest pending case whose mutex is free. Skip blocked same-mutex cases so unrelated work can continue. No same-file, same-fixture, mutex-worker, or repeated-run affinity guarantee.</td></tr>
+              <tr><td>Named mutex</td><td>Tests with the same non-empty, already-trimmed, exact, case-sensitive <code>mutex</code> string never overlap in one command. Hold the permit from assignment through a complete result or recorded crash. Both test decorators expose the same option.</td></tr>
+              <tr><td>Parameterized tests</td><td>Every case inherits its function's mutex. A filtered-out case is not a member. Mutex metadata has no scheduling effect in local or one-worker execution.</td></tr>
+              <tr><td>Constraint limit</td><td>A mutex governs selected test invocations and function-fixture lifecycles in this command only. It is not an operating-system lock and cannot stop another command, timed-out thread, subprocess, or leaked descendant.</td></tr>
+              <tr><td>Repeated selection</td><td>Preserve filter order and repeated selections. Assign a distinct ordinal to every occurrence, even when normalized test identity repeats. Repeated unguarded invocations may overlap in worker mode; a declared mutex applies to every occurrence.</td></tr>
+              <tr><td>Session fixtures</td><td>Once per worker process incarnation that loads the fixture, not once across the command. A replacement worker has a fresh cache, so setup count may exceed the configured worker count.</td></tr>
+              <tr><td>Function fixtures</td><td>Current per-test setup and LIFO teardown. Teardown finishes before the worker commits a complete result.</td></tr>
+              <tr><td>Run-fixture identity</td><td>Zero-argument, top-level run fixtures register stable <code>(module, qualname)</code> identities during canonical collection. Host and worker catalogues must match before execution; lazy or local-function run fixtures are rejected.</td></tr>
+              <tr><td>Run-fixture actor</td><td>The dedicated host serializes top-level setup/publication operations because output capture and tracing are process-global. Duplicate requests share one operation; nested run dependencies resolve inline. Unused fixtures perform zero setup.</td></tr>
+              <tr><td>Run values</td><td>The yielded descriptor must pickle to at most 1 MiB. The host retains the original for teardown; each worker gets an independent decoded copy. Python identity is not shared, but every copy may still mutate the same external resource. Publication atomicity covers cache visibility, not side effects in custom pickle hooks; run descriptors should be inert data.</td></tr>
+              <tr><td>Atomic setup/publication</td><td>A first request creates a fleet safepoint: stop dispatch, let non-waiting active tests finish, run host setup, then stage the same bytes in every worker. Workers send ACK or NACK; the coordinator sends COMMIT only after every ACK, otherwise DISCARD. Requesters see only committed values.</td></tr>
+              <tr><td>Publication failure</td><td>A cooperative setup, pickle, or decode exception becomes one cached fixture publication error; all workers discard staged copies and unrelated tests continue. Host/worker death, missing acknowledgement, or watchdog expiry aborts with exit 2. A spontaneously dead worker's active case is ERROR; coordinator-terminated active cases are aborted. Replacements stage every committed descriptor before becoming ready.</td></tr>
+              <tr><td>Run scope locally</td><td>The local runner owns setup and teardown but still pickle-round-trips the published descriptor. This catches transport mistakes before CI enables workers and preserves copy semantics across modes.</td></tr>
+              <tr><td>Run setup failure</td><td>Cache one process-neutral failure without retry. Requests still pending when setup finishes, plus future loads, receive that diagnostic; a requester may instead have already timed out. Unrelated tests continue. A yielded original whose publication fails still receives one teardown attempt.</td></tr>
+              <tr><td>Transaction watchdog</td><td>A waiting test's cancellation abandons only its response; shared work remains shielded. The command timeout bounds the full setup, pickle, decode, and acknowledgement transaction. Cooperative expiry is cached; an unresponsive host or worker is terminated and the run aborts. <code>--no-timeout</code> removes this bound.</td></tr>
+              <tr><td>Fixture dependencies</td><td>Function may depend on function, session, or run; session on session or run; run on run only. A sync fixture still cannot load an async dependency. Detect cycles and tear down in reverse dependency order across function, session, then run owners.</td></tr>
+              <tr><td>Fixture graph freeze</td><td>Fixtures may load dependencies only before their first <code>yield</code>. Teardown may use values loaded during setup but cannot add dependencies. Reject every new load after shutdown begins, so session and run teardown never reopen the fleet.</td></tr>
+              <tr><td>Cross-command resources</td><td>Run scope is once per invocation, not machine-global. Prefer command-unique directories, ports, and external names. A lock released when the host dies is insufficient unless the resource process itself holds the lease or startup validates and removes a stale owner.</td></tr>
+              <tr><td>Standalone fixture use</td><td>Existing <code>with</code> / <code>async with</code> behavior remains local and ignores declared runner scope. This preserves current benchmark and setup-script usage.</td></tr>
+              <tr><td>Result order</td><td>Console result lines, final details, structured case entries, and programmatic outcomes use canonical manifest order. Controlled infrastructure aborts mark started but uncommitted cases <code>aborted</code> and cases never started <code>not_run</code>, each with a reason.</td></tr>
+              <tr><td>Execution order</td><td>Same-mutex non-overlap constrains it. Otherwise deterministic presentation does not imply deterministic starts, completions, or outcomes for tests sharing external state.</td></tr>
+              <tr><td>Reporter calls</td><td>Coordinator only, synchronously, never concurrently. Reporter objects do not need to be picklable or process-safe.</td></tr>
+              <tr><td>Abort reporting</td><td>Once a canonical plan exists, any controlled infrastructure abort attempts bounded cleanup. <code>run_finished</code> receives completed, aborted, and not-run cases plus cleanup and infrastructure failures. <code>test_finished</code> is called only for committed test outcomes.</td></tr>
+              <tr><td>Captured output</td><td>Per test in its worker; collection and run-fixture lifecycle output remain host-level. Structured output retains bounded output for both. Human output shows captured host output on lifecycle failure; <code>-s</code> streams it live.</td></tr>
+              <tr><td><code>-s</code></td><td>Allowed for human output. Child stdout/stderr, including direct descriptor and inherited subprocess writes, goes through coordinator-owned pipes. Reject <code>-s --json-output</code> before collection so stdout remains one JSON document.</td></tr>
+              <tr><td>Interactive input</td><td>Unavailable in worker mode. <code>input()</code> receives EOF and <code>breakpoint()</code> becomes an actionable test error rather than hanging.</td></tr>
+              <tr><td><code>--pdb</code></td><td>Reject any explicit worker mode before collection. Tell the user to rerun without <code>--workers</code>. Never silently downgrade.</td></tr>
+              <tr><td>Timeouts</td><td>Retain current async-only per-test semantics. Do not quietly turn process workers into hard sync-test timeouts.</td></tr>
+              <tr><td>Initial bootstrap</td><td>Start and validate the host, then each worker, one at a time so imports never overlap tests or one another. Apply the command-timeout watchdog to each bootstrap. Exit, timeout, manifest/catalogue mismatch, or collection failure aborts before execution with no retry.</td></tr>
+              <tr><td>Empty plan</td><td>Apply issue 32's policy after canonical collection and before starting workers. The default is a collection error. If an explicit allow-empty mode exists, finish a host-only zero-test run with no execution workers or fixture setup; <code>auto</code> never exposes zero as a user-supplied worker count.</td></tr>
+              <tr><td>Worker crash before result commit</td><td>Outside a publication transaction, record the assigned test as ERROR, note that process-local teardown was lost, never retry it, replace the worker, and continue. This includes crashes in body or function teardown. Publication uses its stricter abort rule above.</td></tr>
+              <tr><td>Worker crash after commit</td><td>An idle-worker infrastructure error, exit 2. A complete framed result is the commit point; there is no ambiguous retry window.</td></tr>
+              <tr><td>Crash during session teardown</td><td>Attribute it to the announced fixture when possible; otherwise treat it as infrastructure failure. Teardown from a dead process is never claimed to have run.</td></tr>
+              <tr><td>Replacement</td><td>After an active-test crash, stop dispatch and let every other active test finish before replacement imports begin. Recollect and match the manifest and fixture catalogue, republish established run descriptors, then resume. Failure aborts the run.</td></tr>
+              <tr><td>Fixture-host crash</td><td>Run infrastructure error, exit 2. Stop dispatch, shut down workers, and report that run-fixture teardown was lost. Never recreate a once-per-run resource after partial execution.</td></tr>
+              <tr><td>Run teardown stall</td><td>Apply issue 34's cleanup ceiling per run fixture. If teardown returns with a failure, continue. If the host must be killed, report the current and every remaining run fixture as teardown lost; no further attempt is possible, and the run exits 2.</td></tr>
+              <tr><td>Ctrl-C</td><td>The coordinator stops dispatch, asks workers for session teardown, escalates stragglers, then asks the host for run teardown before killing it last. Exit 2; teardown inside forcibly terminated processes is not guaranteed.</td></tr>
+              <tr><td>Exit codes</td><td>0 for clean pass, 1 for test outcomes and attributable fixture lifecycle failures, 2 for usage, collection, interruption, or run infrastructure failure.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout good">
+          <h3>Manifest ordering preserves the reporter model</h3>
+          <p>
+            Workers can finish out of order while the coordinator drains every IPC stream
+            continuously and separately buffers the longest completed prefix. A slow early
+            test can delay visible progress, but it must never stop reads from later workers
+            and fill their pipes. Reporter callbacks remain serial and need no locks, but
+            <code>run_finished</code> changes once to accept the normalized summary described below.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="alternatives">
+        <div class="section-head">
+          <div>
+            <div class="section-number">04 / Alternatives</div>
+            <h2>Five shapes were tested again</h2>
+          </div>
+          <p class="lead">
+            The first idea is rarely the strongest. The options below optimize for
+             different callers. Tether and snekql turn several hypothetical tradeoffs
+             into concrete migration costs.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card recommended">
+            <div class="tag good">A / Recommended</div>
+            <h3>Capacity, one mutex, run ownership</h3>
+            <pre><code>snektest --workers 4
+@test(mutex="pi-runtime")
+@fixture(scope="run")</code></pre>
+            <p><strong>Wins:</strong> maps directly to observed suites: capacity for the common case, one named mutex for conflicting or capacity-heavy tests, and one owner for a shared external server.</p>
+            <p><strong>Cost:</strong> run fixtures add a real host and serialization contract; they must ship as a complete module, not a decorator-only shortcut.</p>
+          </article>
+
+          <article class="card">
+            <div class="tag bad">B / Too little</div>
+            <h3>Worker count only</h3>
+            <pre><code>snektest --workers 4</code></pre>
+            <p><strong>Wins:</strong> smallest implementation and familiar xdist behavior.</p>
+            <p><strong>Loses:</strong> snekql has six tests sharing one table plus a session daemon that cannot be started per worker. Tether also benefits from limiting concurrent Pi subprocess tests. Splitting commands is not a fixture model.</p>
+          </article>
+
+          <article class="card">
+            <div class="tag bad">C / Double opt-in</div>
+            <h3>Positive test eligibility</h3>
+            <pre><code>@test(parallel=True)
+def test_a() -&gt; None: ...</code></pre>
+            <p><strong>Wins:</strong> safest default for an unreviewed suite.</p>
+            <p><strong>Loses:</strong> Tether would annotate 1,522 decorated functions and snekql 651 even though process isolation already makes nearly all of them safe. The explicit worker option is the suite-level opt-in.</p>
+          </article>
+
+          <article class="card">
+            <div class="tag warn">D / Coarse fallback</div>
+            <h3>Atomic test files</h3>
+            <pre><code># scheduler promise:
+# one file stays on one worker</code></pre>
+            <p><strong>Wins:</strong> snekql's six conflicting tests already share one file; module globals and session reuse become simpler.</p>
+            <p><strong>Loses:</strong> file layout silently becomes scheduling policy, large files cap utilization, and conflicts can still cross files. A named mutex states the actual constraint.</p>
+          </article>
+
+          <article class="card">
+            <div class="tag bad">E / Control panel</div>
+            <h3>Published scheduler policy</h3>
+            <pre><code>ProcessExecution(
+    workers=4,
+    dispatch="file",
+    affinity="fixture",
+    progress="completion",
+)</code></pre>
+            <p><strong>Wins:</strong> exposes every implementation choice.</p>
+            <p><strong>Loses:</strong> callers learn pool and batching internals with no second implementation to justify them. The observed needs are constraints, not scheduler selection.</p>
+          </article>
+
+          <article class="card rejected">
+            <div class="tag bad">Rejected backend</div>
+            <h3>Same-loop async concurrency</h3>
+            <p>It speeds only suspended async work and supplies no process isolation. More importantly, it conflicts with current internals:</p>
+            <ul>
+              <li>Output capture replaces process-global <code>sys.stdout</code> and <code>sys.stderr</code>.</li>
+              <li>The fixture registry has one shared function stack.</li>
+              <li>Leaked-task snapshots would see tasks owned by neighboring tests.</li>
+            </ul>
+            <p>This can be designed later under its own name after those modules become task-safe.</p>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Candidate</th><th>Truthful</th><th>Small</th><th>Operations</th><th>Type fit</th><th>Evolution</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>A. Capacity + mutex + run owner</td><td class="score high">Strong</td><td class="score mid">Focused</td><td class="score high">Strong</td><td class="score mid">Runtime check</td><td class="score high">Strong</td></tr>
+              <tr><td>B. Worker count only</td><td class="score mid">Incomplete</td><td class="score high">Strong</td><td class="score low">Weak</td><td class="score high">Strong</td><td class="score low">Weak</td></tr>
+              <tr><td>C. Positive eligibility</td><td class="score high">Strong</td><td class="score low">Repetitive</td><td class="score low">Weak</td><td class="score high">Strong</td><td class="score mid">Mixed</td></tr>
+              <tr><td>D. Atomic files</td><td class="score mid">Indirect</td><td class="score high">Strong</td><td class="score mid">Mixed</td><td class="score high">Strong</td><td class="score low">Weak</td></tr>
+              <tr><td>E. Execution policy</td><td class="score high">Strong</td><td class="score low">Weak</td><td class="score high">Strong</td><td class="score high">Strong</td><td class="score mid">Premature</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="fit">
+        <div class="section-head">
+          <div>
+            <div class="section-number">05 / Library fit</div>
+            <h2>Small outside, real work inside</h2>
+          </div>
+          <p class="lead">
+            The execution coordinator is a good deep module. Removing it would spread
+            process startup, identity dispatch, result ordering, crash handling, and
+            teardown into the CLI, collector, reporters, and presenters.
+          </p>
+        </div>
+
+        <div class="flow" aria-label="Recommended module flow">
+          <div class="flow-box">
+            <strong>Caller interface</strong>
+            <small>worker count, test constraints, fixture ownership</small>
+          </div>
+          <div class="flow-arrow">&gt;</div>
+          <div class="flow-box accent">
+            <strong>Execution coordinator</strong>
+            <small>assign ordinals, own mutex permits, route fixture loads, normalize, reorder</small>
+          </div>
+          <div class="flow-arrow">&gt;</div>
+          <div class="flow-box">
+            <strong>Internal execution hosts</strong>
+            <small>in-process sequential adapter / canonical fixture host + worker fleet</small>
+          </div>
+        </div>
+
+        <div class="fit-row">
+          <div class="fit-file">cli.py</div>
+          <div><span class="tag good">Strong fit</span></div>
+          <div>The pure, branchy parser already handles value options and imports <code>Literal</code>. Add one field and one parser branch. Mirror it in <code>run_tests_programmatic</code>.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">reporting.py</div>
+          <div><span class="tag warn">Normalize first</span></div>
+          <div>Coordinator-only callbacks stay serial, but issue 36 must first define one process-neutral summary that includes worker provenance, aborted/not-run cases, and run-fixture lifecycle failures. Change <code>run_finished</code> once to accept that summary; do not add worker lifecycle callbacks.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">fixtures.py</div>
+          <div><span class="tag warn">Deepen</span></div>
+          <div>Give each worker incarnation a session registry and the canonical host a run registry. Add cross-owner dependency validation, cycle detection, shared first-load setup, and reverse dependency teardown.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">output.py</div>
+          <div><span class="tag good">Process fit</span></div>
+          <div>Capture mutates interpreter globals. Sequential tests inside separate workers make this safe; same-loop concurrency would not.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">collection.py</div>
+          <div><span class="tag warn">Refactor</span></div>
+          <div>Issue 28 must replace streaming queues with a deterministic run plan. Manifests compare normalized identities, markers, and scheduling metadata; arbitrary parameter values remain local and are not falsely claimed equal.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">models.py</div>
+          <div><span class="tag bad">Blocker</span></div>
+          <div><code>TestCase</code> needs a validated <code>mutex</code>. Failure results contain live exception classes, exception objects, tracebacks, and <code>StringIO</code>. None is a robust process protocol.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">decorators.py</div>
+          <div><span class="tag warn">Small change</span></div>
+          <div>Add the same typed <code>mutex</code> keyword to <code>@test</code> and <code>@test_hypothesis</code>. Keep markers independent. Add a zero-argument <code>scope="run"</code> overload with an explicit runtime transport check.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">annotations.py</div>
+          <div><span class="tag bad">Gate</span></div>
+          <div>Issue 31 must first reconcile the exported <code>Scope</code> enum with the literal scope type. Adding <code>RUN</code> while public <code>SESSION</code> is already misinterpreted would enlarge a known interface bug.</div>
+        </div>
+        <div class="fit-row">
+          <div class="fit-file">pyproject.toml</div>
+          <div><span class="tag warn">Verify</span></div>
+          <div><code>coverage.run.parallel = true</code> creates mergeable data files but does not itself start coverage in fresh workers. Worker startup and <code>coverage combine</code> need an end-to-end test.</div>
+        </div>
+
+        <div class="callout">
+          <h3>Keep the adapter seam internal</h3>
+          <p>
+            Local and process execution are two real adapters, so an internal seam is
+            justified. Publishing an executor protocol would make users learn fixture
+            ownership, output routing, cancellation, and result transport. Snektest has
+            no evidence that third-party executors are needed.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="downstream">
+        <div class="section-head">
+          <div>
+            <div class="section-number">06 / Downstream fit</div>
+            <h2>Two suites force the missing decisions</h2>
+          </div>
+          <p class="lead">
+            Tether and snekql together contribute 2,173 decorated test functions. Their
+            current fixture and resource patterns reject both extremes: annotating every
+            safe test is needless churn, while making every test parallel with no mutex or
+            run owner breaks concrete integration tests.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <div class="tag good">Tether</div>
+            <h3>1,540 expanded cases; almost all isolated</h3>
+            <p>In-memory SQLite, unique temporary directories, process-local logging, and one-test-per-worker execution make the default suite parallel-safe.</p>
+            <p>One development-server test has a port reservation gap, but runner exclusivity cannot close a host-level TOCTOU race; Tether should preserve bound sockets through child startup or retry. Eight real Pi process tests benefit from <code>mutex="pi-runtime"</code>.</p>
+          </article>
+          <article class="card">
+            <div class="tag good">snekql</div>
+            <h3>651 tests; one truly shared server</h3>
+            <p>Sixty-three tests consume a session MariaDB fixture backed by the fixed <code>.snektest/mariadb-data</code> directory. Per-worker setup would start competing daemons on the same data.</p>
+            <p>The fixture already yields a frozen connection descriptor rather than the subprocess. Moving it to <code>scope="run"</code> fixes in-command ownership. Six bulk-insert tests sharing one table need one mutex; the retained data directory still needs a command-unique path or a lease that survives the host and detects stale owners.</p>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Observed need</th><th>Rejected workaround</th><th>Small interface that fits</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Thousands of already isolated tests</td><td>Add <code>parallel=True</code> to every decorator.</td><td>Supplying <code>--workers</code> makes ordinary tests eligible by default.</td></tr>
+              <tr><td>Small resource-conflict sets</td><td>Globally stop unrelated tests or publish file scheduling.</td><td>One non-empty <code>mutex</code> string states the actual conflict without affinity.</td></tr>
+              <tr><td>One daemon for all workers</td><td>Start one daemon per worker or implement ad hoc worker convergence.</td><td>A dedicated host owns <code>scope="run"</code>; workers receive descriptor copies.</td></tr>
+              <tr><td>Cross-command fixed resources</td><td>Assume run scope or a host-held lock protects the whole machine.</td><td>Use a command-unique resource, or a daemon-held/external lease with stale-owner validation.</td></tr>
+              <tr><td>Descriptor overclaim</td><td>Treat a frozen copied descriptor as an immutable external resource.</td><td>Cover every conflicting external mutation with the same mutex; keep live clients worker-local.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout good">
+          <h3>Minimal migrations validate the depth</h3>
+          <p>
+            Tether needs the same mutex on eight Pi tests and a code fix for its socket
+            handoff. Snekql needs one session-to-run scope change, the same mutex on six
+            tests, and a unique data directory or durable lease for retained MariaDB state. Neither suite
+            needs a scheduler mode, global barrier, positive eligibility annotation, or affinity.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="precedents">
+        <div class="section-head">
+          <div>
+            <div class="section-number">07 / Precedents</div>
+            <h2>Borrow contracts, not entire runners</h2>
+          </div>
+          <p class="lead">
+            Other ecosystems agree on a few rules and disagree sharply on isolation,
+            defaults, and ordering. Snektest should copy the parts that match its fixture
+            and async model.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Runner</th><th>User control</th><th>Execution unit</th><th>Lesson for snektest</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>pytest-xdist</td><td><code>-n N</code>, <code>auto</code>, scheduler modes</td><td>Long-lived worker processes; individual tests by default</td><td>Per-worker sessions are proven, but its still-open run-once-fixture demand and lock-file recipe show the cost of omitting a real run owner.</td></tr>
+              <tr><td>Python unittest</td><td>No worker count</td><td>Serial in one interpreter</td><td>The local path remains valuable for deterministic debugging. Parallelism need not become the default.</td></tr>
+              <tr><td>Go</td><td><code>t.Parallel()</code>, <code>-parallel</code>, package <code>-p</code></td><td>Parallel package processes and same-process test concurrency</td><td>Positive test opt-in is safe but expensive for existing Python suites. Snektest already has an explicit run-level opt-in and process isolation.</td></tr>
+              <tr><td>Cargo/libtest</td><td><code>--test-threads=N</code></td><td>Threads inside each test binary</td><td>A concurrency count does not imply isolation. Name snektest's processes as workers and document their persistence.</td></tr>
+              <tr><td>nextest</td><td>CPU-based count, slots, groups</td><td>Fresh process per test</td><td>Named logical mutexes match the observed Pi and MariaDB conflicts. Slot counts and multi-permit groups are not yet needed.</td></tr>
+              <tr><td>Node <code>node:test</code></td><td><code>--test-concurrency=N</code></td><td>Child process per file by default</td><td>It reports completed tests promptly while preserving test order. That is a useful reporting precedent.</td></tr>
+              <tr><td>Vitest</td><td><code>maxWorkers</code>, pools, file concurrency</td><td>Files in fork or thread pools</td><td>Pool choices exist because Vitest has several mature implementations. Snektest should not publish hypothetical ones.</td></tr>
+              <tr><td>ExUnit</td><td><code>async: true</code>, <code>max_cases</code>, groups</td><td>Concurrent modules; tests in one module serial</td><td>Groups demonstrate mutual exclusion without globally stopping unrelated tests. Snektest need not copy module-level activation.</td></tr>
+              <tr><td>Swift Testing</td><td>Parallel by default, <code>.serialized</code></td><td>Swift tasks, generally one process</td><td>Its serialized trait applies within suites and parameter cases, not as a universal global barrier. Snektest should not imply stronger semantics it does not need.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-3">
+          <div class="card"><div class="tag good">Adopt</div><h3>CPU-aware <code>auto</code></h3><p>Use available process CPUs and selected count exactly. Issue 38's multiplied-plan benchmark gates the release instead of changing the formula at runtime.</p></div>
+          <div class="card"><div class="tag good">Adopt</div><h3>Split fixture ownership</h3><p>Keep arbitrary live resources worker-local. Let run scope transport only descriptor snapshots from a dedicated owner.</p></div>
+          <div class="card"><div class="tag good">Adopt</div><h3>Ordered aggregation</h3><p>Keep worker completion nondeterminism away from reporters, JSON, and final details.</p></div>
+          <div class="card"><div class="tag good">Adopt</div><h3>One named mutex</h3><p>Observed downstream conflicts justify one mutex per test. Do not add limits, slots, affinity, or multiple-lock acquisition.</p></div>
+          <div class="card"><div class="tag bad">Avoid</div><h3>Silent debugger fallback</h3><p>Reject contradictory intent. Do not accept workers and quietly run locally.</p></div>
+          <div class="card"><div class="tag bad">Avoid</div><h3>Isolation overclaim</h3><p>Persistent workers share state between tests assigned to the same worker.</p></div>
+        </div>
+      </section>
+
+      <section class="section" id="validation">
+        <div class="section-head">
+          <div>
+            <div class="section-number">08 / Validation</div>
+            <h2>Evidence, not just preference</h2>
+          </div>
+          <p class="lead">
+            The recommendation was checked against the current code, open hardening
+            issues, Python 3.14 process behavior, serialization probes, nine runner
+            models, and 2,173 decorated tests in Tether and snekql.
+          </p>
+        </div>
+
+        <div class="evidence">
+          <div class="evidence-item"><div><h3>Live results fail the process test</h3><p>Pickling a real failing <code>TestResult</code> produced <code>TypeError: cannot pickle 'traceback' object</code>. This is a hard blocker, not a theoretical concern.</p></div></div>
+          <div class="evidence-item"><div><h3><code>TracebackException</code> is not a drop-in wire value</h3><p>A Python 3.14 probe also failed while pickling <code>TracebackException</code> because frame summaries retained code objects. Snektest needs its own immutable frame snapshot.</p></div></div>
+          <div class="evidence-item"><div><h3>Callables and parameters must stay local</h3><p><code>TestCase</code> stores a function and arbitrary <code>Param.value</code> objects. Making parallel mode require picklable test data would be a new and poor test-author contract.</p></div></div>
+          <div class="evidence-item"><div><h3>Manifest equality has a hard limit</h3><p>Workers can collect the same case name with different random, time-based, or PID-based values. Compare structural metadata and keep values local; do not claim that a matching manifest proves value equality.</p></div></div>
+          <div class="evidence-item"><div><h3>Fork inheritance cannot be the design</h3><p>Python 3.14 defaults differ by platform. Start every private host with an explicit spawn-style context instead of inheriting loop, thread, tracer, or imported-module state.</p></div></div>
+          <div class="evidence-item"><div><h3>Process workers fit async hygiene</h3><p>Each worker can retain one serial event loop, so task snapshots, async timeouts, session fixtures, and process-global capture keep their current local assumptions.</p></div></div>
+          <div class="evidence-item"><div><h3>The real run descriptor passes the transport probe</h3><p>snekql's frozen <code>TemporaryMariaDBServer</code> descriptor round-trips through stdlib <code>pickle</code> with its host, port, paths, and methods intact. The owning subprocess remains inside the fixture host.</p></div></div>
+          <div class="evidence-item"><div><h3>The public scope interface is already inconsistent</h3><p><code>annotations.Scope</code> accepts literals while the exported enum is a different type and public <code>Scope.SESSION</code> is misinterpreted. Issue 31 must fix that before adding <code>RUN</code>.</p></div></div>
+          <div class="evidence-item"><div><h3>Deterministic collection is a prerequisite</h3><p>Functions are currently alphabetized by <code>getmembers</code>, file walks are unsorted, and duplicate case names can overwrite one another. Issues 28 and 32 must define the canonical manifest before ordinals and mutex scheduling depend on it.</p></div></div>
+          <div class="evidence-item"><div><h3>The reporter stays coordinator-owned, not unchanged</h3><p>Callbacks remain serial, but issue 36's normalized run result must represent process provenance and run-fixture lifecycle failures before the worker protocol is frozen.</p></div></div>
+          <div class="evidence-item"><div><h3>Coverage is not yet confirmed</h3><p>Coverage.py documents separate startup requirements for multiprocessing or subprocesses plus clean worker shutdown. <code>parallel = true</code> solves only data-file collisions.</p></div></div>
+          <div class="evidence-item"><div><h3>Long-lived workers need honest wording</h3><p>pytest-xdist, Go, Cargo, Node, Vitest, ExUnit, and nextest all show that process/thread/task topology changes what "isolation" and fixture lifetime mean. The report states snektest's narrower promise.</p></div></div>
+        </div>
+
+        <h3 style="margin-top: 2rem;">Required capabilities already tracked elsewhere</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Tracker overlap</th><th>Concrete capability required by issue 11</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/27">#27 fixture ownership</a></td><td>Shield shared first setup from waiter cancellation and leave no stale setup/dependency state after failure.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/28">#28 deterministic collection</a> and <a href="https://github.com/crpier/snektest/issues/32">#32 complete collection</a></td><td>Produce one stable plan, apply the default empty-plan error, reject colliding parameter-case identities, preserve repeated filter selections as distinct ordinals, and finish imports before execution.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/31">#31 public interface</a></td><td>Unify the public runtime/static scope representation before adding <code>run</code>; unrelated export cleanup need not block workers.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/34">#34 bounded teardown</a></td><td>Provide cleanup ceilings reusable by worker sessions and the new run host. Host-specific teardown behavior belongs to issue 11.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/36">#36 structured results</a></td><td>Provide process-neutral diagnostics and one normalized result. Worker provenance, aborted/not-run cases, and run-fixture lifecycle fields extend that result in issue 11.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/38">#38 bounded memory</a></td><td>Measure full-plan multiplication at realistic <code>auto</code> counts. Issue 11 does not ship if that design exceeds the agreed budget; the runtime never substitutes a hidden cap.</td></tr>
+              <tr><td><a href="https://github.com/crpier/snektest/issues/39">#39 portability</a></td><td>Verify explicit spawn-style startup, signals, and process cleanup on every supported operating system; unrelated installation copy need not block issue 11.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <h3>These are capability dependencies, not blanket ticket dependencies</h3>
+          <p>Issue 11 may consume the relevant work or extend those tickets' acceptance criteria. It does not wait for unrelated JUnit, package-curation, installation-copy, or allow-empty work merely because it shares a tracker item.</p>
+        </div>
+
+        <h3 style="margin-top: 2rem;">Contract tests required before release</h3>
+        <div class="grid-2">
+          <div class="card">
+            <ul>
+              <li>After deterministic precollection, omitted workers preserve representative local pass, fail, fixture, timeout, debugger, and output behavior.</li>
+              <li><code>--workers 1</code> starts one execution worker plus one host, runs tests in a different PID, and uses the same result schema.</li>
+              <li>Same-mutex tests never overlap; the scheduler skips blocked ordinals and runs different-mutex or unguarded work when capacity exists.</li>
+              <li>Both test decorators and every parameterized case preserve identical scheduling metadata.</li>
+              <li>Overlapping filters preserve filter order and produce distinct ordinals for every repeated occurrence.</li>
+              <li>The default empty plan fails before workers start; a future explicit allow-empty mode produces a host-only zero-test summary.</li>
+              <li>An unused run fixture performs zero setup; different top-level setups serialize; duplicate loads share one shielded operation.</li>
+              <li>First setup/publication pauses at a fleet safepoint; workers stage one bounded descriptor and expose it only after the coordinator's COMMIT.</li>
+              <li>A decode NACK makes every worker discard staged data and caches one publication failure; process loss or watchdog expiry aborts the run.</li>
+              <li>Run-to-run dependencies tear down in reverse order; cycles and invalid cross-scope dependencies fail clearly.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <ul>
+              <li>Unpicklable parameter values stay local; an unpicklable or oversized run value fails as an attributed publication error.</li>
+              <li>One cancelled waiter does not cancel shared work; the transaction watchdog covers setup, pickle, decode, and acknowledgement.</li>
+              <li>New fixture loads during teardown or after shutdown starts fail without reopening the graph or fleet.</li>
+              <li>Session setup is once per process incarnation, and replacement can increase setup count beyond configured workers.</li>
+              <li>Initial host and workers bootstrap one at a time; timeout, exit, collection failure, or structural mismatch aborts before test execution.</li>
+              <li>Crashes in body, function teardown, result send, idle state, session teardown, and fixture host follow distinct documented paths.</li>
+              <li>Replacement imports begin only after all surviving active tests finish.</li>
+              <li>Controlled infrastructure aborts call <code>run_finished</code> with active uncommitted cases aborted and every unstarted case not run.</li>
+              <li>A fatal run-teardown stall reports the current and all remaining host fixtures as teardown lost.</li>
+              <li>Large out-of-order results cannot deadlock because all worker connections remain drained.</li>
+              <li><code>--pdb</code>, <code>breakpoint()</code>, stdin, <code>-s</code>, and the rejected <code>-s --json-output</code> combination follow the contract.</li>
+              <li>Ctrl-C reaps workers and the fixture host, attempts bounded teardown, and does not deadlock a full result pipe.</li>
+              <li>Explicit spawn-style startup passes on Linux, macOS, and Windows in CI.</li>
+              <li>Coverage data from workers combines to the same measured source set as local execution.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="implementation">
+        <div class="section-head">
+          <div>
+            <div class="section-number">09 / Implementation</div>
+            <h2>Preconditions behind the seam</h2>
+          </div>
+          <p class="lead">
+            The public interface is small. The implementation is not. The result model
+            should become process-neutral before any worker code is trusted.
+          </p>
+        </div>
+
+        <div class="callout danger">
+          <h3>First migration: value-based diagnostics</h3>
+          <p>
+            <code>FailedResult</code>, <code>ErrorResult</code>, and
+            <code>TeardownFailure</code> currently expose live exception and traceback
+            objects. Parallel execution cannot preserve those identities. Use one
+            immutable diagnostic model in both local and worker modes rather than a
+            mode-dependent union.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <pre><code>@dataclass(frozen=True)
+class TracebackFrame:
+    filename: str
+    lineno: int
+    function: str
+    source: str | None
+
+@dataclass(frozen=True)
+class ExceptionReport:
+    qualified_type_name: str
+    message: str
+    frames: tuple[TracebackFrame, ...]
+    notes: tuple[str, ...]
+    assertion: AssertionReport | None = None
+    cause: ExceptionReport | None = None
+    context: ExceptionReport | None = None
+    exceptions: tuple[ExceptionReport, ...] = ()</code></pre>
+          <div class="card">
+            <h3>Local debugging still gets live state</h3>
+            <p>The local adapter may retain a private exception and traceback until <code>--pdb</code> finishes. Those objects should not enter <code>TestResult</code>, reporting, JSON, or the worker protocol.</p>
+            <p>This is a clean pre-1.0 change, but it affects repository tests and any caller importing models directly. Release notes must name it.</p>
+          </div>
+        </div>
+
+        <div class="callout">
+          <h3>Change the final reporter callback once</h3>
+          <pre><code>class RunReporter(Protocol):
+    def test_finished(self, test_result: TestResult) -&gt; None: ...
+    def run_finished(self, summary: TestRunSummary) -&gt; None: ...</code></pre>
+          <p><code>TestRunSummary</code> becomes the normalized run value returned by the programmatic API and consumed by console, JSON, JUnit, and custom reporters. It contains one manifest-ordered case entry per selected ordinal, including <code>aborted</code> and <code>not_run</code>. This is a pre-1.0 programmatic compatibility break and belongs in the migration notes.</p>
+        </div>
+
+        <h3 style="margin-top: 2rem;">Recommended internal flow</h3>
+        <ol>
+          <li>Start the canonical collector/fixture host under the command-timeout watchdog. Finish deterministic collection, apply the empty-plan policy, assign distinct ordinals to repeated selections, reject colliding parameter-case identities, and register top-level run fixtures.</li>
+          <li>Build a manifest from normalized file identity, function and case names, markers, and <code>mutex</code>; build a run-fixture catalogue from module and qualified name.</li>
+          <li>Resolve <code>auto</code> exactly as the lesser of available process CPUs and selected case count. Start non-daemon execution workers one at a time under the same watchdog.</li>
+          <li>Each worker independently collects and matches both structures before the next worker starts. Keep local callables and arbitrary parameter values; do not claim that equal structure proves equal values. Any bootstrap failure aborts without retry.</li>
+          <li>Send only ordinals for tests. The coordinator owns mutex permits, scans past blocked cases, and marks an assignment active before sending it.</li>
+          <li>On a first run-fixture request, stop dispatch and drain non-waiting active tests. The transaction watchdog covers host setup, serialization, staged worker decode, ACK/NACK, and COMMIT/DISCARD. A process failure aborts rather than exposing a partial value.</li>
+          <li>Execute one test at a time per worker through existing timeout, function-fixture, memory, output, and leaked-task logic.</li>
+          <li>Drain every framed worker and host connection continuously. A complete result frame commits its ordinal; ordering buffers never control IPC reads.</li>
+          <li>After an active-test crash, stop new dispatch, let surviving active tests finish, then import and validate a replacement before resuming. Never import replacement modules alongside tests.</li>
+          <li>After dispatch ends, freeze the dependency graph. Tear down surviving worker sessions, then host-owned run fixtures, in reverse dependency order and under bounded cleanup. If the host must die, mark every unattempted run teardown lost.</li>
+          <li>Normalize provenance, diagnostics, lifecycle output, infrastructure failures, and every unstarted case into one run result; flush committed test callbacks in manifest order and finish once after controlled aborts.</li>
+        </ol>
+
+        <div class="grid-3">
+          <div class="card">
+            <div class="tag good">Prefer</div>
+            <h3>Explicit spawn-style startup</h3>
+            <p>Private collector and execution hosts start clean on every supported operating system. They never depend on the platform's default process start method. Exact entry points stay private.</p>
+          </div>
+          <div class="card">
+            <div class="tag good">Require</div>
+            <h3>Dedicated protocol</h3>
+            <p>Do not multiplex control messages with test stdout/stderr. Use framed messages over dedicated connections and explicit EOF/crash handling.</p>
+          </div>
+          <div class="card">
+            <div class="tag good">Require</div>
+            <h3>Non-daemon children</h3>
+            <p>Tests and run fixtures may launch subprocesses, including snekql's MariaDB server. Neither execution workers nor the fixture host may be daemonic.</p>
+          </div>
+        </div>
+
+        <div class="callout">
+          <h3>Repeated collection is a measured cost, not a free invariant</h3>
+          <p>
+            Full local collection avoids serializing test functions and parameter values,
+            but imports selected modules in the canonical host and every worker. Capture
+            bootstrap output, present the canonical copy only, and surface secondary
+            output only for mismatch diagnostics. Issue 38 must measure the multiplied
+            memory before issue 11 ships; the runtime must not silently alter
+            <code>auto</code>'s documented formula with an undisclosed cap.
+          </p>
+        </div>
+
+        <div class="callout danger">
+          <h3>Run scope is a host protocol, not shared memory</h3>
+          <p>
+            The host keeps the original yielded object for teardown. Workers receive
+            independent pickle round-trips. A file handle, client, lock, closure,
+            event-loop object, or mutable registry is the wrong value; return an immutable
+            path, URL, port, credentials, or frozen configuration descriptor and build
+            worker-local clients in session or function fixtures. A frozen descriptor can
+            still mutate one shared external resource, so all conflicting tests must name
+            the same mutex and cross-command ownership remains the fixture author's job.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="risks">
+        <div class="section-head">
+          <div>
+            <div class="section-number">10 / Risks</div>
+            <h2>What can still sink it</h2>
+          </div>
+          <p class="lead">
+            None of these risks argues for a larger caller interface. They argue for
+            sequencing the implementation and refusing weak fallbacks.
+          </p>
+        </div>
+
+        <div class="risk">
+          <div class="risk-level blocker">Blocker</div>
+          <div><strong>Live result objects</strong></div>
+          <div>Tracebacks and arbitrary exceptions do not cross the protocol. Migrate diagnostics under local execution first and verify presenter parity.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Assertion detail loss</strong></div>
+          <div>Snapshot conversion must preserve useful dict/list diffs and safely bound hostile <code>repr()</code> calls. A string-only exception message is not enough.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Parameter value drift</strong></div>
+          <div>Random, PID-based, time-based, or externally mutable values can differ while structural manifests still match. State this limitation; only structural mismatch is detectable without imposing serialization on parameters.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Crash and interrupt deadlocks</strong></div>
+          <div>Worker death while writing a result can corrupt or stall naive queues. Exercise EOF, full buffers, signals, forced kill, and child reaping with real processes.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Fixture ownership</strong></div>
+          <div>Documentation currently says session fixtures run once per run. Every guide must define worker-incarnation sessions, host-owned run fixtures, descriptor copies, dependency limits, and teardown order together.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Run-value misuse</strong></div>
+          <div>Pickle success and a frozen descriptor do not make the referenced external resource immutable. Validate bounded transport, use trusted local channels, and require complete mutex coverage for conflicting external mutations.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Host setup stalls</strong></div>
+          <div>Serial host setup protects process-global capture but one hung fixture blocks every later request. Watch the complete publication transaction, distinguish cooperative fixture failure from process termination, and document that <code>--no-timeout</code> removes the bound.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Partial publication</strong></div>
+          <div>A local pickle round-trip does not prove clean-worker importability. Workers must stage bounded payloads, ACK or NACK, and expose a value only after COMMIT. Process loss during the transaction aborts the run.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Fixture-host loss</strong></div>
+          <div>A host crash can orphan an external daemon and loses run teardown. Abort without recreating the fixture and report exit 2. A later command needs a unique resource or a lease that survives the host and validates stale owners.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Single-host teardown loss</strong></div>
+          <div>A sync or cancellation-resistant teardown can force host termination. Report the current fixture and every remaining fixture as teardown lost; do not promise an attempt after their owning process is gone.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Import side effects</strong></div>
+          <div>Every child repeats selected imports. Bootstrap the host and workers serially, never import replacements beside active tests, and abort on timeout or mismatch. Sequential startup limits overlap but cannot make arbitrary import side effects idempotent.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Mutex boundary</strong></div>
+          <div>A mutex is exact and command-local, not affinity or an OS lock. Avoid claims about other commands, leaked descendants, or resources used by tests that omit the same name.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level high">High</div>
+          <div><strong>Coverage startup</strong></div>
+          <div>The root <code>sitecustomize.py</code> is not a general installed-user guarantee. Verify startup, clean shutdown, unique data files, and combine behavior for the chosen worker host.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level medium">Medium</div>
+          <div><strong>Oversubscription</strong></div>
+          <div>Each worker may start Hypothesis threads, <code>asyncio.to_thread</code>, BLAS threads, or subprocesses, and each retains a full plan. Issue 38 must prove the exact <code>auto</code> formula stays within the release budget.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level medium">Medium</div>
+          <div><strong>Head-of-line reporting</strong></div>
+          <div>Canonical manifest order can hide later completions behind one slow test. Accept this in v1 to preserve the reporter interface; revisit only with user evidence.</div>
+        </div>
+        <div class="risk">
+          <div class="risk-level medium">Medium</div>
+          <div><strong>Worker state leakage</strong></div>
+          <div>Persistent workers still share globals between assigned tests. Say so. Do not imply that adding workers repairs every order-dependent suite.</div>
+        </div>
+
+        <h3 style="margin-top: 2rem;">Suggested delivery order</h3>
+        <ol>
+          <li>Land the relevant issue 27 and 31 capabilities: shield shared setup and unify the public scope representation.</li>
+          <li>Land the relevant issue 28 and 32 capabilities: collect one deterministic plan, register run fixtures, reject colliding parameter-case identities, and preserve repeated selections as distinct ordinals.</li>
+          <li>Land reusable issue 34 cleanup ceilings and issue 36's immutable normalized <code>TestRunSummary</code> under local execution first. Change <code>RunReporter.run_finished</code> to accept that value.</li>
+          <li>Add typed <code>mutex</code> and <code>run</code> metadata plus validation while execution remains local; preserve standalone fixture contexts.</li>
+          <li>Add the canonical collector/fixture-host actor and one execution worker, including catalogue agreement, atomic bounded publication, dependency teardown, framed commits, and crash tests.</li>
+          <li>Add the worker fleet, mutex permits with skip-ahead, independent IPC draining, quiescent replacement imports, aborted/not-run outcomes, interruption, and bounded shutdown.</li>
+          <li>Use issue 38 benchmarks as the release gate for the exact <code>auto</code> formula, then verify issue 39's explicit spawn-style OS matrix plus coverage.</li>
+          <li>Run Tether and snekql in worker mode as acceptance suites; include Tether's socket-handoff fix and a command-unique or durably leased snekql data directory in their migrations.</li>
+          <li>Update README, embedded agent docs, bundled examples, AGENTS.md, migration notes, and coverage guidance in the same release.</li>
+        </ol>
+      </section>
+
+      <section class="section" id="sources">
+        <div class="section-head">
+          <div>
+            <div class="section-number">11 / Sources</div>
+            <h2>Code and external references</h2>
+          </div>
+          <p class="lead">
+            Code links are pinned to the reviewed commits; downstream repository links
+            require access to those repositories. External behavior is based on official
+            documentation available on 31 August 2026.
+          </p>
+        </div>
+
+        <details open>
+          <summary>Snektest code reviewed</summary>
+          <div>
+            <ul class="source-list">
+              <li><a href="https://github.com/crpier/snektest/issues/11">Issue 11: implement parallel test execution</a></li>
+              <li>Related capability trackers: <a href="https://github.com/crpier/snektest/issues/27">#27 fixture ownership</a>, <a href="https://github.com/crpier/snektest/issues/28">#28 deterministic collection</a>, <a href="https://github.com/crpier/snektest/issues/31">#31 public interface</a>, <a href="https://github.com/crpier/snektest/issues/32">#32 complete collection</a>, <a href="https://github.com/crpier/snektest/issues/34">#34 teardown</a>, <a href="https://github.com/crpier/snektest/issues/36">#36 results</a>, <a href="https://github.com/crpier/snektest/issues/38">#38 memory</a>, and <a href="https://github.com/crpier/snektest/issues/39">#39 portability</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/cli.py#L121-L130">CLI options</a> and <a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/cli.py#L278-L363">pure parser</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/cli.py#L366-L463">producer and programmatic runner</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/execution.py#L284-L355">sequential run orchestration</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/collection.py#L65-L132">callable test collection</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/models.py#L167-L247">test and result models</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/fixtures.py#L78-L214">fixture registry</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/decorators.py#L31-L82">markers and test decorator</a>, <a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/decorators.py#L226-L311">fixture decorator</a>, and <a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/annotations.py#L23-L40">literal scope type</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/reporting.py#L9-L76">reporter interface and adapters</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/snektest/output.py#L187-L261">process-global output capture</a></li>
+              <li><a href="https://github.com/crpier/snektest/blob/425af98d9fcbf0755e612098108661bc4fe12966/pyproject.toml#L33-L39">coverage configuration</a></li>
+            </ul>
+          </div>
+        </details>
+
+        <details open>
+          <summary>Downstream code reviewed</summary>
+          <div>
+            <ul class="source-list">
+              <li>Tether: 1,522 decorated functions and 1,540 expanded cases across the <a href="https://github.com/crpier/tether/tree/670da114d0a39270ece46a07f6357ffeb58a1702/apps/host/tests">host suite</a> (1,504 cases) and <a href="https://github.com/crpier/tether/tree/670da114d0a39270ece46a07f6357ffeb58a1702/packages/snekok/tests">snekok suite</a> (36 cases)</li>
+              <li><a href="https://github.com/crpier/tether/blob/670da114d0a39270ece46a07f6357ffeb58a1702/apps/host/tests/test_server.py#L355-L403">Tether development-server port race</a></li>
+              <li><a href="https://github.com/crpier/tether/blob/670da114d0a39270ece46a07f6357ffeb58a1702/apps/host/tests/test_pi_runtime.py#L633-L889">Tether real Pi process tests</a></li>
+              <li><a href="https://github.com/crpier/tether/blob/670da114d0a39270ece46a07f6357ffeb58a1702/apps/host/tests/test_conversation_import_parsers.py#L25-L104">Tether's read-only session fixture</a></li>
+              <li><a href="https://github.com/crpier/snekql/tree/af4e40f079497c28cf07420d1d28b13121c1fc93/tests">snekql suite</a>: 651 decorated tests across 84 files</li>
+              <li><a href="https://github.com/crpier/snekql/blob/af4e40f079497c28cf07420d1d28b13121c1fc93/tests/helpers.py#L138-L147">snekql shared MariaDB session fixture</a></li>
+              <li><a href="https://github.com/crpier/snekql/blob/af4e40f079497c28cf07420d1d28b13121c1fc93/snekql/testing/mariadb/server.py#L66-L103">snekql frozen server descriptor</a></li>
+              <li><a href="https://github.com/crpier/snekql/blob/af4e40f079497c28cf07420d1d28b13121c1fc93/tests/mariadb/test_bulk_insert_runtime.py#L25-L181">snekql shared-table mutex set</a></li>
+            </ul>
+          </div>
+        </details>
+
+        <details open>
+          <summary>Python and coverage</summary>
+          <div>
+            <ul class="source-list">
+              <li><a href="https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods">Python 3.14 process start methods</a></li>
+              <li><a href="https://docs.python.org/3/library/multiprocessing.html#exchanging-objects-between-processes">Python process serialization</a></li>
+              <li><a href="https://docs.python.org/3/library/pickle.html#what-can-be-pickled-and-unpickled">Python pickle support and qualified-name limits</a></li>
+              <li><a href="https://docs.python.org/3/library/os.html#os.process_cpu_count"><code>os.process_cpu_count</code></a></li>
+              <li><a href="https://docs.python.org/3/library/traceback.html#traceback.TracebackException"><code>TracebackException</code></a></li>
+              <li><a href="https://coverage.readthedocs.io/en/latest/subprocess.html">Coverage.py process management</a></li>
+            </ul>
+          </div>
+        </details>
+
+        <details open>
+          <summary>Other test runners</summary>
+          <div>
+            <ul class="source-list">
+              <li><a href="https://pytest-xdist.readthedocs.io/en/stable/distribution.html">pytest-xdist distribution</a>, <a href="https://pytest-xdist.readthedocs.io/en/stable/how-to.html#making-session-scoped-fixtures-execute-only-once">run-once lock recipe</a>, and <a href="https://github.com/pytest-dev/pytest-xdist/issues/783">open run-fixture request</a></li>
+              <li><a href="https://docs.python.org/3/library/unittest.html">Python unittest</a></li>
+              <li><a href="https://pkg.go.dev/cmd/go#hdr-Testing_flags">Go test flags</a> and <a href="https://pkg.go.dev/testing#T.Parallel"><code>T.Parallel</code></a></li>
+              <li><a href="https://doc.rust-lang.org/stable/cargo/commands/cargo-test.html">Cargo test</a> and <a href="https://doc.rust-lang.org/stable/rustc/tests/index.html">libtest</a></li>
+              <li><a href="https://nexte.st/docs/design/why-process-per-test/">nextest process per test</a> and <a href="https://nexte.st/docs/configuration/test-groups/">mutual-exclusion groups</a></li>
+              <li><a href="https://nodejs.org/api/test.html">Node test runner</a> and <a href="https://nodejs.org/api/cli.html#--test-concurrency"><code>--test-concurrency</code></a></li>
+              <li><a href="https://vitest.dev/guide/parallelism">Vitest parallelism</a>, <a href="https://vitest.dev/config/maxworkers">workers</a>, and <a href="https://vitest.dev/config/isolate">isolation</a></li>
+              <li><a href="https://hexdocs.pm/ex_unit/ExUnit.html">ExUnit</a> and <a href="https://hexdocs.pm/ex_unit/ExUnit.Case.html">ExUnit.Case</a></li>
+              <li><a href="https://github.com/swiftlang/swift-testing/raw/refs/heads/main/Sources/Testing/Testing.docc/Parallelization.md">Swift Testing parallelization</a></li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <footer class="footer">
+        Interface design report for crpier/snektest issue 11.<br>
+        Scope: design and validation only. No parallel execution code is implemented by this report.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

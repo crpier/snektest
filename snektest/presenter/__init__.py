@@ -187,6 +187,8 @@ def print_test_result(result: TestResult) -> None:
 
 def print_failures(
     test_results: list[TestResult],
+    run_teardown_failures: list[TeardownFailure] | None = None,
+    run_teardown_output: str | None = None,
     session_teardown_failures: list[TeardownFailure] | None = None,
     session_teardown_output: str | None = None,
 ) -> None:
@@ -194,6 +196,8 @@ def print_failures(
     _print_failures(
         console,
         test_results,
+        run_teardown_failures=run_teardown_failures,
+        run_teardown_output=run_teardown_output,
         session_teardown_failures=session_teardown_failures,
         session_teardown_output=session_teardown_output,
     )
@@ -202,6 +206,7 @@ def print_failures(
 def print_summary(
     test_results: list[TestResult],
     total_duration: float,
+    run_teardown_failures: list[TeardownFailure] | None = None,
     session_teardown_failures: list[TeardownFailure] | None = None,
 ) -> None:
     """Print test summary."""
@@ -209,6 +214,7 @@ def print_summary(
         console,
         test_results,
         total_duration,
+        run_teardown_failures=run_teardown_failures,
         session_teardown_failures=session_teardown_failures,
     )
 

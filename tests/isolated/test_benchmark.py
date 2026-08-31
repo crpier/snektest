@@ -4,7 +4,6 @@ import asyncio
 import gc
 import json
 from collections.abc import Generator
-from io import StringIO
 from pathlib import Path
 
 from rich.console import Console
@@ -546,10 +545,10 @@ def _benchmark_test_result() -> TestResult:
             )
         ),
         markers=("fast",),
-        captured_output=StringIO(),
-        fixture_teardown_failures=[],
+        captured_output="",
+        fixture_teardown_failures=(),
         fixture_teardown_output=None,
-        warnings=[],
+        warnings=(),
     )
 
 

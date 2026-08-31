@@ -21,7 +21,7 @@ from pydantic_core.core_schema import (
 )
 
 type Coroutine[T] = _Coroutine[None, None, T]
-type Scope = Literal["function", "session"]
+type FixtureScope = Literal["function", "run", "session"]
 
 
 class Fixture[T]:
@@ -34,7 +34,11 @@ class Fixture[T]:
     """
 
     def __init__(
-        self, make: Callable[[], Generator[T]], scope: Scope, key: object, name: str
+        self,
+        make: Callable[[], Generator[T]],
+        scope: FixtureScope,
+        key: object,
+        name: str,
     ) -> None:
         self.make = make
         self.scope = scope
@@ -69,7 +73,7 @@ class AsyncFixture[T]:
     def __init__(
         self,
         make: Callable[[], AsyncGenerator[T]],
-        scope: Scope,
+        scope: FixtureScope,
         key: object,
         name: str,
     ) -> None:

@@ -7,6 +7,7 @@ from rich.text import Text
 
 from snektest.models import (
     ErrorResult,
+    ExceptionDiagnostic,
     FailedResult,
     PassedResult,
     TeardownFailure,
@@ -20,6 +21,7 @@ class RunCounts:
     failed: int
     errors: int
     fixture_teardown_failed: int
+    run_teardown_failed: int
     session_teardown_failed: int
 
 
@@ -63,17 +65,17 @@ def _print_named_summary_entry(
     console.print(line, markup=False, soft_wrap=True)
 
 
-def _summarize_exception(exc_value: BaseException) -> str:
+def _summarize_exception(exception: ExceptionDiagnostic) -> str:
     """Render exception values as single-line summary details.
 
     Full multi-line exception messages are already shown in the failure details.
     The summary keeps only the first line so repeated diagnostics do not swamp
     the final count line.
     """
-    first_line = str(exc_value).splitlines()[0] if str(exc_value) else ""
+    first_line = exception.message.splitlines()[0] if exception.message else ""
     if not first_line:
         return ""
-    return f"{type(exc_value).__name__}: {first_line}"
+    return f"{exception.type_name}: {first_line}"
 
 
 def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
@@ -91,7 +93,7 @@ def _print_test_failures(console: Console, test_results: list[TestResult]) -> No
     """Print test failures."""
     for result in test_results:
         if (failed_result := result.result) and isinstance(failed_result, FailedResult):
-            error_msg = _summarize_exception(failed_result.exc_value)
+            error_msg = _summarize_exception(failed_result.exception)
             _print_named_summary_entry(
                 console,
                 label=("FAILED", "red"),
@@ -105,7 +107,7 @@ def _print_test_errors(console: Console, test_results: list[TestResult]) -> None
     """Print test errors (unexpected exceptions)."""
     for result in test_results:
         if (error_result := result.result) and isinstance(error_result, ErrorResult):
-            error_msg = _summarize_exception(error_result.exc_value)
+            error_msg = _summarize_exception(error_result.exception)
             _print_named_summary_entry(
                 console,
                 label=("ERROR", "dark_orange"),
@@ -121,7 +123,7 @@ def _print_fixture_teardown_failures(
     """Print fixture teardown failures."""
     for result in test_results:
         for teardown_failure in result.fixture_teardown_failures:
-            error_msg = _summarize_exception(teardown_failure.exc_value)
+            error_msg = _summarize_exception(teardown_failure.exception)
             _print_named_summary_entry(
                 console,
                 label=("FIXTURE TEARDOWN FAILED", "red"),
@@ -136,10 +138,23 @@ def _print_session_teardown_failures(
 ) -> None:
     """Print session teardown failures."""
     for teardown_failure in session_teardown_failures:
-        error_msg = _summarize_exception(teardown_failure.exc_value)
+        error_msg = _summarize_exception(teardown_failure.exception)
         _print_summary_entry(
             console,
             label="SESSION FIXTURE TEARDOWN FAILED",
+            style="red",
+            details=f"{teardown_failure.fixture_name}: {error_msg}",
+        )
+
+
+def _print_run_teardown_failures(
+    console: Console, run_teardown_failures: list[TeardownFailure]
+) -> None:
+    for teardown_failure in run_teardown_failures:
+        error_msg = _summarize_exception(teardown_failure.exception)
+        _print_summary_entry(
+            console,
+            label="RUN FIXTURE TEARDOWN FAILED",
             style="red",
             details=f"{teardown_failure.fixture_name}: {error_msg}",
         )
@@ -150,6 +165,7 @@ def _has_failures(counts: RunCounts) -> bool:
         counts.failed > 0
         or counts.errors > 0
         or counts.fixture_teardown_failed > 0
+        or counts.run_teardown_failed > 0
         or counts.session_teardown_failed > 0
     )
 
@@ -168,6 +184,8 @@ def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str
         status_text += (
             f"{counts.session_teardown_failed} session fixture teardown failed, "
         )
+    if counts.run_teardown_failed > 0:
+        status_text += f"{counts.run_teardown_failed} run fixture teardown failed, "
     status_text += f"{counts.passed} passed in {total_duration:.2f}s"
     return status_text, f"bold {status_color}"
 
@@ -176,11 +194,14 @@ def print_summary(
     console: Console,
     test_results: list[TestResult],
     total_duration: float,
+    run_teardown_failures: list[TeardownFailure] | None = None,
     session_teardown_failures: list[TeardownFailure] | None = None,
 ) -> None:
     """Print test summary with counts and status."""
     if session_teardown_failures is None:
         session_teardown_failures = []
+    if run_teardown_failures is None:
+        run_teardown_failures = []
 
     passed = sum(
         1 for result in test_results if isinstance(result.result, PassedResult)
@@ -193,12 +214,14 @@ def print_summary(
         len(result.fixture_teardown_failures) for result in test_results
     )
     session_teardown_failed = len(session_teardown_failures)
+    run_teardown_failed = len(run_teardown_failures)
 
     counts = RunCounts(
         passed=passed,
         failed=failed,
         errors=errors,
         fixture_teardown_failed=fixture_teardown_failed,
+        run_teardown_failed=run_teardown_failed,
         session_teardown_failed=session_teardown_failed,
     )
 
@@ -210,6 +233,7 @@ def print_summary(
         _print_test_errors(console, test_results)
         _print_fixture_teardown_failures(console, test_results)
         _print_session_teardown_failures(console, session_teardown_failures)
+        _print_run_teardown_failures(console, run_teardown_failures)
         console.print()
 
     status_text, status_style = _build_status_text(

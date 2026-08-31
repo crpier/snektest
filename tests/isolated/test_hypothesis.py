@@ -13,17 +13,22 @@ from snektest.assertions import (
     assert_true,
 )
 from snektest.decorators import test_hypothesis
-from snektest.utils import get_test_function_markers, is_test_function
+from snektest.utils import (
+    get_test_function_markers,
+    get_test_function_mutex,
+    is_test_function,
+)
 
 
 @test()
 def test_test_hypothesis_marks_function() -> None:
-    @test_hypothesis(st.integers(), mark="fast")
+    @test_hypothesis(st.integers(), mark="fast", mutex="property-engine")
     def prop(x: int) -> None:
         _ = x
 
     assert_true(is_test_function(prop))
     assert_true(get_test_function_markers(prop) == ("fast",))
+    assert_true(get_test_function_mutex(prop) == "property-engine")
 
 
 @test()

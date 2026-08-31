@@ -82,13 +82,15 @@ snektest --mark fast
 Define fixtures as generator functions decorated with `@fixture`, annotated
 `Generator[T]` or `AsyncGenerator[T]`. `@fixture` (the default) is
 function-scoped: set up and torn down for each test. `@fixture(scope="session")`
-is set up once and reused across the run. Calling a decorated fixture returns a
-handle; pass it to `load_fixture()`. Fixtures may take arguments, passed at the
+is set up once per execution process and reused there. `@fixture(scope="run")`
+is a zero-argument, module-level fixture owned once by the command; it lazily
+yields an inert stdlib-pickle descriptor of at most 1 MiB, and each worker gets
+an independent decoded copy. Calling a decorated fixture returns a handle; pass
+it to `load_fixture()`. Fixtures may take arguments, passed at the
 call site (e.g. `load_fixture(make_user("Ada"))`), and calling one twice yields
-two independent instances. Session fixtures must not accept parameters because
-they are cached once per fixture function. Use a function fixture for
-parameter-dependent setup, or have a zero-argument session fixture return a
-factory/cache.
+two independent instances. Session and run fixtures must not accept parameters.
+Use a function fixture for parameter-dependent setup, or have a zero-argument
+cached fixture return a factory/cache.
 
 Set up and tear down test dependencies with session-scoped fixtures:
 
@@ -122,8 +124,9 @@ runner, so scope is ignored and each block does its own setup and teardown.
 A fixture can depend on another by calling `load_fixture()` in its own body. The
 rules:
 
-- A **function** fixture may depend on a function fixture or a session fixture.
-- A **session** fixture may depend on another session fixture.
+- A **function** fixture may depend on a function, session, or run fixture.
+- A **session** fixture may depend on another session or run fixture.
+- A **run** fixture may depend on another run fixture.
 - A **session** fixture may **not** depend on a function fixture: the session
   fixture is cached for the whole run and would outlive the per-test
   dependency, so snektest raises `FixtureError`.
@@ -134,7 +137,7 @@ rules:
   cannot await an async dependency.
 - **Teardown is depending-fixture-first**: a fixture is torn down before the
   fixtures it loaded, so it may safely use them during its own teardown. This
-  holds for both function and session scope.
+  holds across function, session, and run scope.
 
 ```python
 from collections.abc import Generator
@@ -438,6 +441,12 @@ snektest tests/test_myfeature.py::test_something
 # Run tests with a marker
 snektest --mark fast
 
+# Run in four persistent execution workers (plus one fixture host)
+snektest --workers 4
+
+# Choose the lesser of available process CPUs and selected cases
+snektest -n auto
+
 # Override the default 60-second async-test timeout
 snektest --timeout 5
 
@@ -476,6 +485,15 @@ machine-readable summary with per-test exception messages.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
+`--pdb` cannot be combined with explicit worker mode; rerun without `--workers`
+to debug locally. `-s --json-output` is also rejected so JSON stdout remains one
+document.
+
+Pass `mutex="name"` to `@test()` or `@test_hypothesis()` when selected cases use
+the same command-local resource. Mutex names are exact, non-empty, trimmed, and
+case-sensitive. Same-name tests never overlap, while the scheduler can skip a
+blocked case and run unrelated work. A mutex is not an OS lock and does not
+coordinate other snektest commands or leaked subprocesses.
 
 The CLI applies a 60-second timeout to every async test by default. Use
 `--timeout SECONDS` to override it or `--no-timeout` to disable it. The timeout
@@ -503,19 +521,19 @@ Interactions to know about:
 
 ## Execution Model
 
-Tests run sequentially — one at a time, in collection order — on a single
-asyncio event loop shared by the entire run. An async test is awaited to
-completion before the next test starts, so tests never interleave with each
-other; a background task a test starts but does not await can, however, keep
-running on the shared loop while later tests execute.
+Snektest completes deterministic collection before any test starts. Omit
+`--workers` for in-process sequential execution on one event loop. Explicit
+worker mode starts the requested number of persistent spawn workers, capped by
+the selected case count, plus one canonical collector/run-fixture host;
+`--workers 1` still uses real child processes. Each worker executes one test at
+a time on its own event loop and owns its session fixtures. Results are presented
+in canonical manifest order even when workers finish out of order. Repeated
+filters remain repeated invocations with distinct ordinals.
 
-Test collection runs in a background thread while tests execute, so a test
-module may be imported while tests from earlier modules are already running.
-Avoid import-time side effects in test modules.
-
-Teardown is last-in-first-out: function fixtures are torn down after each test
-in reverse loading order, and session fixtures are torn down after all tests
-finish in reverse registration order.
+Teardown is dependency-first-in-reverse: function fixtures after each test,
+session fixtures when each worker exits, then run fixtures in the host. A worker
+replacement after a crash is a new process incarnation and may set up session
+fixtures again.
 
 ## Marking Tests
 

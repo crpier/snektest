@@ -10,17 +10,20 @@ TEST_ATTR_VALUE = object()
 
 PARAMS_ATTR_NAME = "__snektest_params__"
 MARKERS_ATTR_NAME = "__snektest_markers__"
+MUTEX_ATTR_NAME = "__snektest_mutex__"
 
 
 def mark_test_function(
     func: Callable[..., Any],
     params: tuple[list[Param[Any]], ...],
     markers: tuple[str, ...],
+    mutex: str | None = None,
 ) -> None:
     """Mark a function as a test and store its parameters."""
     setattr(func, TEST_ATTR_NAME, TEST_ATTR_VALUE)
     setattr(func, PARAMS_ATTR_NAME, Param.to_dict(params))
     setattr(func, MARKERS_ATTR_NAME, markers)
+    setattr(func, MUTEX_ATTR_NAME, mutex)
 
 
 def is_test_function(func: Callable[..., Any]) -> bool:
@@ -38,3 +41,8 @@ def get_test_function_params(
 def get_test_function_markers(func: Callable[..., Any]) -> tuple[str, ...]:
     """Get the markers tuple for a test function."""
     return cast("tuple[str, ...]", getattr(func, MARKERS_ATTR_NAME, ()))
+
+
+def get_test_function_mutex(func: Callable[..., Any]) -> str | None:
+    """Return the validated command-local mutex attached to a test function."""
+    return cast("str | None", getattr(func, MUTEX_ATTR_NAME, None))

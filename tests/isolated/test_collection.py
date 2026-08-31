@@ -10,9 +10,14 @@ from typing import cast
 
 from pydantic import TypeAdapter
 
-from snektest import assert_eq, assert_raises, test
+from snektest import assert_eq, assert_in, assert_raises, test
 from snektest.annotations import PyFilePath
-from snektest.collection import TestsQueue, generate_file_list, load_tests_from_file
+from snektest.collection import (
+    TestsQueue,
+    collect_tests_from_filters,
+    generate_file_list,
+    load_tests_from_file,
+)
 from snektest.models import CollectionError, FilterItem
 
 
@@ -35,6 +40,132 @@ def test_generate_file_list_excludes_gitignored_files() -> None:
         file_paths = generate_file_list(FilterItem(str(repository)))
 
     assert_eq([path.name for path in file_paths], ["test_included.py"])
+
+
+@test()
+def test_generate_file_list_sorts_directory_candidates() -> None:
+    """Filesystem enumeration order does not affect the canonical plan."""
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        _ = (directory / "test_z.py").write_text("")
+        _ = (directory / "test_a.py").write_text("")
+
+        file_paths = generate_file_list(FilterItem(str(directory)))
+
+    assert_eq([path.name for path in file_paths], ["test_a.py", "test_z.py"])
+
+
+@test()
+def test_collection_uses_definition_order_and_assigns_ordinals() -> None:
+    """Cases retain source order rather than alphabetical member order."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_definition_order.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_z() -> None:
+    pass
+
+@test()
+def test_a() -> None:
+    pass
+""".lstrip()
+        )
+
+        test_cases = collect_tests_from_filters([FilterItem(str(test_file))])
+
+    assert_eq([case.name.func_name for case in test_cases], ["test_z", "test_a"])
+    assert_eq([case.ordinal for case in test_cases], [0, 1])
+
+
+@test()
+def test_collection_preserves_repeated_filter_occurrences() -> None:
+    """Selecting the same case twice produces two distinct plan ordinals."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_repeated_filter.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_one() -> None:
+    pass
+""".lstrip()
+        )
+        selected_filter = FilterItem(str(test_file))
+
+        test_cases = collect_tests_from_filters([selected_filter, selected_filter])
+
+    assert_eq([str(case.name) for case in test_cases], [str(test_cases[0].name)] * 2)
+    assert_eq([case.ordinal for case in test_cases], [0, 1])
+
+
+@test()
+def test_collection_rejects_duplicate_case_identity_within_selection() -> None:
+    """Two discovered callables cannot silently claim one case identity."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_duplicate_identity.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def first() -> None:
+    pass
+
+first.__name__ = "test_same"
+
+@test()
+def second() -> None:
+    pass
+
+second.__name__ = "test_same"
+""".lstrip()
+        )
+
+        with assert_raises(CollectionError):
+            _ = collect_tests_from_filters([FilterItem(str(test_file))])
+
+
+@test()
+def test_collection_rejects_empty_plan() -> None:
+    """A successful command cannot silently report a zero-test run."""
+    with tempfile.TemporaryDirectory() as tmp, assert_raises(CollectionError):
+        _ = collect_tests_from_filters([FilterItem(tmp)])
+
+
+@test()
+def test_collection_rejects_run_fixture_identity_collision() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "test_run_collision.py"
+        _ = test_file.write_text(
+            """
+from collections.abc import Generator
+
+from snektest import fixture, test
+
+@fixture(scope="run")
+def descriptor() -> Generator[str]:
+    yield "first"
+
+first_descriptor = descriptor
+
+@fixture(scope="run")
+def descriptor() -> Generator[str]:
+    yield "second"
+
+@test()
+def test_one() -> None:
+    pass
+""".lstrip()
+        )
+
+        with assert_raises(CollectionError) as raised:
+            _ = collect_tests_from_filters([FilterItem(str(test_file))])
+
+    assert_in("Run fixture identity collision", str(raised.exception))
 
 
 @test()

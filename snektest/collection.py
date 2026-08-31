@@ -4,10 +4,10 @@ import asyncio
 import os
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
-from inspect import getmembers, isfunction
+from inspect import isfunction
 from pathlib import Path
 from shutil import which
 from sys import modules
@@ -19,6 +19,7 @@ from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.models import CollectionError, FilterItem, TestCase, TestName
 from snektest.utils import (
     get_test_function_markers,
+    get_test_function_mutex,
     get_test_function_params,
     is_test_function,
 )
@@ -34,6 +35,14 @@ class _CollectionMatchStats:
 
     function_matched: bool
     params_matched: bool
+
+
+@dataclass(frozen=True)
+class _CollectedFile:
+    """Cases and selector-match details collected from one module."""
+
+    cases: tuple[TestCase, ...]
+    stats: _CollectionMatchStats
 
 
 def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Path]:
@@ -62,18 +71,15 @@ def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Pat
     )
 
 
-def load_tests_from_file(  # noqa: PLR0913
+def collect_tests_from_file(
     file_path: PyFilePath,
     filter_item: FilterItem,
-    queue: TestsQueue,
-    loop: asyncio.AbstractEventLoop,
     *,
     mark: str | None = None,
     spec_loader: Callable[..., object] = spec_from_file_location,
     collection_root: Path | None = None,
-    seen_test_cases: set[tuple[Path, str, str]] | None = None,
-) -> _CollectionMatchStats:
-    """Load and queue tests from a single Python file."""
+) -> _CollectedFile:
+    """Import one module and return selected cases in definition order."""
     path_root = collection_root or Path.cwd()
     canonical_file_path = (
         file_path.resolve()
@@ -93,10 +99,18 @@ def load_tests_from_file(  # noqa: PLR0913
 
         module = module_from_spec(spec_value)
         modules[module_name] = module
-        loader.exec_module(module)
+        try:
+            loader.exec_module(module)
+        except BaseException:
+            modules.pop(module_name, None)
+            raise
 
     test_functions = [
-        func for _, func in getmembers(module, isfunction) if is_test_function(func)
+        func
+        for func in vars(module).values()
+        if isfunction(func)
+        and func.__module__ == module.__name__
+        and is_test_function(func)
     ]
     if filter_item.function_name is None:
         named_functions = test_functions
@@ -118,16 +132,12 @@ def load_tests_from_file(  # noqa: PLR0913
             func for func in named_functions if mark in get_test_function_markers(func)
         ]
 
+    cases: list[TestCase] = []
     for func in runnable_functions:
         markers = get_test_function_markers(func)
         for param_names, params in get_test_function_params(func).items():
             if filter_item.params and filter_item.params != param_names:
                 continue
-            if seen_test_cases is not None:
-                test_identity = (canonical_file_path, func.__name__, param_names)
-                if test_identity in seen_test_cases:
-                    continue
-                seen_test_cases.add(test_identity)
             test_name = TestName(
                 file_path=file_path,
                 func_name=func.__name__,
@@ -137,15 +147,42 @@ def load_tests_from_file(  # noqa: PLR0913
             test_case = TestCase(
                 function=func,
                 markers=markers,
+                mutex=get_test_function_mutex(func),
                 name=test_name,
                 param_values=tuple(param.value for param in params),
             )
-            _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
+            cases.append(test_case)
 
-    return _CollectionMatchStats(
-        function_matched=filter_item.function_name is None or bool(named_functions),
-        params_matched=params_matched,
+    return _CollectedFile(
+        cases=tuple(cases),
+        stats=_CollectionMatchStats(
+            function_matched=filter_item.function_name is None or bool(named_functions),
+            params_matched=params_matched,
+        ),
     )
+
+
+def load_tests_from_file(  # noqa: PLR0913
+    file_path: PyFilePath,
+    filter_item: FilterItem,
+    queue: TestsQueue,
+    loop: asyncio.AbstractEventLoop,
+    *,
+    mark: str | None = None,
+    spec_loader: Callable[..., object] = spec_from_file_location,
+    collection_root: Path | None = None,
+) -> _CollectionMatchStats:
+    """Collect one file and publish its cases to an event-loop queue."""
+    collected = collect_tests_from_file(
+        file_path,
+        filter_item,
+        mark=mark,
+        spec_loader=spec_loader,
+        collection_root=collection_root,
+    )
+    for test_case in collected.cases:
+        _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
+    return collected.stats
 
 
 def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
@@ -176,7 +213,67 @@ def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
     ]
     ignored_paths = git_ignored_files(paths, cwd=filter_item.file_path)
 
-    return [path for path in paths if path.resolve() not in ignored_paths]
+    return sorted(
+        (path for path in paths if path.resolve() not in ignored_paths),
+        key=lambda path: path.as_posix(),
+    )
+
+
+def collect_tests_from_filters(
+    filter_items: list[FilterItem],
+    *,
+    mark: str | None = None,
+) -> list[TestCase]:
+    """Build one complete canonical plan before any selected test executes."""
+    collected_cases: list[TestCase] = []
+    try:
+        for filter_item in filter_items:
+            function_matched = filter_item.function_name is None
+            params_matched = filter_item.params is None
+            selection_names: set[TestName] = set()
+            for file_path in generate_file_list(filter_item):
+                collected_file = collect_tests_from_file(
+                    file_path=file_path,
+                    filter_item=filter_item,
+                    mark=mark,
+                    collection_root=Path.cwd().resolve(),
+                )
+                function_matched = (
+                    function_matched or collected_file.stats.function_matched
+                )
+                params_matched = params_matched or collected_file.stats.params_matched
+                for test_case in collected_file.cases:
+                    if test_case.name in selection_names:
+                        msg = (
+                            f"Collected duplicate test case `{test_case.name}` for "
+                            f"filter `{filter_item}`"
+                        )
+                        raise CollectionError(msg)  # noqa: TRY301
+                    selection_names.add(test_case.name)
+                    collected_cases.append(
+                        replace(test_case, ordinal=len(collected_cases))
+                    )
+            if filter_item.function_name is not None and not function_matched:
+                msg = (
+                    f"No test named `{filter_item.function_name}` found for "
+                    f"filter `{filter_item}`"
+                )
+                raise CollectionError(msg)  # noqa: TRY301
+            if filter_item.params is not None and not params_matched:
+                msg = (
+                    f"No parameterized case `{filter_item.params}` found for "
+                    f"filter `{filter_item}`"
+                )
+                raise CollectionError(msg)  # noqa: TRY301
+        if not collected_cases:
+            msg = "No tests selected"
+            raise CollectionError(msg)  # noqa: TRY301
+    except CollectionError:
+        raise
+    except BaseException as exc:
+        msg = f"Error during collection: {exc}"
+        raise CollectionError(msg) from exc
+    return collected_cases
 
 
 def load_tests_from_filters(
@@ -195,44 +292,17 @@ def load_tests_from_filters(
         loop: Event loop for thread-safe queue operations
         exception_holder: Optional list to store exception if one occurs during collection
     """
-    collection_root = Path.cwd().resolve()
-    seen_test_cases: set[tuple[Path, str, str]] = set()
     try:
-        for filter_item in filter_items:
-            file_paths = generate_file_list(filter_item)
-            function_matched = filter_item.function_name is None
-            params_matched = filter_item.params is None
-            for file_path in file_paths:
-                stats = load_tests_from_file(
-                    file_path=file_path,
-                    filter_item=filter_item,
-                    queue=queue,
-                    loop=loop,
-                    mark=mark,
-                    collection_root=collection_root,
-                    seen_test_cases=seen_test_cases,
-                )
-                function_matched = function_matched or stats.function_matched
-                params_matched = params_matched or stats.params_matched
-            if filter_item.function_name is not None and not function_matched:
-                msg = (
-                    f"No test named `{filter_item.function_name}` found for "
-                    f"filter `{filter_item}`"
-                )
-                raise CollectionError(msg)  # noqa: TRY301
-            if filter_item.params is not None and not params_matched:
-                msg = (
-                    f"No parameterized case `{filter_item.params}` found for "
-                    f"filter `{filter_item}`"
-                )
-                raise CollectionError(msg)  # noqa: TRY301
-    except BaseException as e:
+        test_cases = collect_tests_from_filters(filter_items, mark=mark)
+        for test_case in test_cases:
+            _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
+    except BaseException as exc:
         if exception_holder is not None:
-            if isinstance(e, CollectionError):
-                exception_holder.append(e)
+            if isinstance(exc, CollectionError):
+                exception_holder.append(exc)
             else:
-                collection_error = CollectionError(f"Error during collection: {e}")
-                collection_error.__cause__ = e
+                collection_error = CollectionError(f"Error during collection: {exc}")
+                collection_error.__cause__ = exc
                 exception_holder.append(collection_error)
     finally:
         _ = loop.call_soon_threadsafe(queue.shutdown)

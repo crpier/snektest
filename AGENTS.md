@@ -61,11 +61,10 @@ This project uses `uv` for dependency management. The project requires Python >=
 ### Test Collection & Execution Flow
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
-2. **Producer-Consumer Pattern**:
-   - Producer thread (`load_tests_from_filters`) walks the filesystem, excludes Git-ignored candidates for directory filters, imports test modules, and adds tests to the async queue. Explicit file filters bypass Git ignore checks.
-   - Consumer coroutine (`run_tests`) awaits tests from the queue one at a time, on a single event loop, while collection continues in the producer thread
-3. **Test Discovery** (`load_tests_from_file`): Import modules, find functions decorated with `@test()`, expand parameterized tests
-4. **Test Execution** (`execute_test`): Capture stdout/stderr, execute test function (sync or async), teardown function fixtures, return `TestResult`
+2. **Canonical Collection** (`collect_tests_from_filters`): Sort directory candidates, preserve source and filter order, finish all imports, reject empty/colliding plans, and assign an ordinal to every occurrence. Explicit files bypass Git ignore checks; repeated filters remain repeated cases.
+3. **Local Execution**: With workers omitted, publish the complete plan to `run_tests`, which executes sequentially in process on one event loop.
+4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order.
+5. **Test Execution** (`execute_test`): Capture stdout/stderr, execute one sync or async test, teardown function fixtures, and return a process-neutral `TestResult`.
 
 ### Fixture System
 
@@ -85,21 +84,27 @@ current registry — tests take no context parameter.
 - **Function fixtures** (`@fixture`): Set up on each `load_fixture()` call,
   pushed onto the registry's function stack, torn down after each test in reverse
   (first-in-last-out) order. May take arguments, passed at the call site.
-- **Session fixtures** (`@fixture(scope="session")`): Cached in the registry
+- **Session fixtures** (`@fixture(scope="session")`): Cached in one execution-process registry
   keyed by the decorated function, created on first `load_fixture()` call, reused
-  across tests, torn down after all tests complete. Concurrent first-awaits of an
+  across tests assigned to that process, torn down when it exits. Concurrent first-awaits of an
   async session fixture share one setup coroutine. Session fixtures must not
   accept parameters (enforced statically via the `@fixture(scope="session")`
   overload and at load time by the registry); use function fixtures for
   parameter-dependent setup, or return a factory/cache from a zero-argument
-  session fixture.
+  session fixture. Worker replacement creates a new session incarnation.
+- **Run fixtures** (`@fixture(scope="run")`): Zero-argument module-level fixtures
+  set up lazily and exactly once by the fixture host. The yielded descriptor must
+  round-trip through stdlib pickle in at most 1 MiB. Publication stages an
+  independent decoded copy in every worker before commit; the host retains the
+  original for teardown after worker sessions. Local mode enforces the same
+  descriptor-copy contract.
 - **Fixtures depending on fixtures**: a fixture may `load_fixture()` another in
   its body (resolved through the ambient registry). The dependency is registered
   for teardown only after its own setup completes, so it lands below the
   depending fixture on the teardown stack and is torn down *after* it — a
   depending fixture may use its dependency during teardown. This holds for both
-  scopes. A function fixture may depend on function or session fixtures; a
-  session fixture may depend on session fixtures only — depending on a function
+  scopes. Function may depend on function, session, or run; session on session or
+  run; run on run only. A session fixture depending on a function
   fixture raises `FixtureError` at load time, because the cached session fixture
   would outlive the per-test dependency. An async fixture may depend on sync or
   async fixtures; a sync fixture cannot await an async dependency.
@@ -124,6 +129,19 @@ threads), or `"slow"` (network IO, subprocesses, or other expensive external
 resources). Marking every test is the recommended public style; filter a run to
 one group with `--mark fast|medium|slow`. `Marker` (`decorators.py`) is the type
 alias for the three literals; markers are passed as a single literal.
+
+`mutex="name"` on either test decorator declares one exact command-local mutex.
+Same-name selected cases do not overlap; blocked ordinals are skipped so unrelated
+cases can run. Mutexes are case-sensitive and do not provide cross-command or OS
+locking.
+
+### Process Workers
+
+`-n COUNT` / `--workers COUNT` accepts a positive integer or `auto`; omission is
+local sequential mode. `auto` resolves to
+`min(os.process_cpu_count() or 1, selected_count)`. The count covers execution
+workers only; process mode also has one fixture host, and `--workers 1` still
+uses children. `--pdb` with workers and `-s --json-output` are usage errors.
 
 ### Async Hygiene
 

@@ -9,14 +9,15 @@ from inspect import (
     Signature,
     isasyncgenfunction,
     iscoroutinefunction,
+    signature,
 )
 from typing import Any, Literal, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture, Scope
-from snektest.fixtures import current_registry
-from snektest.models import Param
+from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope
+from snektest.fixtures import current_registry, load_run_fixture
+from snektest.models import Param, Scope
 from snektest.utils import mark_test_function
 
 _given = cast("Any", given)
@@ -45,6 +46,11 @@ or other expensive external resources.
 
 VALID_MARKERS: tuple[Marker, ...] = ("slow", "medium", "fast")
 
+type RunFixtureIdentity = tuple[str, str]
+_run_fixture_catalog: dict[
+    RunFixtureIdentity, Callable[[], Fixture[Any] | AsyncFixture[Any]]
+] = {}
+
 
 def _normalize_marker_entry(entry: object) -> str:
     if isinstance(entry, str) and entry in VALID_MARKERS:
@@ -62,9 +68,20 @@ def _normalize_markers(mark: object | None) -> tuple[str, ...]:
     raise TypeError(msg)
 
 
+def _normalize_mutex(mutex: object | None) -> str | None:
+    """Validate one exact, non-empty command-local mutex name."""
+    if mutex is None:
+        return None
+    if isinstance(mutex, str) and mutex and mutex == mutex.strip():
+        return mutex
+    msg = "Mutex must be a non-empty, already-trimmed string"
+    raise TypeError(msg)
+
+
 def test(
     *params: list[Param[Any]],
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
@@ -72,11 +89,12 @@ def test(
     """Mark a function as a test function with an optional built-in marker."""
 
     markers = _normalize_markers(mark)
+    normalized_mutex = _normalize_mutex(mutex)
 
     def decorator(
         test_func: Callable[[*tuple[Any, ...]], Coroutine[None] | None],
     ) -> Callable[[*tuple[Any, ...]], Coroutine[None] | None]:
-        mark_test_function(test_func, params, markers)
+        mark_test_function(test_func, params, markers, normalized_mutex)
         return test_func
 
     return decorator
@@ -161,6 +179,7 @@ def _run_async_example(
 def test_hypothesis(
     *strategies: SearchStrategy[Any],
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],
@@ -184,6 +203,7 @@ def test_hypothesis(
 
     strategies_tuple = tuple(strategies)
     markers = _normalize_markers(mark)
+    normalized_mutex = _normalize_mutex(mutex)
 
     def decorator(
         test_func: Callable[..., Coroutine[None] | None],
@@ -207,7 +227,7 @@ def test_hypothesis(
 
                 await asyncio.to_thread(run_hypothesis)
 
-            mark_test_function(async_wrapper, (), markers)
+            mark_test_function(async_wrapper, (), markers, normalized_mutex)
             return async_wrapper
 
         @wraps(test_func)
@@ -217,7 +237,7 @@ def test_hypothesis(
 
             _run_hypothesis(sync_wrapper, strategies_tuple, run_one_example)
 
-        mark_test_function(sync_wrapper, (), markers)
+        mark_test_function(sync_wrapper, (), markers, normalized_mutex)
         return sync_wrapper
 
     return decorator
@@ -245,6 +265,31 @@ class _SessionDecorator(Protocol):
     ) -> Callable[[], AsyncFixture[T]]: ...
 
 
+class _RunDecorator(Protocol):
+    @overload
+    def __call__[T](
+        self, func: Callable[[], Generator[T]]
+    ) -> Callable[[], Fixture[T]]: ...
+    @overload
+    def __call__[T](
+        self, func: Callable[[], AsyncGenerator[T]]
+    ) -> Callable[[], AsyncFixture[T]]: ...
+
+
+def _normalize_fixture_scope(scope: object) -> FixtureScope:
+    """Store public enum members and literals as one stable string contract."""
+    if isinstance(scope, Scope):
+        return scope.value
+    if scope == "function":
+        return "function"
+    if scope == "session":
+        return "session"
+    if scope == "run":
+        return "run"
+    msg = "Fixture scope must be 'function', 'session', or 'run'"
+    raise TypeError(msg)
+
+
 @overload
 def fixture[**P, T](func: Callable[P, Generator[T]]) -> Callable[P, Fixture[T]]: ...
 @overload
@@ -252,27 +297,41 @@ def fixture[**P, T](
     func: Callable[P, AsyncGenerator[T]],
 ) -> Callable[P, AsyncFixture[T]]: ...
 @overload
-def fixture(*, scope: Literal["session"]) -> _SessionDecorator: ...
+def fixture(*, scope: Literal["session", Scope.SESSION]) -> _SessionDecorator: ...
 @overload
-def fixture(*, scope: Literal["function"] = ...) -> _FunctionDecorator: ...
+def fixture(*, scope: Literal["run", Scope.RUN]) -> _RunDecorator: ...
+@overload
+def fixture(
+    *, scope: Literal["function", Scope.FUNCTION] = ...
+) -> _FunctionDecorator: ...
 def fixture(
     func: Callable[..., Generator[Any]]
     | Callable[..., AsyncGenerator[Any]]
     | None = None,
     *,
-    scope: Scope = "function",
+    scope: FixtureScope | Scope = "function",
 ) -> Any:
     """Mark a generator function as a fixture.
 
     `@fixture` (default) is function-scoped: set up and torn down for each test.
-    `@fixture(scope="session")` is set up once and reused; session fixtures cannot
-    take parameters. Calling a decorated fixture returns a handle to pass to
-    `load_fixture`, or to use directly as a context manager outside the runner.
+    Session fixtures are reused within one execution process. Run fixtures are
+    owned once by the run and publish bounded pickle descriptors. Session and run
+    fixtures cannot take parameters.
     """
+
+    normalized_scope = _normalize_fixture_scope(scope)
 
     def decorate(
         f: Callable[..., Generator[Any]] | Callable[..., AsyncGenerator[Any]],
     ) -> Callable[..., Fixture[Any] | AsyncFixture[Any]]:
+        if normalized_scope == "run":
+            if signature(f).parameters:
+                msg = "Run fixtures cannot accept parameters"
+                raise TypeError(msg)
+            fixture_qualname = cast("str", getattr(f, "__qualname__", ""))
+            if "." in fixture_qualname:
+                msg = "Run fixtures must be defined at module scope"
+                raise TypeError(msg)
         is_async = isasyncgenfunction(f)
         fixture_name = cast("str", getattr(f, "__name__", "fixture"))
 
@@ -283,11 +342,31 @@ def fixture(
                     "Callable[[], AsyncGenerator[Any]]", lambda: f(*args, **kwargs)
                 )
                 return AsyncFixture(
-                    make=async_make, scope=scope, key=f, name=fixture_name
+                    make=async_make,
+                    scope=normalized_scope,
+                    key=f,
+                    name=fixture_name,
                 )
             sync_make = cast("Callable[[], Generator[Any]]", lambda: f(*args, **kwargs))
-            return Fixture(make=sync_make, scope=scope, key=f, name=fixture_name)
+            return Fixture(
+                make=sync_make,
+                scope=normalized_scope,
+                key=f,
+                name=fixture_name,
+            )
 
+        if normalized_scope == "run":
+            identity = (
+                cast("str", getattr(f, "__module__", "")),
+                cast("str", getattr(f, "__qualname__", "")),
+            )
+            existing = _run_fixture_catalog.get(identity)
+            if existing is not None and getattr(existing, "__wrapped__", None) is not f:
+                msg = f"Run fixture identity collision for {identity[0]}.{identity[1]}"
+                raise TypeError(msg)
+            _run_fixture_catalog[identity] = cast(
+                "Callable[[], Fixture[Any] | AsyncFixture[Any]]", make_handle
+            )
         return make_handle
 
     if func is not None:
@@ -305,7 +384,16 @@ def load_fixture[R](fix: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
     The active run's `FixtureRegistry` sets it up, caches session fixtures, and
     tears it down after the test (function scope) or after the run (session scope).
     """
+    if fix.scope == "run":
+        return cast("R | Coroutine[R]", load_run_fixture(fix))
     registry = current_registry()
     if fix.scope == "session":
         return cast("R | Coroutine[R]", registry.load_session(fix))
     return cast("R | Coroutine[R]", registry.load_function(fix))
+
+
+def get_run_fixture_catalog() -> dict[
+    RunFixtureIdentity, Callable[[], Fixture[Any] | AsyncFixture[Any]]
+]:
+    """Return run fixtures registered while selected modules were imported."""
+    return dict(_run_fixture_catalog)

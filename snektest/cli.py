@@ -4,7 +4,7 @@ import sys
 import threading
 import traceback
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
@@ -25,13 +25,16 @@ from snektest.models import (
     BadRequestError,
     CollectionError,
     ErrorResult,
+    ExceptionDiagnostic,
     FailedResult,
     FilterItem,
     PassedResult,
+    RunInfrastructureError,
     TeardownFailure,
     TestResult,
     UnreachableError,
 )
+from snektest.parallel import run_tests_parallel
 from snektest.presenter import print_error
 from snektest.reporting import (
     ConsoleRunReporter,
@@ -51,10 +54,8 @@ def _json_result_status(result: TestResult) -> str:
             return "error"
 
 
-def _json_exception(
-    exc_type: type[BaseException], exc_value: BaseException
-) -> dict[str, str]:
-    return {"type": exc_type.__name__, "message": str(exc_value)}
+def _json_exception(exception: ExceptionDiagnostic) -> dict[str, str]:
+    return {"type": exception.type_name, "message": exception.message}
 
 
 def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
@@ -82,10 +83,10 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
         "status": _json_result_status(result),
     }
     match result.result:
-        case FailedResult(exc_type=exc_type, exc_value=exc_value):
-            entry["exception"] = _json_exception(exc_type, exc_value)
-        case ErrorResult(exc_type=exc_type, exc_value=exc_value):
-            entry["exception"] = _json_exception(exc_type, exc_value)
+        case FailedResult(exception=exception):
+            entry["exception"] = _json_exception(exception)
+        case ErrorResult(exception=exception):
+            entry["exception"] = _json_exception(exception)
         case PassedResult(measurements=measurements):
             if measurements:
                 entry["memory_measurements"] = [
@@ -139,7 +140,7 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
         entry["fixture_teardown_failures"] = [
             {
                 "fixture_name": failure.fixture_name,
-                "exception": _json_exception(failure.exc_type, failure.exc_value),
+                "exception": _json_exception(failure.exception),
             }
             for failure in result.fixture_teardown_failures
         ]
@@ -152,11 +153,19 @@ def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
         "failed": summary.failed,
         "errors": summary.errors,
         "fixture_teardown_failed": summary.fixture_teardown_failed,
+        "run_teardown_failed": summary.run_teardown_failed,
         "session_teardown_failed": summary.session_teardown_failed,
+        "run_teardown_failures": [
+            {
+                "fixture_name": failure.fixture_name,
+                "exception": _json_exception(failure.exception),
+            }
+            for failure in summary.run_teardown_failures
+        ],
         "session_teardown_failures": [
             {
                 "fixture_name": failure.fixture_name,
-                "exception": _json_exception(failure.exc_type, failure.exc_value),
+                "exception": _json_exception(failure.exception),
             }
             for failure in summary.session_teardown_failures
         ],
@@ -207,10 +216,13 @@ class TestRunSummary:
     session_teardown_failed: int
     test_results: list[TestResult]
     session_teardown_failures: list[TeardownFailure]
+    run_teardown_failed: int = 0
+    run_teardown_failures: list[TeardownFailure] = field(default_factory=list)
     benchmark_baseline: BenchmarkBaselineRun | None = None
 
 
 type CliAction = Literal["agent_docs", "help", "list_examples", "show_example"]
+type WorkerCount = int | Literal["auto"]
 
 _DEFAULT_TIMEOUT_SECONDS = 60.0
 
@@ -227,6 +239,7 @@ class CliOptions:
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
     update_benchmark_baseline: str | None = None
+    workers: WorkerCount | None = None
 
 
 @dataclass(frozen=True)
@@ -265,6 +278,7 @@ Options:
   --update-benchmark-baseline PATH
                     Atomically update opted-in benchmarks after a passing run
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
+  -n, --workers N   Run in N worker processes, or use auto
   --timeout SECONDS Override the 60-second async-test timeout
   --no-timeout      Disable the default async-test timeout
   --pdb             Drop into post-mortem debugger on first failure
@@ -357,6 +371,31 @@ def _parse_timeout_flag(
     return timeout, value_index
 
 
+def _parse_workers_flag(
+    argv: list[str], index: int, *, workers_option_seen: bool
+) -> tuple[WorkerCount, int] | ParseError:
+    """Parse one positive worker count or the exact value `auto`."""
+    if workers_option_seen:
+        return ParseError("Only one -n or --workers option is supported")
+    consumed = _consume_flag_value(argv, index, argv[index])
+    if isinstance(consumed, ParseError):
+        return consumed
+    raw_value, value_index = consumed
+    if raw_value == "auto":
+        return "auto", value_index
+    try:
+        workers = int(raw_value)
+    except ValueError:
+        return ParseError(
+            f"Invalid --workers value: `{raw_value}`. Expected a positive integer or auto."
+        )
+    if workers <= 0:
+        return ParseError(
+            f"Invalid --workers value: `{raw_value}`. Must be a positive integer."
+        )
+    return workers, value_index
+
+
 def _print_cli_action(options: CliOptions) -> int:
     output = ""
     if options.action == "help":
@@ -378,7 +417,9 @@ def _print_cli_action(options: CliOptions) -> int:
     return 0
 
 
-def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0911, PLR0912, PLR0915
+def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
+    argv: list[str],
+) -> CliOptions | ParseError:
     """Parse argv into CliOptions, or a ParseError on invalid usage.
 
     Pure: never prints. The caller renders any ParseError once. Value-taking
@@ -400,6 +441,8 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
     timeout_option_seen = False
     update_benchmark_baseline: str | None = None
+    workers: WorkerCount | None = None
+    workers_option_seen = False
     filters: list[str] = []
     duplicate_action = ParseError("Only one help/docs/examples command is supported")
 
@@ -456,6 +499,14 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
                 )
             timeout = None
             timeout_option_seen = True
+        elif arg in {"-n", "--workers"}:
+            parsed_workers = _parse_workers_flag(
+                argv, index, workers_option_seen=workers_option_seen
+            )
+            if isinstance(parsed_workers, ParseError):
+                return parsed_workers
+            workers, index = parsed_workers
+            workers_option_seen = True
         elif arg.startswith("-"):
             return ParseError(f"Invalid option: `{arg}`")
         else:
@@ -470,6 +521,12 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
         return ParseError(
             "Cannot combine help/docs/examples commands with test filters or baseline options"
         )
+    if pdb_on_failure and workers is not None:
+        return ParseError(
+            "Cannot combine --pdb with --workers; rerun without --workers to debug locally"
+        )
+    if not capture_output and json_output:
+        return ParseError("Cannot combine -s with --json-output")
     if action is None and not filters:
         filters.append(".")
 
@@ -484,6 +541,7 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
         update_benchmark_baseline=update_benchmark_baseline,
+        workers=workers,
     )
 
 
@@ -496,7 +554,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
-) -> tuple[list[TestResult], list[TeardownFailure]]:
+) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
     queue = TestsQueue()
     collection_exception: list[BaseException] = []
 
@@ -514,7 +572,11 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
     producer_thread.start()
 
     try:
-        test_results, session_teardown_failures = await run_tests(
+        (
+            test_results,
+            session_teardown_failures,
+            run_teardown_failures,
+        ) = await run_tests(
             queue=queue,
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
@@ -528,7 +590,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
         if collection_exception:
             raise collection_exception[0]
 
-    return test_results, session_teardown_failures
+    return test_results, session_teardown_failures, run_teardown_failures
 
 
 def exit_code_from_summary(summary: TestRunSummary) -> int:
@@ -536,6 +598,7 @@ def exit_code_from_summary(summary: TestRunSummary) -> int:
         summary.failed > 0
         or summary.errors > 0
         or summary.fixture_teardown_failed > 0
+        or summary.run_teardown_failed > 0
         or summary.session_teardown_failed > 0
     )
     return 1 if has_failures else 0
@@ -550,6 +613,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
+    workers: WorkerCount | None = None,
 ) -> TestRunSummary:
     """Run tests and return structured results instead of printing.
 
@@ -566,16 +630,46 @@ async def run_tests_programmatic(  # noqa: PLR0913
     """
     if mark is not None and not _is_valid_mark_value(mark):
         raise BadRequestError(_invalid_mark_message(mark))
+    if workers is not None and (
+        isinstance(workers, bool)
+        or not (workers == "auto" or isinstance(workers, int))
+        or (isinstance(workers, int) and workers <= 0)
+    ):
+        msg = "workers must be a positive integer, 'auto', or None"
+        raise BadRequestError(msg)
 
-    test_results, session_teardown_failures = await _run_tests_with_producer_thread(
-        filter_items,
-        capture_output=capture_output,
-        pdb_on_failure=pdb_on_failure,
-        mark=mark,
-        timeout=timeout,
-        reporter=reporter or NullRunReporter(),
-        benchmark_baseline=benchmark_baseline,
-    )
+    selected_reporter = reporter or NullRunReporter()
+    if workers is None:
+        (
+            test_results,
+            session_teardown_failures,
+            run_teardown_failures,
+        ) = await _run_tests_with_producer_thread(
+            filter_items,
+            capture_output=capture_output,
+            pdb_on_failure=pdb_on_failure,
+            mark=mark,
+            timeout=timeout,
+            reporter=selected_reporter,
+            benchmark_baseline=benchmark_baseline,
+        )
+    else:
+        if pdb_on_failure:
+            msg = "Cannot combine pdb_on_failure with workers"
+            raise BadRequestError(msg)
+        (
+            test_results,
+            session_teardown_failures,
+            run_teardown_failures,
+        ) = await run_tests_parallel(
+            filter_items,
+            capture_output=capture_output,
+            mark=mark,
+            reporter=selected_reporter,
+            timeout=timeout,
+            workers=workers,
+            benchmark_baseline=benchmark_baseline,
+        )
 
     return TestRunSummary(
         total_tests=len(test_results),
@@ -585,7 +679,9 @@ async def run_tests_programmatic(  # noqa: PLR0913
         fixture_teardown_failed=sum(
             1 for r in test_results if r.fixture_teardown_failures
         ),
+        run_teardown_failed=len(run_teardown_failures),
         session_teardown_failed=len(session_teardown_failures),
+        run_teardown_failures=run_teardown_failures,
         test_results=test_results,
         session_teardown_failures=session_teardown_failures,
     )
@@ -649,6 +745,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
                 timeout=options.timeout,
                 reporter=reporter,
                 benchmark_baseline=benchmark_baseline,
+                workers=options.workers,
             ),
         )
     except asyncio.CancelledError:
@@ -708,7 +805,7 @@ def main() -> None:
     sys.exit(main_inner(async_runner=async_runner))
 
 
-def main_inner(
+def main_inner(  # noqa: PLR0911
     *,
     async_runner: Callable[[Coroutine[object, object, int]], int],
     argv: list[str] | None = None,
@@ -725,6 +822,9 @@ def main_inner(
         return 2
     except BadRequestError as e:
         print_error(f"Bad request error: {e}")
+        return 2
+    except RunInfrastructureError as e:
+        print_error(f"Run infrastructure error: {e}")
         return 2
     except UnreachableError as e:
         print_error(f"Internal error: {e}")

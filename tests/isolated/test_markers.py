@@ -4,7 +4,6 @@ import asyncio
 import json
 import tempfile
 from collections.abc import Callable
-from io import StringIO
 from pathlib import Path
 from typing import Any, cast
 
@@ -21,7 +20,7 @@ from snektest.cli import (
 )
 from snektest.collection import TestsQueue, load_tests_from_file
 from snektest.models import FilterItem, PassedResult, TestName, TestResult
-from snektest.utils import get_test_function_markers
+from snektest.utils import get_test_function_markers, get_test_function_mutex
 
 MarkerDecorator = Callable[[Any], Any]
 
@@ -72,6 +71,26 @@ def test_marker_literal_values() -> None:
         pass
 
     assert_eq(get_test_function_markers(test_marked), ("slow",))
+
+
+@test()
+def test_mutex_is_stored_independently_from_markers() -> None:
+    @test(mark="medium", mutex="database:bulk-user")
+    def test_marked() -> None:
+        pass
+
+    assert_eq(get_test_function_markers(test_marked), ("medium",))
+    assert_eq(get_test_function_mutex(test_marked), "database:bulk-user")
+
+
+@test()
+def test_mutex_rejects_empty_untrimmed_and_non_string_values() -> None:
+    with assert_raises(TypeError):
+        _ = test(mutex="")
+    with assert_raises(TypeError):
+        _ = test(mutex=" shared")
+    with assert_raises(TypeError):
+        _ = test(mutex=1)  # ty: ignore[no-matching-overload]
 
 
 @test()
@@ -171,10 +190,10 @@ def test_json_output_includes_markers() -> None:
         duration=0.5,
         result=PassedResult(),
         markers=("fast",),
-        captured_output=StringIO(""),
-        fixture_teardown_failures=[],
+        captured_output="",
+        fixture_teardown_failures=(),
         fixture_teardown_output=None,
-        warnings=[],
+        warnings=(),
     )
     summary = TestRunSummary(
         total_tests=1,
@@ -182,7 +201,9 @@ def test_json_output_includes_markers() -> None:
         failed=0,
         errors=0,
         fixture_teardown_failed=0,
+        run_teardown_failed=0,
         session_teardown_failed=0,
+        run_teardown_failures=[],
         test_results=[test_result],
         session_teardown_failures=[],
     )
