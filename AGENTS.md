@@ -218,6 +218,25 @@ out tracemalloc's own allocations and never stops tracing it did not start.
   result line by the presenter, and appear under `memory_measurements` in
   `--json-output`.
 
+### Performance Benchmarks
+
+`assert_benchmark(median_below=..., p95_below=..., rounds=100, warmup=10)` is a
+context-manager assertion for sync or async timing budgets in seconds. At least
+one of the median or p95 budgets is required. Setup goes before the context;
+timed work loops over `timing.rounds`, a stateful iterator of warmup plus
+measured iterations. It reports min, median, nearest-rank p95, mean, and
+population standard deviation, and uses strict `<` for each configured budget.
+GC is suspended only during measured rounds by default. Optional `name=` values
+identify multiple timed regions in console and JSON output. Benchmark contexts
+cannot overlap because concurrent regions distort timings and process-wide GC
+state.
+
+The normal `--timeout` bounds the complete async test, not an individual round;
+it cannot interrupt synchronous or CPU-bound work. Passing measurements flow
+through `benchmark.py` into `PassedResult.benchmarks`, the console result line,
+and `benchmark_measurements` in JSON output. Stored baselines and cross-machine
+normalization are deferred.
+
 ### Type Checking Configuration
 
 The project uses ty with every available rule set to `error`, plus strict equality

@@ -1,6 +1,7 @@
 from rich.console import Console
 
 from snektest.models import (
+    BenchmarkMeasurement,
     ErrorResult,
     FailedResult,
     MemoryMeasurement,
@@ -15,6 +16,8 @@ console = Console()
 
 _BYTE_UNITS = ("B", "KB", "MB", "GB", "TB")
 _BYTES_PER_UNIT = 1024
+_MICROSECOND = 0.000001
+_MILLISECOND = 0.001
 
 
 def humanize_bytes(num_bytes: float) -> str:
@@ -63,6 +66,48 @@ def _format_measurements(measurements: tuple[MemoryMeasurement, ...]) -> str:
     return "  " + "  ".join(non_empty)
 
 
+def _humanize_seconds(seconds: float) -> str:
+    """Render seconds with a compact unit suited to benchmark timings."""
+    if seconds < _MICROSECOND:
+        return f"{seconds * 1_000_000_000:.1f}ns"
+    if seconds < _MILLISECOND:
+        return f"{seconds * 1_000_000:.1f}us"
+    if seconds < 1:
+        return f"{seconds * 1_000:.1f}ms"
+    return f"{seconds:.2f}s"
+
+
+def _format_benchmark(benchmark: BenchmarkMeasurement) -> str:
+    """Render one benchmark's statistics and configured budgets."""
+    label = "benchmark" if benchmark.name is None else f"benchmark[{benchmark.name}]"
+    median = f"median={_humanize_seconds(benchmark.median_seconds)}"
+    if benchmark.median_budget_seconds is not None:
+        median += f" (<{_humanize_seconds(benchmark.median_budget_seconds)})"
+    p95 = f"p95={_humanize_seconds(benchmark.p95_seconds)}"
+    if benchmark.p95_budget_seconds is not None:
+        p95 += f" (<{_humanize_seconds(benchmark.p95_budget_seconds)})"
+    round_word = "round" if benchmark.rounds == 1 else "rounds"
+    warmup_word = "warmup" if benchmark.warmup == 1 else "warmups"
+    return " ".join(
+        (
+            label,
+            f"min={_humanize_seconds(benchmark.min_seconds)}",
+            median,
+            p95,
+            f"mean={_humanize_seconds(benchmark.mean_seconds)}",
+            f"stddev={_humanize_seconds(benchmark.stddev_seconds)}",
+            f"({benchmark.rounds} {round_word}, {benchmark.warmup} {warmup_word})",
+        )
+    )
+
+
+def _format_benchmarks(benchmarks: tuple[BenchmarkMeasurement, ...]) -> str:
+    """Join benchmark statistics into an OK-line suffix."""
+    if not benchmarks:
+        return ""
+    return "  " + "  ".join(_format_benchmark(benchmark) for benchmark in benchmarks)
+
+
 def print_error(exc: str) -> None:
     """Print an error message in red."""
     console.print(exc, markup=False, style="red")
@@ -77,9 +122,9 @@ def print_test_result_to_console(console: Console, result: TestResult) -> None:
         soft_wrap=True,
     )
     match result.result:
-        case PassedResult(measurements=measurements):
+        case PassedResult(measurements=measurements, benchmarks=benchmarks):
             console.print(
-                f"OK ({result.duration:.2f}s){_format_measurements(measurements)}",
+                f"OK ({result.duration:.2f}s){_format_measurements(measurements)}{_format_benchmarks(benchmarks)}",
                 highlight=False,
                 style="green",
                 markup=False,

@@ -140,6 +140,27 @@ class TestName:
 
 
 @dataclass(frozen=True)
+class BenchmarkMeasurement:
+    """Timing statistics for the measured rounds of one benchmark test.
+
+    Durations and optional budgets are seconds. `p95_seconds` uses the
+    nearest-rank percentile, and `stddev_seconds` is the population standard
+    deviation across measured rounds.
+    """
+
+    name: str | None
+    rounds: int
+    warmup: int
+    min_seconds: float
+    median_seconds: float
+    p95_seconds: float
+    mean_seconds: float
+    stddev_seconds: float
+    median_budget_seconds: float | None
+    p95_budget_seconds: float | None
+
+
+@dataclass(frozen=True)
 class MemoryMeasurement:
     """One `assert_memory` result: measured numbers plus the budgets that gated them.
 
@@ -159,6 +180,7 @@ class MemoryMeasurement:
 @dataclass(frozen=True)
 class PassedResult:
     measurements: tuple[MemoryMeasurement, ...] = ()
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
 
 
 type TestFunction = Callable[..., Coroutine[None] | None]
