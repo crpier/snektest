@@ -191,7 +191,7 @@ class FixtureRegistry:
         async def wrapper() -> R:
             return result
 
-        return wrapper()
+        return cast("Coroutine[R]", wrapper())
 
     async def teardown_function_fixtures(self) -> list[TeardownFailure]:
         """Tear down active function fixtures in first-in-last-out order."""

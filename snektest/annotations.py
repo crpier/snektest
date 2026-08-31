@@ -1,10 +1,12 @@
+"""Shared type aliases, fixture handles, and validated path annotations."""
+
 import contextlib
 from collections.abc import AsyncGenerator, Callable, Generator
 from collections.abc import Coroutine as _Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Annotated, Any, Literal, NewType
+from typing import Annotated, Any, Literal, NewType, override
 
 from pydantic import (
     GetCoreSchemaHandler,
@@ -121,9 +123,11 @@ class PyFileType:
             raise PydanticCustomError(err_type, msg)
         return path
 
+    @override
     def __hash__(self) -> int:
         return hash(self.__class__.__name__)
 
 
-PyFilePath = Annotated[NewType("PyFile", Path), PyFileType()]
+PyFile = NewType("PyFile", Path)
+PyFilePath = Annotated[PyFile, PyFileType()]
 validate_PyFilePath = TypeAdapter[PyFilePath](PyFilePath).validate_python

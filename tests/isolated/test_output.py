@@ -1,3 +1,5 @@
+"""Tests for output capture and breakpoint integration."""
+
 from __future__ import annotations
 
 import sys
@@ -97,8 +99,8 @@ def test_stdin_proxy_covers_proxy_methods_and_properties() -> None:
 
 def _set_breakpoint_hooks(hook: Callable[..., Any]) -> Callable[[], None]:
     original_hook = sys.__breakpointhook__
-    sys.__breakpointhook__ = hook
-    sys.breakpointhook = hook
+    sys.__breakpointhook__ = hook  # ty: ignore[invalid-assignment]
+    sys.breakpointhook = hook  # ty: ignore[invalid-assignment]
 
     def restore() -> None:
         sys.__breakpointhook__ = original_hook
@@ -115,7 +117,7 @@ def test_breakpoint_custom_hook() -> None:
         _ = (args, kwargs)
         called.append("custom")
 
-    sys.breakpointhook = custom_hook
+    sys.breakpointhook = custom_hook  # ty: ignore[invalid-assignment]
     try:
         with capture_output():
             breakpoint()

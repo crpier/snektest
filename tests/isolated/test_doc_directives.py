@@ -1,4 +1,4 @@
-"""Unit tests for snektest-doc directive parsing (no pyright spawn).
+"""Unit tests for snektest-doc directive parsing (no ty spawn).
 
 The parser is private (``_parse_directives``); it is exercised through the
 public :func:`extract_blocks` entry point that drives it.
@@ -28,32 +28,32 @@ def test_bare_flag_directive() -> None:
 @test()
 def test_pinned_rule_only() -> None:
     """``=rule`` routes to expected_diagnostics with line None, not the flags."""
-    block = _block_with("expect-type-error=reportArgumentType")
+    block = _block_with("expect-type-error=invalid-argument-type")
     assert_eq(block.directives, frozenset())
     assert_eq(
         block.expected_diagnostics,
-        (ExpectedDiagnostic(rule="reportArgumentType", line=None),),
+        (ExpectedDiagnostic(rule="invalid-argument-type", line=None),),
     )
 
 
 @test()
 def test_pinned_rule_and_line() -> None:
     """``=rule@line`` captures a 1-based line."""
-    block = _block_with("expect-type-error=reportArgumentType@3")
+    block = _block_with("expect-type-error=invalid-argument-type@3")
     assert_eq(
         block.expected_diagnostics,
-        (ExpectedDiagnostic(rule="reportArgumentType", line=3),),
+        (ExpectedDiagnostic(rule="invalid-argument-type", line=3),),
     )
 
 
 @test()
 def test_mixed_flag_and_pinned() -> None:
     """A flag and a pinned expectation can coexist in one comment."""
-    block = _block_with("skip-run, expect-type-error=reportCallIssue@5")
+    block = _block_with("skip-run, expect-type-error=no-matching-overload@5")
     assert_eq(block.directives, frozenset({"skip-run"}))
     assert_eq(
         block.expected_diagnostics,
-        (ExpectedDiagnostic(rule="reportCallIssue", line=5),),
+        (ExpectedDiagnostic(rule="no-matching-overload", line=5),),
     )
 
 
@@ -69,7 +69,7 @@ def test_empty_rule_rejected() -> None:
 def test_non_integer_line_rejected() -> None:
     """A non-integer line component is an error."""
     with assert_raises(ValueError) as exc:
-        _ = _block_with("expect-type-error=reportArgumentType@x")
+        _ = _block_with("expect-type-error=invalid-argument-type@x")
     assert_eq("must be an integer" in str(exc.exception), True)
 
 
@@ -77,7 +77,7 @@ def test_non_integer_line_rejected() -> None:
 def test_zero_line_rejected() -> None:
     """Lines are 1-based; 0 is rejected."""
     with assert_raises(ValueError) as exc:
-        _ = _block_with("expect-type-error=reportArgumentType@0")
+        _ = _block_with("expect-type-error=invalid-argument-type@0")
     assert_eq("must be >= 1" in str(exc.exception), True)
 
 
@@ -85,7 +85,7 @@ def test_zero_line_rejected() -> None:
 def test_skip_typecheck_with_pin_rejected() -> None:
     """A pinned expectation under skip-typecheck would never run, so it raises."""
     with assert_raises(ValueError) as exc:
-        _ = _block_with("skip-typecheck, expect-type-error=reportCallIssue@5")
+        _ = _block_with("skip-typecheck, expect-type-error=no-matching-overload@5")
     assert_eq("skip-typecheck cannot be combined" in str(exc.exception), True)
 
 

@@ -241,7 +241,7 @@ def test_assert_is_not_none_passes() -> None:
 def test_assert_is_not_none_fails() -> None:
     """Test assert_is_not_none fails with None."""
     with assert_raises(AssertionFailure):
-        _ = assert_is_not_none(None)  # pyright: ignore[reportUnknownVariableType]
+        _ = assert_is_not_none(None)
 
 
 @test()
@@ -362,7 +362,7 @@ def test_assert_isinstance_passes() -> None:
     """Test assert_isinstance with correct type."""
     _ = assert_isinstance(1, int)
     _ = assert_isinstance("hello", str)
-    _ = assert_isinstance([1, 2], list)  # pyright: ignore[reportUnknownVariableType]
+    _ = assert_isinstance([1, 2], list)
 
 
 @test()
