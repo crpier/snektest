@@ -28,6 +28,7 @@ from snektest.assertions import (
     assert_true,
     fail,
 )
+from snektest.benchmark import assert_benchmark
 from snektest.decorators import Marker, SearchStrategy
 from snektest.decorators import fixture as fixture
 from snektest.decorators import load_fixture as load_fixture
@@ -41,6 +42,7 @@ __all__ = [
     "Param",
     "Scope",
     "UnreachableError",
+    "assert_benchmark",
     "assert_eq",
     "assert_false",
     "assert_ge",

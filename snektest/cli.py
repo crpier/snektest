@@ -58,7 +58,7 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
             entry["exception"] = _json_exception(exc_type, exc_value)
         case ErrorResult(exc_type=exc_type, exc_value=exc_value):
             entry["exception"] = _json_exception(exc_type, exc_value)
-        case PassedResult(measurements=measurements):
+        case PassedResult(measurements=measurements, benchmarks=benchmarks):
             if measurements:
                 entry["memory_measurements"] = [
                     {
@@ -69,6 +69,22 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
                         "slope_budget": measurement.slope_budget,
                     }
                     for measurement in measurements
+                ]
+            if benchmarks:
+                entry["benchmark_measurements"] = [
+                    {
+                        "name": benchmark.name,
+                        "rounds": benchmark.rounds,
+                        "warmup": benchmark.warmup,
+                        "min_seconds": benchmark.min_seconds,
+                        "median_seconds": benchmark.median_seconds,
+                        "p95_seconds": benchmark.p95_seconds,
+                        "mean_seconds": benchmark.mean_seconds,
+                        "stddev_seconds": benchmark.stddev_seconds,
+                        "median_budget_seconds": benchmark.median_budget_seconds,
+                        "p95_budget_seconds": benchmark.p95_budget_seconds,
+                    }
+                    for benchmark in benchmarks
                 ]
     if result.fixture_teardown_failures:
         entry["fixture_teardown_failures"] = [

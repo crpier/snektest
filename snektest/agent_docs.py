@@ -69,6 +69,13 @@ def test_needs_parentheses() -> None:
   `rounds >= 10` for a `slope_below` leak check). At least one budget is
   required — a budgetless call is a type error. `m.peak_bytes` /
   `m.growth_slope` stay readable after the block. Cannot be nested.
+- `assert_benchmark(median_below=..., p95_below=..., rounds=..., warmup=...)`
+  asserts a sync or async region's typical and/or tail duration in seconds. At
+  least one budget is required. Put setup before the context and loop timed work
+  over `timing.rounds`. It reports min/median/p95/mean/stddev; GC is suspended
+  during measured rounds unless `disable_gc=False`. Use `name=` to distinguish
+  multiple timed regions in one test. Benchmark contexts cannot overlap because
+  concurrent regions distort timings and process-wide GC state.
 - Mark every test. This is the recommended way to use snektest.
 - Use `mark="fast"` for in-memory tests with no IO, threads, or subprocesses.
 - Use `mark="medium"` for tests that use local IO or threads.
@@ -115,6 +122,25 @@ def test_no_leak() -> None:
     _ = m.peak_bytes
 ```
 
+## Benchmarks
+
+Assert async latency without starting another event loop:
+
+```python
+import asyncio
+
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+async def test_async_checkpoint_latency() -> None:
+    with assert_benchmark(
+        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            await asyncio.sleep(0)
+```
+
 ## Copyable examples
 
 List bundled examples:
@@ -129,6 +155,7 @@ Print one example:
 snektest --example basic
 snektest --example fixtures
 snektest --example async
+snektest --example benchmark
 snektest --example memory
 snektest --example parametrize
 ```
@@ -137,6 +164,7 @@ snektest --example parametrize
 EXAMPLE_FILES: dict[str, str] = {
     "async": "async_tests.py",
     "basic": "basic_test.py",
+    "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
     "memory": "memory.py",
     "parametrize": "parametrize.py",

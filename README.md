@@ -261,6 +261,68 @@ Async tests fail if they finish with tasks they created still pending. Snektest
 cancels and awaits those tasks so they cannot contaminate later tests. Await
 background work before returning from a test.
 
+### Performance Benchmarks
+
+Use `assert_benchmark(median_below=..., p95_below=...)` to assert the typical
+and/or tail latency of a sync or async operation. At least one budget is
+required. Put one-time setup before the context, then loop the timed operation
+over `timing.rounds`. Snektest discards warmups and reports min, median,
+nearest-rank p95, mean, and population standard deviation. Durations and budgets
+are seconds. GC is suspended during measured rounds by default; pass
+`disable_gc=False` to retain normal GC behavior. Benchmark contexts cannot
+overlap because concurrent regions would distort both timings and process-wide
+GC state.
+
+Pass `name=` when a test contains multiple timed regions. Names appear in the
+console and JSON output and give each region a stable identity for external
+result tracking.
+
+```python
+import asyncio
+
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_list_copy_latency() -> None:
+    with assert_benchmark(
+        name="list copy", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            _ = list(range(100))
+
+
+@test(mark="fast")
+async def test_async_checkpoint_latency() -> None:
+    with assert_benchmark(
+        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+    ) as timing:
+        for _ in timing.rounds:
+            await asyncio.sleep(0)
+```
+
+Set only the statistic that should gate the test, or set both. Budgets are
+checked with strict `<` on context exit, raising `AssertionFailure`.
+Statistics remain readable afterwards as `timing.min_seconds`,
+`timing.median_seconds`, `timing.p95_seconds`, `timing.mean_seconds`, and
+`timing.stddev_seconds`. `--timeout` bounds a complete async test, not an
+individual benchmark round; it cannot interrupt synchronous or CPU-bound work.
+Stored baselines are intentionally deferred because timing files produced on a
+different machine are not a meaningful default regression gate.
+
+A budgetless call is rejected by the type checker:
+
+<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+```python
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_needs_a_timing_budget() -> None:
+    with assert_benchmark():
+        pass
+```
+
 ### Parameterized Tests
 
 Run the same test with different inputs:
