@@ -8,6 +8,12 @@ A type-safe, async-native Python testing framework.
 uv add snektest
 ```
 
+OpenAPI contract testing is optional:
+
+```bash
+uv add 'snektest[schema]'
+```
+
 ## Type checking is part of the contract
 
 snektest expects your test code to pass a strict static type checker (such as
@@ -523,6 +529,222 @@ async def test_addition_specific_cases(values: tuple[int, int, int]) -> None:
     a, b, expected = values
     assert_eq(a + b, expected)
 ```
+
+## OpenAPI Contract Testing
+
+Install `snektest[schema]` to generate contract tests from an OpenAPI JSON or
+YAML file. `@test_schema` collects one test per operation, generates
+schema-compliant requests with Hypothesis, and checks that each response is not
+a server error and conforms to its declared response schema.
+
+The decorated function is declarative: its body is not called. It supplies the
+test name, marker, and any `@hypothesis.settings`. A literal target is enough for
+an already-running service:
+
+<!-- snektest-doc: skip-run -->
+```python
+from hypothesis import settings
+
+from snektest import test_schema
+
+
+@settings(max_examples=50, deadline=None)
+@test_schema(
+    "openapi.json",
+    base_url="http://127.0.0.1:8000",
+    headers={"Authorization": "Bearer test-token"},
+    request_timeout=5.0,
+    mark="slow",
+)
+async def test_api_contract() -> None:
+    ...
+```
+
+`base_url` and `headers` may also be fixture handles. This lets a session fixture
+start a service on an ephemeral port before Schemathesis sends requests:
+
+<!-- snektest-doc: skip-run -->
+```python
+from collections.abc import AsyncGenerator
+
+from snektest import fixture, test_schema
+
+
+@fixture(scope="session")
+async def api_url() -> AsyncGenerator[str]:
+    # Start the service here and tear it down after yield.
+    yield "http://127.0.0.1:8123"
+
+
+@test_schema("openapi.json", base_url=api_url(), mark="slow")
+async def test_api_contract() -> None:
+    ...
+```
+
+Operation names are regular parameter-case names, such as
+`test_api_contract[GET /users/{user_id}]`, so they can be selected directly from
+the CLI.
+
+For login and token-refresh flows, pass a native Schemathesis auth provider.
+Schemathesis calls `get` in the worker thread, caches its result for five minutes,
+and uses `set` to modify generated cases. Return `None` from `get` to skip auth
+for an operation. Static credentials should continue to use `headers`.
+
+Custom checks are native Schemathesis check functions. They run in addition to
+Snektest's server-error and response-schema checks and should raise
+`AssertionError` when an invariant is violated:
+
+<!-- snektest-doc: skip-run -->
+```python
+from collections.abc import Mapping
+from typing import Protocol
+
+from snektest import test_schema
+
+
+class AuthCase(Protocol):
+    headers: dict[str, str] | None
+
+
+class ContractResponse(Protocol):
+    headers: Mapping[str, object]
+
+
+class TokenAuth:
+    def get(self, case: AuthCase, context: object) -> str:
+        # A real provider may log in or refresh a token here.
+        return "test-token"
+
+    def set(self, case: AuthCase, data: str, context: object) -> None:
+        case.headers = case.headers or {}
+        case.headers["Authorization"] = f"Bearer {data}"
+
+
+def require_request_id(
+    context: object,
+    response: ContractResponse,
+    case: object,
+) -> None:
+    if "x-request-id" not in response.headers:
+        raise AssertionError("response is missing X-Request-ID")
+
+
+@test_schema(
+    "openapi.json",
+    base_url="http://127.0.0.1:8000",
+    auth=TokenAuth,
+    checks=[require_request_id],
+    mark="slow",
+)
+async def test_authenticated_contract() -> None:
+    ...
+```
+
+Use `@test_schema_workflow` to exercise explicit OpenAPI links and inferred
+producer-consumer relationships. A workflow is one Snektest result because
+Hypothesis generates and shrinks the whole operation sequence together:
+
+<!-- snektest-doc: skip-run -->
+```python
+from hypothesis import settings
+
+from snektest import test_schema_workflow
+
+
+@settings(max_examples=50, stateful_step_count=8, deadline=None)
+@test_schema_workflow(
+    "openapi.json",
+    base_url="http://127.0.0.1:8000",
+    mark="slow",
+)
+async def test_api_workflows() -> None:
+    ...
+```
+
+Stateful workflows accept the same `headers`, `auth`, `checks`, timeout, fixture,
+and Hypothesis settings as operation tests. Negative workflow generation and
+GraphQL remain outside this integration. A schema without usable links fails during
+collection with guidance; malformed links identify the source operation,
+response status, link name, and missing or invalid target. Workflow failures
+include the minimized method, path, and response-status sequence in both console
+and JSON output. Credentials, query values, and request bodies are omitted from
+that sequence.
+
+### Negative Requests
+
+Set `generation="negative"` on `@test_schema` to generate requests that
+deliberately violate request schemas. A response passes only when its status is
+an allowed 4xx and that status is documented for the operation. A 2xx means the
+API accepted invalid input; a 5xx remains a server-error failure.
+
+<!-- snektest-doc: skip-run -->
+```python
+from hypothesis import settings
+
+from snektest import SchemaFilter, SchemaOperationSelector, test_schema
+
+
+@settings(max_examples=100, deadline=None)
+@test_schema(
+    "openapi.json",
+    base_url="http://127.0.0.1:8000",
+    generation="negative",
+    expected_statuses={400, 422},
+    operations=SchemaFilter(
+        exclude=(SchemaOperationSelector(path="/health"),)
+    ),
+    mark="slow",
+)
+async def test_invalid_requests() -> None:
+    ...
+```
+
+`expected_statuses` defaults to every 4xx status and must be a non-empty
+collection containing only 4xx integers. Response-schema checks, auth, custom
+checks, operation filters, fixtures, and Hypothesis shrinking continue to apply.
+Negative cases are named like
+`test_invalid_requests[negative POST /users]`. Operations without request
+constraints cannot produce negative cases and report an error suggesting that
+they be removed with `SchemaFilter`.
+
+### Operation Filtering
+
+Use `SchemaFilter` to keep destructive, privileged, deprecated, or unsupported
+operations out of a contract suite. Selector fields are exact matches combined
+with AND; multiple selectors are OR alternatives. Excludes always win over
+includes, and HTTP methods are case-insensitive:
+
+<!-- snektest-doc: skip-run -->
+```python
+from snektest import SchemaFilter, SchemaOperationSelector, test_schema
+
+
+public_operations = SchemaFilter(
+    include=(
+        SchemaOperationSelector(tag="public"),
+        SchemaOperationSelector(path="/health", method="GET"),
+    ),
+    exclude=(
+        SchemaOperationSelector(operation_id="deleteAllUsers"),
+    ),
+    exclude_deprecated=True,
+)
+
+
+@test_schema(
+    "openapi.json",
+    base_url="http://127.0.0.1:8000",
+    operations=public_operations,
+    mark="slow",
+)
+async def test_public_contract() -> None:
+    ...
+```
+
+The same `operations=` filter works with `@test_schema_workflow`. Both the
+producer and consumer must remain selected for a link to be exercised. Selecting
+no operations, or removing one end of every workflow link, fails collection with
+an actionable error instead of running an empty suite.
 
 ## Assertions Reference
 
