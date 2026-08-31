@@ -312,7 +312,7 @@ different machine are not a meaningful default regression gate.
 
 A budgetless call is rejected by the type checker:
 
-<!-- snektest-doc: expect-type-error=reportCallIssue, skip-run -->
+<!-- snektest-doc: expect-type-error=no-matching-overload, skip-run -->
 ```python
 from snektest import assert_benchmark, test
 
