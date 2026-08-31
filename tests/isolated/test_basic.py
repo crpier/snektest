@@ -24,7 +24,7 @@ from snektest.assertions import (
     assert_true,
     fail,
 )
-from snektest.models import AssertionFailure, TestName
+from snektest.models import AssertionFailure, BadRequestError, TestName
 from snektest.utils import (
     get_test_function_params,
     is_test_function,
@@ -125,6 +125,15 @@ def test_param_to_dict_multiple_lists() -> None:
             "b, Y": (params[0][1], params[1][1]),
         },
     )
+
+
+@test()
+def test_param_to_dict_rejects_colliding_case_names() -> None:
+    """Parameter combinations cannot silently overwrite one another."""
+    params = ([Param(value=1, name="same"), Param(value=2, name="same")],)
+
+    with assert_raises(BadRequestError):
+        _ = Param.to_dict(params)
 
 
 @test()

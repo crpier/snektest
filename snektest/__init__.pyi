@@ -84,7 +84,7 @@ __all__ = [
 
 @overload
 def test(
-    *, mark: Marker | None = None
+    *, mark: Marker | None = None, mutex: str | None = None
 ) -> Callable[
     [Callable[[], Coroutine[None] | None]], Callable[[], Coroutine[None] | None]
 ]: ...
@@ -93,6 +93,7 @@ def test[T](
     param: list[Param[T]],
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T], Coroutine[None] | None]], Callable[[T], Coroutine[None] | None]
 ]: ...
@@ -102,6 +103,7 @@ def test[T1, T2](
     param2: list[Param[T2]],
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2], Coroutine[None] | None]],
     Callable[[T1, T2], Coroutine[None] | None],
@@ -110,6 +112,7 @@ def test[T1, T2](
 def test(
     *params: list[Param[Any]],
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
 ]: ...
@@ -119,6 +122,7 @@ def test_hypothesis[T1](
     /,
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1], Coroutine[None] | None]],
     Callable[[], Coroutine[None] | None],
@@ -130,6 +134,7 @@ def test_hypothesis[T1, T2](
     /,
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2], Coroutine[None] | None]],
     Callable[[], Coroutine[None] | None],
@@ -142,6 +147,7 @@ def test_hypothesis[T1, T2, T3](
     /,
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2, T3], Coroutine[None] | None]],
     Callable[[], Coroutine[None] | None],
@@ -155,6 +161,7 @@ def test_hypothesis[T1, T2, T3, T4](
     /,
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2, T3, T4], Coroutine[None] | None]],
     Callable[[], Coroutine[None] | None],
@@ -169,6 +176,7 @@ def test_hypothesis[T1, T2, T3, T4, T5](
     /,
     *,
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2, T3, T4, T5], Coroutine[None] | None]],
     Callable[[], Coroutine[None] | None],
@@ -177,6 +185,7 @@ def test_hypothesis[T1, T2, T3, T4, T5](
 def test_hypothesis(
     *strategies: SearchStrategy[Any],
     mark: Marker | None = None,
+    mutex: str | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],

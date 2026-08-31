@@ -7,7 +7,6 @@ from types import TracebackType
 
 from snektest import (
     assert_eq,
-    assert_is,
     assert_is_not_none,
     assert_isinstance,
     assert_raises,
@@ -19,7 +18,6 @@ from snektest import (
 from snektest.execution import execute_test, run_tests
 from snektest.fixtures import FixtureRegistry, teardown_fixture, use_registry
 from snektest.models import (
-    AssertionFailure,
     BadRequestError,
     ErrorResult,
     FailedResult,
@@ -27,7 +25,6 @@ from snektest.models import (
     TestCase,
     TestFunction,
     TestName,
-    TestTimeoutError,
     UnreachableError,
 )
 
@@ -77,7 +74,7 @@ async def _run_queue(
     def base_resolver(path: Path) -> Path:
         return path.resolve()
 
-    _results, _session_failures = await run_tests(
+    _results, _session_failures, _run_failures = await run_tests(
         queue,
         pdb_on_failure=pdb_on_failure,
         post_mortem=post_mortem or base_post_mortem,
@@ -238,7 +235,7 @@ async def test_execute_test_marks_cancelled_error_as_failed() -> None:
     test_result = await execute_test(_test_case(name, cancelled))
 
     failed = assert_isinstance(test_result.result, FailedResult)
-    assert_eq(failed.exc_type, asyncio.CancelledError)
+    assert_eq(failed.exception.type_name, "CancelledError")
 
 
 @test()
@@ -268,13 +265,14 @@ async def test_run_tests_continues_after_cancelled_test() -> None:
         queue.shutdown()
 
     shutdown_task = asyncio.create_task(shutdown_soon())
-    results, session_failures = await run_tests(queue)
+    results, session_failures, run_failures = await run_tests(queue)
     await shutdown_task
 
     assert_eq(len(results), 2)
     _ = assert_isinstance(results[0].result, FailedResult)
     _ = assert_isinstance(results[1].result, PassedResult)
     assert_eq(len(session_failures), 0)
+    assert_eq(len(run_failures), 0)
 
 
 @test()
@@ -292,8 +290,8 @@ async def test_execute_test_fails_and_cancels_pending_task() -> None:
     result = await execute_test(_test_case(name, leaks_task))
 
     failure = assert_isinstance(result.result, FailedResult)
-    assert_is(failure.exc_type, AssertionFailure)
-    assert_eq(str(failure.exc_value), "async test leaked 1 pending task")
+    assert_eq(failure.exception.type_name, "AssertionFailure")
+    assert_eq(failure.exception.message, "async test leaked 1 pending task")
     assert_eq([task.cancelled() for task in leaked_tasks], [True])
 
 
@@ -307,7 +305,7 @@ async def test_execute_test_times_out_hanging_async_test() -> None:
     result = await execute_test(_test_case(name, hangs), timeout=0.01)
 
     error = assert_isinstance(result.result, ErrorResult)
-    assert_is(error.exc_type, TestTimeoutError)
+    assert_eq(error.exception.type_name, "TestTimeoutError")
 
 
 @test()
@@ -328,7 +326,7 @@ async def test_timed_out_test_still_runs_function_teardown() -> None:
         result = await execute_test(_test_case(name, hangs), timeout=0.01)
 
     error = assert_isinstance(result.result, ErrorResult)
-    assert_is(error.exc_type, TestTimeoutError)
+    assert_eq(error.exception.type_name, "TestTimeoutError")
     assert_eq(torn_down, [True])
 
 
@@ -343,7 +341,7 @@ async def test_user_raised_timeout_error_is_not_reported_as_test_timeout() -> No
     result = await execute_test(_test_case(name, raises_timeout), timeout=10)
 
     error = assert_isinstance(result.result, ErrorResult)
-    assert_is(error.exc_type, TimeoutError)
+    assert_eq(error.exception.type_name, "TimeoutError")
 
 
 @test()

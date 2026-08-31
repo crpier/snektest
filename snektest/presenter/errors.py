@@ -7,7 +7,6 @@ from rich.console import Console
 from rich.text import Text
 
 from snektest.models import (
-    AssertionFailure,
     ErrorResult,
     FailedResult,
     TeardownFailure,
@@ -97,26 +96,21 @@ def _print_result_details(
     result: TestResult,
     outcome: FailedResult | ErrorResult,
 ) -> None:
-    exc_type = outcome.exc_type
-    exc_value = outcome.exc_value
-    traceback = outcome.traceback
-
-    if isinstance(exc_value, AssertionFailure):
+    exception = outcome.exception
+    if exception.assertion is not None:
         render_traceback(
             console,
-            exc_type,
-            exc_value,
-            traceback,
+            exception,
             show_exception_line=False,
         )
-        render_assertion_failure(console, exc_value)
+        render_assertion_failure(console, exception.assertion)
     else:
-        render_traceback(console, exc_type, exc_value, traceback)
+        render_traceback(console, exception)
 
     _print_optional_output(
         console,
         title="Captured output:",
-        output=result.captured_output.getvalue(),
+        output=result.captured_output,
     )
     _print_optional_output(
         console,
@@ -173,9 +167,7 @@ def _print_fixture_teardown_failures(
             )
             render_traceback(
                 console,
-                teardown_failure.exc_type,
-                teardown_failure.exc_value,
-                teardown_failure.traceback,
+                teardown_failure.exception,
             )
             console.print()
 
@@ -196,22 +188,36 @@ def _print_session_teardown_failures(
         )
         render_traceback(
             console,
-            teardown_failure.exc_type,
-            teardown_failure.exc_value,
-            teardown_failure.traceback,
+            teardown_failure.exception,
         )
         console.print()
 
 
-def print_failures(
+def _print_run_teardown_failures(
+    console: Console, run_teardown_failures: list[TeardownFailure]
+) -> None:
+    for teardown_failure in run_teardown_failures:
+        console.rule(
+            f"Run fixture teardown: {teardown_failure.fixture_name}",
+            style="bold red",
+        )
+        render_traceback(console, teardown_failure.exception)
+        console.print()
+
+
+def print_failures(  # noqa: PLR0913
     console: Console,
     test_results: list[TestResult],
+    run_teardown_failures: list[TeardownFailure] | None = None,
+    run_teardown_output: str | None = None,
     session_teardown_failures: list[TeardownFailure] | None = None,
     session_teardown_output: str | None = None,
 ) -> None:
     """Print all test failures, fixture teardown failures, and session teardown failures."""
     if session_teardown_failures is None:
         session_teardown_failures = []
+    if run_teardown_failures is None:
+        run_teardown_failures = []
 
     groups = _collect_failure_groups(test_results)
 
@@ -219,6 +225,7 @@ def print_failures(
         not groups.failures
         and not groups.errors
         and not groups.fixture_teardown_failures
+        and not run_teardown_failures
         and not session_teardown_failures
     ):
         return
@@ -231,6 +238,7 @@ def print_failures(
     _print_test_errors(console, groups.errors)
     _print_fixture_teardown_failures(console, groups.fixture_teardown_failures)
     _print_session_teardown_failures(console, session_teardown_failures)
+    _print_run_teardown_failures(console, run_teardown_failures)
 
     if session_teardown_output and (groups.failures or groups.errors):
         console.print()
@@ -239,3 +247,9 @@ def print_failures(
             style="bold yellow",
         )
         console.print(session_teardown_output, markup=False, highlight=False)
+    if run_teardown_output and (
+        groups.failures or groups.errors or run_teardown_failures
+    ):
+        console.print()
+        console.rule("Output from run fixture lifecycle", style="bold yellow")
+        console.print(run_teardown_output, markup=False, highlight=False)

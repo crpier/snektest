@@ -13,6 +13,11 @@ from typing import Any, cast
 from snektest.benchmark import collect_benchmarks
 from snektest.benchmark_baseline import BenchmarkBaseline
 from snektest.collection import TestsQueue
+from snektest.diagnostics import (
+    LiveDiagnosticStore,
+    snapshot_exception,
+    use_live_diagnostic_store,
+)
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
 from snektest.memory import collect_measurements
 from snektest.models import (
@@ -128,9 +133,11 @@ async def execute_test(  # noqa: C901
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
             result = FailedResult(
-                exc_type=cast("type[BaseException]", exc_type),
-                exc_value=cast("BaseException", exc_value),
-                traceback=traceback,
+                exception=snapshot_exception(
+                    cast("type[BaseException]", exc_type),
+                    cast("BaseException", exc_value),
+                    traceback,
+                ),
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
@@ -141,9 +148,11 @@ async def execute_test(  # noqa: C901
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
             result = ErrorResult(
-                exc_type=cast("type[BaseException]", exc_type),
-                exc_value=cast("BaseException", exc_value),
-                traceback=traceback,
+                exception=snapshot_exception(
+                    cast("type[BaseException]", exc_type),
+                    cast("BaseException", exc_value),
+                    traceback,
+                ),
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
@@ -167,9 +176,11 @@ async def execute_test(  # noqa: C901
             msg = "Baseline configuration error had no traceback. This shouldn't be possible!"
             raise UnreachableError(msg)
         result = ErrorResult(
-            exc_type=type(bad_request),
-            exc_value=bad_request,
-            traceback=traceback,
+            exception=snapshot_exception(
+                type(bad_request),
+                bad_request,
+                traceback,
+            ),
             benchmarks=tuple(benchmark_capture.measurements),
             benchmark_comparisons=tuple(benchmark_capture.comparisons),
         )
@@ -184,10 +195,11 @@ async def execute_test(  # noqa: C901
         duration=duration,
         result=result,
         markers=test_case.markers,
-        captured_output=output_buffer,
-        fixture_teardown_failures=fixture_teardown_failures,
+        captured_output=output_buffer.getvalue(),
+        fixture_teardown_failures=tuple(fixture_teardown_failures),
         fixture_teardown_output=fixture_teardown_output_value,
-        warnings=captured_warnings,
+        ordinal=test_case.ordinal,
+        warnings=tuple(captured_warnings),
     )
 
 
@@ -202,9 +214,20 @@ async def teardown_session_fixtures(
     return session_teardown_failures, output_value
 
 
+async def teardown_run_fixtures(
+    *, capture_output: bool
+) -> tuple[list[TeardownFailure], str | None]:
+    """Tear down host-owned run fixtures and return failures and output."""
+    with maybe_capture_output(capture_output) as (teardown_output, _):
+        failures = await current_registry().teardown_run_fixtures()
+    return failures, teardown_output.getvalue() or None
+
+
 def has_any_failures(
-    test_results: list[TestResult], session_teardown_failures: list[TeardownFailure]
-) -> tuple[bool, bool, bool]:
+    test_results: list[TestResult],
+    session_teardown_failures: list[TeardownFailure],
+    run_teardown_failures: list[TeardownFailure] | None = None,
+) -> tuple[bool, bool, bool, bool]:
     """Check for test failures, fixture failures, and session failures."""
     has_test_failures = any(
         isinstance(result.result, (FailedResult, ErrorResult))
@@ -214,10 +237,12 @@ def has_any_failures(
         result.fixture_teardown_failures for result in test_results
     )
     has_session_teardown_failures = len(session_teardown_failures) > 0
+    has_run_teardown_failures = bool(run_teardown_failures)
     return (
         has_test_failures,
         has_fixture_teardown_failures,
         has_session_teardown_failures,
+        has_run_teardown_failures,
     )
 
 
@@ -285,6 +310,7 @@ def _traceback_for_file(
 def _maybe_debug_test_result(
     test_result: TestResult,
     *,
+    live_diagnostics: LiveDiagnosticStore,
     pdb_on_failure: bool,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
     resolver: Callable[[Path], Path] = Path.resolve,
@@ -292,16 +318,24 @@ def _maybe_debug_test_result(
     if not pdb_on_failure:
         return False
     if isinstance(test_result.result, (FailedResult, ErrorResult)):
+        live_traceback = live_diagnostics.traceback_for(test_result.result.exception)
+        if live_traceback is None:
+            return False
         traceback = _traceback_for_file(
-            test_result.result.traceback,
+            live_traceback,
             preferred_file=test_result.name.file_path,
             resolver=resolver,
         )
         post_mortem(traceback)
         return True
     if test_result.fixture_teardown_failures:
+        live_traceback = live_diagnostics.traceback_for(
+            test_result.fixture_teardown_failures[0].exception
+        )
+        if live_traceback is None:
+            return False
         traceback = _traceback_for_file(
-            test_result.fixture_teardown_failures[0].traceback,
+            live_traceback,
             preferred_file=test_result.name.file_path,
             resolver=resolver,
         )
@@ -313,12 +347,18 @@ def _maybe_debug_test_result(
 def _maybe_debug_session_teardown(
     session_teardown_failures: list[TeardownFailure],
     *,
+    live_diagnostics: LiveDiagnosticStore,
     pdb_on_failure: bool,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
 ) -> bool:
     if not pdb_on_failure or not session_teardown_failures:
         return False
-    post_mortem(session_teardown_failures[0].traceback)
+    live_traceback = live_diagnostics.traceback_for(
+        session_teardown_failures[0].exception
+    )
+    if live_traceback is None:
+        return False
+    post_mortem(live_traceback)
     return True
 
 
@@ -333,7 +373,7 @@ async def run_tests(  # noqa: PLR0913
     reporter: RunReporter | None = None,
     resolver: Callable[[Path], Path] = Path.resolve,
     benchmark_baseline: BenchmarkBaseline | None = None,
-) -> tuple[list[TestResult], list[TeardownFailure]]:
+) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
     """Run all tests from the queue and report progress through a small seam."""
     if reporter is None:
         reporter = ConsoleRunReporter()
@@ -341,8 +381,13 @@ async def run_tests(  # noqa: PLR0913
     total_duration = time.monotonic()
     test_results: list[TestResult] = []
     session_teardown_failures: list[TeardownFailure] = []
+    run_teardown_failures: list[TeardownFailure] = []
     pdb_triggered = False
-    with use_registry(FixtureRegistry()):
+    live_diagnostics = LiveDiagnosticStore()
+    with (
+        use_live_diagnostic_store(live_diagnostics),
+        use_registry(FixtureRegistry()),
+    ):
         try:
             while True:
                 test_case = await queue.get()
@@ -356,6 +401,7 @@ async def run_tests(  # noqa: PLR0913
                 reporter.test_finished(test_result)
                 if not pdb_triggered and _maybe_debug_test_result(
                     test_result,
+                    live_diagnostics=live_diagnostics,
                     pdb_on_failure=pdb_on_failure,
                     post_mortem=post_mortem,
                     resolver=resolver,
@@ -370,8 +416,12 @@ async def run_tests(  # noqa: PLR0913
                     session_teardown_failures,
                     session_output,
                 ) = await teardown_session_fixtures(capture_output=capture_output)
+                run_teardown_failures, run_output = await teardown_run_fixtures(
+                    capture_output=capture_output
+                )
                 if not pdb_triggered and _maybe_debug_session_teardown(
                     session_teardown_failures,
+                    live_diagnostics=live_diagnostics,
                     pdb_on_failure=pdb_on_failure,
                     post_mortem=post_mortem,
                 ):
@@ -381,7 +431,12 @@ async def run_tests(  # noqa: PLR0913
                     has_test_failures,
                     has_fixture_teardown_failures,
                     has_session_teardown_failures,
-                ) = has_any_failures(test_results, session_teardown_failures)
+                    has_run_teardown_failures,
+                ) = has_any_failures(
+                    test_results,
+                    session_teardown_failures,
+                    run_teardown_failures,
+                )
 
                 session_output_for_display = None
                 if session_output and (
@@ -392,9 +447,13 @@ async def run_tests(  # noqa: PLR0913
                     session_output_for_display = session_output
 
                 reporter.run_finished(
+                    run_teardown_failures=run_teardown_failures,
+                    run_teardown_output=(
+                        run_output if run_output and has_run_teardown_failures else None
+                    ),
                     test_results=test_results,
                     session_teardown_failures=session_teardown_failures,
                     session_teardown_output=session_output_for_display,
                     total_duration=time.monotonic() - total_duration,
                 )
-    return test_results, session_teardown_failures
+    return test_results, session_teardown_failures, run_teardown_failures

@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Generator
-from io import StringIO
+from dataclasses import replace
 from pathlib import Path
 
 from rich.console import Console
@@ -23,6 +23,7 @@ from snektest import (
 from snektest.benchmark import BenchmarkContext
 from snektest.benchmark_baseline import BenchmarkBaseline, MachineFingerprint
 from snektest.cli import TestRunSummary, build_json_summary
+from snektest.diagnostics import snapshot_exception
 from snektest.execution import execute_test
 from snektest.fixtures import FixtureRegistry, use_registry
 from snektest.models import (
@@ -110,10 +111,10 @@ def _test_result(
             benchmark_comparisons=comparisons,
         ),
         markers=("medium",),
-        captured_output=StringIO(),
-        fixture_teardown_failures=[],
+        captured_output="",
+        fixture_teardown_failures=(),
         fixture_teardown_output=None,
-        warnings=[],
+        warnings=(),
     )
 
 
@@ -234,10 +235,10 @@ async def test_regression_becomes_failure_with_measurement_and_comparison() -> N
                         )
                     ),
                     markers=("medium",),
-                    captured_output=StringIO(),
-                    fixture_teardown_failures=[],
+                    captured_output="",
+                    fixture_teardown_failures=(),
                     fixture_teardown_output=None,
-                    warnings=[],
+                    warnings=(),
                 )
             ],
             filter_items=[FilterItem(str(test_file))],
@@ -273,7 +274,7 @@ async def test_regression_becomes_failure_with_measurement_and_comparison() -> N
         )
 
     failure = assert_isinstance(test_result.result, FailedResult)
-    assert_in("regressed +20.0%", str(failure.exc_value))
+    assert_in("regressed +20.0%", failure.exception.message)
     assert_eq(len(failure.benchmarks), 1)
     assert_eq(failure.benchmark_comparisons[0].verdict, "regressed")
 
@@ -765,11 +766,11 @@ async def test_teardown_failure_is_reported_with_baseline_bad_request() -> None:
             test_result = await execute_test(test_case, benchmark_baseline=baseline)
 
     error = assert_isinstance(test_result.result, ErrorResult)
-    assert_isinstance(error.exc_value, BadRequestError)
+    assert_eq(error.exception.type_name, "BadRequestError")
     assert_eq(len(test_result.fixture_teardown_failures), 1)
     assert_in(
         "teardown failed",
-        str(test_result.fixture_teardown_failures[0].exc_value),
+        test_result.fixture_teardown_failures[0].exception.message,
     )
 
 
@@ -825,9 +826,7 @@ def test_failed_comparison_is_in_json_output() -> None:
         ),
         duration=0.1,
         result=FailedResult(
-            exc_type=AssertionFailure,
-            exc_value=failure,
-            traceback=traceback,
+            exception=snapshot_exception(AssertionFailure, failure, traceback),
             benchmarks=(benchmark_comparison,),
             benchmark_comparisons=(
                 BenchmarkComparison(
@@ -845,10 +844,10 @@ def test_failed_comparison_is_in_json_output() -> None:
             ),
         ),
         markers=("fast",),
-        captured_output=StringIO(),
-        fixture_teardown_failures=[],
+        captured_output="",
+        fixture_teardown_failures=(),
         fixture_teardown_output=None,
-        warnings=[],
+        warnings=(),
     )
     summary = TestRunSummary(
         total_tests=1,
@@ -913,11 +912,13 @@ def test_failed_result_line_keeps_benchmark_diagnostics() -> None:
         Path("tests/test_perf.py"),
         _measurement(median_seconds=0.001),
     )
-    result.result = FailedResult(
-        exc_type=AssertionFailure,
-        exc_value=failure,
-        traceback=traceback,
-        benchmarks=result.result.benchmarks,
+    passed = assert_isinstance(result.result, PassedResult)
+    result = replace(
+        result,
+        result=FailedResult(
+            exception=snapshot_exception(AssertionFailure, failure, traceback),
+            benchmarks=passed.benchmarks,
+        ),
     )
     console = Console(record=True)
 

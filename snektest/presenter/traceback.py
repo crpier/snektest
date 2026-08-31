@@ -1,68 +1,73 @@
-import pathlib
-from collections.abc import Callable
-from types import TracebackType
-
 from rich.console import Console
 from rich.markup import escape
 from rich.syntax import Syntax
 
-import snektest
+from snektest.models import ExceptionDiagnostic
 
 
-def render_traceback(  # noqa: PLR0913
+def _render_single_traceback(
     console: Console,
-    exc_type: type[BaseException],
-    exc_value: BaseException,
-    traceback: object,
+    exception: ExceptionDiagnostic,
     *,
-    show_exception_line: bool = True,
-    open_path: Callable[[str], list[str]] | None = None,
+    show_exception_line: bool,
 ) -> None:
-    """Render a traceback without a box, using Rich for syntax highlighting."""
     console.print("[bold]Traceback[/bold] [dim](most recent call last):[/dim]")
 
-    tb = traceback
-    snektest_path = str(snektest.__file__).rsplit("/", 1)[0]
-
-    while tb:
-        if not isinstance(tb, TracebackType):
-            break
-
-        frame = tb.tb_frame
-        lineno = tb.tb_lineno
-        filename = frame.f_code.co_filename
-        name = frame.f_code.co_name
-
-        if not filename.startswith(snektest_path):
+    for frame in exception.frames:
+        console.print(
+            f'  File "[cyan]{frame.filename}[/cyan]", line {frame.lineno}, in [yellow]{frame.function_name}[/yellow]'
+        )
+        if frame.source_line is not None:
             console.print(
-                f'  File "[cyan]{filename}[/cyan]", line {lineno}, in [yellow]{name}[/yellow]'
+                Syntax(
+                    frame.source_line,
+                    "python",
+                    theme="ansi_dark",
+                    line_numbers=False,
+                    padding=(0, 0, 0, 4),
+                    word_wrap=True,
+                )
             )
 
-            try:
-                if open_path is None:
-                    with pathlib.Path(filename).open(encoding="utf-8") as f:
-                        lines = f.readlines()
-                else:
-                    lines = open_path(filename)
-                if 0 <= lineno - 1 < len(lines):
-                    code_line = lines[lineno - 1].rstrip()
-                    syntax = Syntax(
-                        code_line,
-                        "python",
-                        theme="ansi_dark",
-                        line_numbers=False,
-                        padding=(0, 0, 0, 4),
-                        word_wrap=True,
-                    )
-                    console.print(syntax)
-            except (OSError, IndexError):
-                pass
+    if show_exception_line:
+        console.print(
+            f"[red bold]{exception.type_name}[/red bold]: {escape(exception.message)}"
+        )
+        for note in exception.notes:
+            console.print(escape(note), style="red")
 
-        tb = tb.tb_next
 
-    if not show_exception_line:
-        return
+def render_traceback(
+    console: Console,
+    exception: ExceptionDiagnostic,
+    *,
+    show_exception_line: bool = True,
+) -> None:
+    """Render immutable exception chains and groups with captured source."""
+    if exception.cause is not None:
+        render_traceback(console, exception.cause)
+        console.print()
+        console.print(
+            "[dim]The above exception was the direct cause of the following exception:[/dim]"
+        )
+        console.print()
+    elif exception.context is not None and not exception.suppress_context:
+        render_traceback(console, exception.context)
+        console.print()
+        console.print(
+            "[dim]During handling of the above exception, another exception occurred:[/dim]"
+        )
+        console.print()
 
-    exc_name = exc_type.__name__
-    exc_msg = str(exc_value)
-    console.print(f"[red bold]{exc_name}[/red bold]: {escape(exc_msg)}")
+    _render_single_traceback(
+        console,
+        exception,
+        show_exception_line=show_exception_line,
+    )
+    for index, grouped_exception in enumerate(exception.exceptions, start=1):
+        console.print()
+        console.rule(
+            f"Exception group member {index}",
+            style="dim red",
+        )
+        render_traceback(console, grouped_exception)

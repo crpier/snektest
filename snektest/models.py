@@ -1,12 +1,12 @@
 """Domain models for collected tests, results, filters, and framework errors."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum, auto
-from io import StringIO
+from enum import StrEnum
 from itertools import product
 from pathlib import Path
-from types import TracebackType
 from typing import Any, Literal, override
 
 from snektest.annotations import Coroutine
@@ -19,6 +19,10 @@ class ArgsError(BaseException): ...
 
 
 class UnreachableError(BaseException): ...
+
+
+class RunInfrastructureError(BaseException):
+    """A child-process failure that prevents the selected run from completing."""
 
 
 class BadRequestError(BaseException):
@@ -124,7 +128,7 @@ class FilterItem:
 
 
 # Set kw_only so we can write attributes in the order they appear
-@dataclass(kw_only=True)
+@dataclass(frozen=True, kw_only=True)
 class TestName:
     file_path: Path
     func_name: str
@@ -220,6 +224,8 @@ class TestCase:
     function: TestFunction
     markers: tuple[str, ...]
     name: TestName
+    mutex: str | None = None
+    ordinal: int = 0
     param_values: tuple[object, ...] = ()
 
     def call(self) -> Coroutine[None] | None:
@@ -246,50 +252,126 @@ class Param[T]:
         combinations = product(*params)
         result: dict[str, tuple[Param[Any], ...]] = {}
         for combination in combinations:
-            result[", ".join([param.name for param in combination])] = combination
+            case_name = ", ".join([param.name for param in combination])
+            if case_name in result:
+                msg = f"Parameterized case name `{case_name}` is not unique"
+                raise BadRequestError(msg)
+            result[case_name] = combination
         return result
 
 
-class Scope(Enum):
-    FUNCTION = auto()
-    SESSION = auto()
+class Scope(StrEnum):
+    """Named fixture scopes accepted by `@fixture` alongside string literals."""
+
+    FUNCTION = "function"
+    RUN = "run"
+    SESSION = "session"
+
+
+@dataclass(frozen=True)
+class DiagnosticFrame:
+    """One user-code frame captured before a live traceback is released."""
+
+    filename: str
+    function_name: str
+    lineno: int
+    source_line: str | None
+
+
+@dataclass(frozen=True)
+class DiagnosticRepr:
+    """Bounded representation of a value that cannot cross a process directly."""
+
+    text: str
+
+    @override
+    def __repr__(self) -> str:
+        return self.text
+
+
+@dataclass(frozen=True)
+class DiagnosticList:
+    """Immutable snapshot of a list used for assertion diff rendering."""
+
+    items: tuple[DiagnosticValue, ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticDict:
+    """Immutable snapshot of a dictionary used for assertion diff rendering."""
+
+    entries: tuple[tuple[DiagnosticValue, DiagnosticValue], ...]
+
+
+type DiagnosticValue = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | bytes
+    | DiagnosticRepr
+    | DiagnosticList
+    | DiagnosticDict
+)
+
+
+@dataclass(frozen=True)
+class AssertionDiagnostic:
+    """Process-neutral data needed to reproduce assertion presentation."""
+
+    actual: DiagnosticValue | None
+    expected: DiagnosticValue | None
+    kind: Literal["plain", "list", "dict", "multiline_string"]
+    message: str
+
+
+@dataclass(frozen=True)
+class ExceptionDiagnostic:
+    """Immutable exception details safe to retain or send to another process."""
+
+    frames: tuple[DiagnosticFrame, ...]
+    message: str
+    qualified_type_name: str
+    type_name: str
+    assertion: AssertionDiagnostic | None = None
+    cause: ExceptionDiagnostic | None = None
+    context: ExceptionDiagnostic | None = None
+    exceptions: tuple[ExceptionDiagnostic, ...] = ()
+    notes: tuple[str, ...] = ()
+    suppress_context: bool = False
 
 
 @dataclass(frozen=True)
 class FailedResult:
-    exc_type: type[BaseException]
-    exc_value: BaseException
-    traceback: TracebackType
+    exception: ExceptionDiagnostic
     benchmarks: tuple[BenchmarkMeasurement, ...] = ()
     benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
 
 
 @dataclass(frozen=True)
 class ErrorResult:
-    exc_type: type[BaseException]
-    exc_value: BaseException
-    traceback: TracebackType
+    exception: ExceptionDiagnostic
     benchmarks: tuple[BenchmarkMeasurement, ...] = ()
     benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
 
 
 @dataclass(frozen=True)
 class TeardownFailure:
-    """Represents a fixture teardown failure"""
+    """Represent one fixture teardown failure."""
 
+    exception: ExceptionDiagnostic
     fixture_name: str
-    exc_type: type[BaseException]
-    exc_value: BaseException
-    traceback: TracebackType
 
 
-@dataclass
+@dataclass(frozen=True)
 class TestResult:
-    name: TestName
+    captured_output: str
     duration: float
-    result: PassedResult | FailedResult | ErrorResult
-    markers: tuple[str, ...]
-    captured_output: StringIO
-    fixture_teardown_failures: list[TeardownFailure]
+    fixture_teardown_failures: tuple[TeardownFailure, ...]
     fixture_teardown_output: str | None
-    warnings: list[str]
+    markers: tuple[str, ...]
+    name: TestName
+    result: PassedResult | FailedResult | ErrorResult
+    warnings: tuple[str, ...]
+    ordinal: int = 0

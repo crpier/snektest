@@ -57,6 +57,55 @@ def test_parse_cli_args_defaults_to_dot() -> None:
     assert_eq(options.json_output, False)
     assert_eq(options.pdb_on_failure, False)
     assert_eq(options.mark, None)
+    assert_eq(options.workers, None)
+
+
+@test()
+def test_parse_cli_args_workers_accepts_count_and_auto() -> None:
+    count_options = assert_isinstance(parse_cli_args(["-n", "3", "."]), CliOptions)
+    auto_options = assert_isinstance(
+        parse_cli_args(["--workers", "auto", "."]), CliOptions
+    )
+
+    assert_eq(count_options.workers, 3)
+    assert_eq(auto_options.workers, "auto")
+
+
+@test()
+def test_parse_cli_args_workers_rejects_invalid_and_repeated_values() -> None:
+    zero = assert_isinstance(parse_cli_args(["-n", "0"]), ParseError)
+    invalid = assert_isinstance(parse_cli_args(["--workers", "many"]), ParseError)
+    repeated = assert_isinstance(
+        parse_cli_args(["-n", "2", "--workers", "3"]), ParseError
+    )
+
+    assert_in("positive", zero.message)
+    assert_in("positive integer or auto", invalid.message)
+    assert_in("Only one", repeated.message)
+
+
+@test()
+def test_parse_cli_args_rejects_workers_with_pdb() -> None:
+    result = assert_isinstance(
+        parse_cli_args(["--pdb", "--workers", "1", "."]), ParseError
+    )
+
+    assert_in("rerun without --workers", result.message)
+
+
+@test()
+def test_parse_cli_args_rejects_uncaptured_json_output() -> None:
+    result = assert_isinstance(parse_cli_args(["-s", "--json-output", "."]), ParseError)
+
+    assert_in("Cannot combine -s", result.message)
+
+
+@test()
+async def test_programmatic_workers_rejects_non_positive_and_bool() -> None:
+    with assert_raises(BadRequestError):
+        _ = await run_tests_programmatic([], workers=0)
+    with assert_raises(BadRequestError):
+        _ = await run_tests_programmatic([], workers=True)
 
 
 @test()
@@ -447,8 +496,8 @@ def test_timed_region() -> None:
 
 
 @test(mark="medium")
-async def test_overlapping_filters_execute_each_test_once() -> None:
-    """Alternate filter spellings neither re-import nor duplicate a test."""
+async def test_overlapping_filters_repeat_tests_without_reimporting() -> None:
+    """Each filter occurrence runs while the selected module imports once."""
     with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
         temporary_path = Path(temporary_directory)
         test_file = temporary_path / "test_overlapping_filters.py"
@@ -476,8 +525,8 @@ def test_once() -> None:
         )
         import_count = int(import_count_file.read_text())
 
-    assert_eq(summary.total_tests, 1)
-    assert_eq(summary.passed, 1)
+    assert_eq(summary.total_tests, 2)
+    assert_eq(summary.passed, 2)
     assert_eq(import_count, 1)
 
 
@@ -560,10 +609,10 @@ async def test_run_script_json_output_includes_markers() -> None:
             duration=0.0,
             result=PassedResult(),
             markers=("fast",),
-            captured_output=StringIO(""),
-            fixture_teardown_failures=[],
+            captured_output="",
+            fixture_teardown_failures=(),
             fixture_teardown_output=None,
-            warnings=[],
+            warnings=(),
         )
         return type(
             "Summary",
@@ -573,7 +622,9 @@ async def test_run_script_json_output_includes_markers() -> None:
                 "failed": 0,
                 "errors": 0,
                 "fixture_teardown_failed": 0,
+                "run_teardown_failed": 0,
                 "session_teardown_failed": 0,
+                "run_teardown_failures": [],
                 "session_teardown_failures": [],
                 "test_results": [test_result],
             },

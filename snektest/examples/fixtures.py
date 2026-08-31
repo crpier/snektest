@@ -21,6 +21,12 @@ async def config_fixture() -> AsyncGenerator[dict[str, str]]:
     config.clear()
 
 
+@fixture(scope="run")
+def service_descriptor() -> Generator[tuple[str, int]]:
+    """Publish inert connection details from one command-owned resource."""
+    yield ("127.0.0.1", 5432)
+
+
 @test(mark="fast")
 def test_function_fixture() -> None:
     """Function fixtures are loaded first and torn down for each test."""
@@ -35,3 +41,11 @@ async def test_session_fixture() -> None:
     config = await load_fixture(config_fixture())
 
     assert_eq(config["environment"], "test")
+
+
+@test(mark="fast", mutex="example-service")
+def test_run_fixture() -> None:
+    """Run descriptors are copied into the process executing this test."""
+    host, port = load_fixture(service_descriptor())
+
+    assert_eq((host, port), ("127.0.0.1", 5432))

@@ -18,9 +18,11 @@ class RunReporter(Protocol):
     def test_finished(self, test_result: TestResult) -> None:
         """Observe one completed test result."""
 
-    def run_finished(
+    def run_finished(  # noqa: PLR0913
         self,
         *,
+        run_teardown_failures: list[TeardownFailure],
+        run_teardown_output: str | None,
         test_results: list[TestResult],
         session_teardown_failures: list[TeardownFailure],
         session_teardown_output: str | None,
@@ -35,9 +37,11 @@ class ConsoleRunReporter:
     def test_finished(self, test_result: TestResult) -> None:
         print_test_result(test_result)
 
-    def run_finished(
+    def run_finished(  # noqa: PLR0913
         self,
         *,
+        run_teardown_failures: list[TeardownFailure],
+        run_teardown_output: str | None,
         test_results: list[TestResult],
         session_teardown_failures: list[TeardownFailure],
         session_teardown_output: str | None,
@@ -45,11 +49,14 @@ class ConsoleRunReporter:
     ) -> None:
         print_failures(
             test_results,
+            run_teardown_failures=run_teardown_failures,
+            run_teardown_output=run_teardown_output,
             session_teardown_failures=session_teardown_failures,
             session_teardown_output=session_teardown_output,
         )
         print_summary(
             test_results,
+            run_teardown_failures=run_teardown_failures,
             session_teardown_failures=session_teardown_failures,
             total_duration=total_duration,
         )
@@ -61,15 +68,19 @@ class NullRunReporter:
     def test_finished(self, test_result: TestResult) -> None:
         _ = test_result
 
-    def run_finished(
+    def run_finished(  # noqa: PLR0913
         self,
         *,
+        run_teardown_failures: list[TeardownFailure],
+        run_teardown_output: str | None,
         test_results: list[TestResult],
         session_teardown_failures: list[TeardownFailure],
         session_teardown_output: str | None,
         total_duration: float,
     ) -> None:
         _ = (
+            run_teardown_failures,
+            run_teardown_output,
             test_results,
             session_teardown_failures,
             session_teardown_output,
@@ -79,6 +90,8 @@ class NullRunReporter:
 
 @dataclass(frozen=True)
 class _DeferredRunFinished:
+    run_teardown_failures: list[TeardownFailure]
+    run_teardown_output: str | None
     test_results: list[TestResult]
     session_teardown_failures: list[TeardownFailure]
     session_teardown_output: str | None
@@ -95,15 +108,19 @@ class DeferredRunReporter:
     def test_finished(self, test_result: TestResult) -> None:
         self._reporter.test_finished(test_result)
 
-    def run_finished(
+    def run_finished(  # noqa: PLR0913
         self,
         *,
+        run_teardown_failures: list[TeardownFailure],
+        run_teardown_output: str | None,
         test_results: list[TestResult],
         session_teardown_failures: list[TeardownFailure],
         session_teardown_output: str | None,
         total_duration: float,
     ) -> None:
         self._run_finished = _DeferredRunFinished(
+            run_teardown_failures=run_teardown_failures,
+            run_teardown_output=run_teardown_output,
             test_results=test_results,
             session_teardown_failures=session_teardown_failures,
             session_teardown_output=session_teardown_output,
@@ -116,6 +133,8 @@ class DeferredRunReporter:
         if run_finished is None:
             return
         self._reporter.run_finished(
+            run_teardown_failures=run_finished.run_teardown_failures,
+            run_teardown_output=run_finished.run_teardown_output,
             test_results=run_finished.test_results,
             session_teardown_failures=run_finished.session_teardown_failures,
             session_teardown_output=run_finished.session_teardown_output,

@@ -5,27 +5,49 @@ from typing import Any, cast
 
 from rich.console import Console
 
-from snektest.models import AssertionFailure
+from snektest.models import (
+    AssertionDiagnostic,
+    AssertionFailure,
+    DiagnosticDict,
+    DiagnosticList,
+    DiagnosticValue,
+)
+
+
+def _display_value(value: DiagnosticValue) -> Any:
+    """Restore immutable assertion snapshots as display-only collections."""
+    if isinstance(value, DiagnosticList):
+        return [_display_value(item) for item in value.items]
+    if isinstance(value, DiagnosticDict):
+        return {
+            _display_value(key): _display_value(item) for key, item in value.entries
+        }
+    return value
 
 
 def render_assertion_failure(
     console: Console,
-    exc: AssertionFailure,
+    exc: AssertionFailure | AssertionDiagnostic,
     *,
     ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
 ) -> None:
     """Pretty-print an AssertionFailure using Rich, styled like pytest."""
     actual = exc.actual
     expected = exc.expected
+    message = exc.args[0] if isinstance(exc, AssertionFailure) else exc.message
+
+    if isinstance(exc, AssertionDiagnostic):
+        actual = _display_value(actual) if actual is not None else None
+        expected = _display_value(expected) if expected is not None else None
 
     if isinstance(actual, list) and isinstance(expected, list):
-        console.print(f"E       {exc.args[0]}", style="red", markup=False)
+        console.print(f"E       {message}", style="red", markup=False)
         # I'm just casting list[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("list[Any]", actual)
         expected = cast("list[Any]", expected)
         render_list_diff(console, actual, expected, ndiff_func=ndiff_func)
     elif isinstance(actual, dict) and isinstance(expected, dict):
-        console.print(f"E       {exc.args[0]}", style="red", markup=False)
+        console.print(f"E       {message}", style="red", markup=False)
         # I'm just casting dict[Unknown] to list[Any] here to please our strict type check rules
         actual = cast("dict[Any, Any]", actual)
         expected = cast("dict[Any, Any]", expected)
@@ -42,7 +64,7 @@ def render_assertion_failure(
             ndiff_func=ndiff_func,
         )
     else:
-        console.print(f"E       {exc.args[0]}", style="red", markup=False)
+        console.print(f"E       {message}", style="red", markup=False)
         return
 
 
