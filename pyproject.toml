@@ -10,10 +10,16 @@ dependencies = [
     "rich>=14.2.0",
 ]
 
+[project.optional-dependencies]
+schema = [
+    "schemathesis>=4.25.2,<4.26",
+]
+
 [dependency-groups]
 dev = [
     "coverage>=7.13.1",
     "ruff>=0.14.5",
+    "schemathesis>=4.25.2,<4.26",
     "ty>=0.0.75",
 ]
 

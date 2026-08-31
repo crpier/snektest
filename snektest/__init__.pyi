@@ -1,5 +1,6 @@
-from collections.abc import Callable
-from typing import Any, overload
+from collections.abc import Callable, Collection, Sequence
+from pathlib import Path
+from typing import Any, Literal, overload
 
 from snektest.annotations import (
     AsyncFixture,
@@ -34,12 +35,22 @@ from snektest.decorators import fixture as fixture
 from snektest.decorators import load_fixture as load_fixture
 from snektest.models import Param, UnreachableError
 from snektest.models import Scope as Scope
+from snektest.schema import (
+    SchemaAuthProvider,
+    SchemaCheck,
+    SchemaFilter,
+    SchemaOperationSelector,
+)
 
 __all__ = [
     "AsyncFixture",
     "Fixture",
     "Marker",
     "Param",
+    "SchemaAuthProvider",
+    "SchemaCheck",
+    "SchemaFilter",
+    "SchemaOperationSelector",
     "Scope",
     "UnreachableError",
     "assert_benchmark",
@@ -67,6 +78,8 @@ __all__ = [
     "load_fixture",
     "test",
     "test_hypothesis",
+    "test_schema",
+    "test_schema_workflow",
 ]
 
 @overload
@@ -167,4 +180,40 @@ def test_hypothesis(
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],
+]: ...
+def test_schema(
+    schema_path: str | Path,
+    *,
+    base_url: str | Fixture[str] | AsyncFixture[str],
+    headers: dict[str, str]
+    | Fixture[dict[str, str]]
+    | AsyncFixture[dict[str, str]]
+    | None = None,
+    auth: type[SchemaAuthProvider] | None = None,
+    checks: Sequence[SchemaCheck] = (),
+    generation: Literal["positive", "negative"] = "positive",
+    expected_statuses: Collection[int] | None = None,
+    operations: SchemaFilter | None = None,
+    request_timeout: float = 10.0,
+    mark: Marker | None = None,
+) -> Callable[
+    [Callable[[], Coroutine[None] | None]],
+    Callable[[], Coroutine[None]],
+]: ...
+def test_schema_workflow(
+    schema_path: str | Path,
+    *,
+    base_url: str | Fixture[str] | AsyncFixture[str],
+    headers: dict[str, str]
+    | Fixture[dict[str, str]]
+    | AsyncFixture[dict[str, str]]
+    | None = None,
+    auth: type[SchemaAuthProvider] | None = None,
+    checks: Sequence[SchemaCheck] = (),
+    operations: SchemaFilter | None = None,
+    request_timeout: float = 10.0,
+    mark: Marker | None = None,
+) -> Callable[
+    [Callable[[], Coroutine[None] | None]],
+    Callable[[], Coroutine[None]],
 ]: ...

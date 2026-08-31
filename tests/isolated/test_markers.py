@@ -123,6 +123,7 @@ def test_unmarked() -> None:
         queue_empty.shutdown()
         with assert_raises(asyncio.QueueShutDown):
             _ = await queue_empty.get()
+        await asyncio.sleep(0)
 
 
 @test()

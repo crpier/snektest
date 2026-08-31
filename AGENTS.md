@@ -172,6 +172,58 @@ each list built from `Param(value=..., name=...)`. `Param.to_dict()` creates all
 combinations using `itertools.product`, keyed by param names. Each combination
 becomes a separate test execution.
 
+### OpenAPI Contract Testing
+
+`test_schema` (`schema.py`) is an optional Schemathesis integration installed
+with `snektest[schema]`. It loads a local OpenAPI JSON/YAML document during
+collection and expands it into one ordinary parameterized Snektest case per
+operation. Each operation runs a positive Schemathesis strategy through the
+existing Hypothesis worker-thread path, using Schemathesis's synchronous HTTP
+transport so the main event loop remains available to fixture-started services.
+
+The integration always runs `not_a_server_error` and
+`response_schema_conformance`; native Schemathesis checks passed through
+`checks=` run in addition. A native `AuthProvider` class passed through `auth=`
+supports cached login and token-refresh flows. Schemathesis raises contract
+failures as a `BaseExceptionGroup`, so the adapter translates them to
+`AssertionFailure` without changing core result classification. Network and
+configuration exceptions remain errors. Literal targets and fixture-backed
+`base_url` / `headers` values are resolved before the worker starts. The
+decorated function is metadata-only and is not called.
+
+`test_schema_workflow` builds Schemathesis's Hypothesis state machine from
+explicit OpenAPI links and inferred producer-consumer relationships. It reports
+one Snektest result for the complete generated workflow so Hypothesis can shrink
+the operation sequence as a unit. It shares the operation decorator's auth,
+checks, fixtures, timeout, marker, and Hypothesis-settings behavior. Construction
+rejects schemas with no usable transitions and translates Schemathesis's grouped
+link-validation errors to `BadRequestError` with source/status/link/target
+context. Schemathesis clears Hypothesis's state-machine notes, so the adapter
+records the final minimized method/path/status sequence itself and appends it to
+the `AssertionFailure`; credentials, query values, and bodies are intentionally
+excluded so console and JSON diagnostics are safe to retain.
+
+Both schema decorators accept a `SchemaFilter`, applied to the loaded schema
+before operation collection or state-machine construction. Each
+`SchemaOperationSelector` combines its exact path/method/tag/operation-ID fields
+with AND semantics; include and exclude tuples are OR sets, excludes take
+precedence, and deprecated operations may be excluded globally. Operation tests
+collect through Schemathesis's filter-aware `get_all_operations()` result
+iterator rather than its unfiltered mapping interface. Empty operation selections
+and workflow selections that retain no complete producer-consumer link raise
+`BadRequestError` during collection.
+
+`test_schema(generation="negative")` passes Schemathesis's negative generation
+mode into each selected operation strategy. It enables
+`negative_data_rejection` and `status_code_conformance` in addition to the
+always-on server-error and response-schema checks. `expected_statuses` defaults
+to all 4xx statuses and may narrow that non-empty set; 2xx acceptance,
+undocumented statuses, configured-status mismatches, and all 5xx responses are
+failures. Negative case names are prefixed with `negative`. Hypothesis
+`Unsatisfiable` from an operation with no negatable request constraints is
+translated to `SchemaGenerationError` with filtering guidance. Stateful
+workflows remain positive-only.
+
 ### Summary Output
 
 Console summary lines intentionally keep exception details compact: only the first

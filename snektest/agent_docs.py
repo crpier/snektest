@@ -95,6 +95,8 @@ def test_needs_parentheses() -> None:
 - CLI runs bound every async test to 60 seconds by default. Override the limit with `snektest --timeout SECONDS` or disable it with `snektest --no-timeout`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout.
 - Timeout interactions: for async `@test_hypothesis`, the timeout bounds the whole property run (not each example) and the Hypothesis worker thread keeps running after it fires, so use Hypothesis's own `deadline`/`max_examples` for per-example limits and `--no-timeout` if the complete run must remain unbounded; sync property tests are not bounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
 - Explicit test-name and parameter-case filters fail if the requested test or case is not found.
+- Install `snektest[schema]` and use `@test_schema("openapi.json", base_url=..., mark="slow")` for positive OpenAPI contract tests. It collects one test per operation and checks for server errors and response-schema violations. Native Schemathesis auth providers and custom checks may be passed through `auth=` and `checks=`. Use `@test_schema_workflow` for linked stateful sequences. Decorated function bodies are declarative and are not called; `base_url` and `headers` may be fixture handles.
+- Set `generation="negative"` on `@test_schema` to generate schema-violating requests. A passing response must use an allowed, documented 4xx status; `expected_statuses` defaults to all 4xx responses. Accepted 2xx responses and all 5xx responses fail. Negative stateful workflows are not supported.
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked.
 
 ## Memory budgets
@@ -121,6 +123,75 @@ def test_no_leak() -> None:
             scratch.append(bytearray(32 * 1024))
     _ = m.peak_bytes
 ```
+
+## OpenAPI contracts
+
+The schema integration is an optional extra. A target URL may be supplied by a
+session fixture so service setup remains under snektest's fixture lifecycle:
+
+<!-- snektest-doc: skip-run -->
+```python
+from collections.abc import AsyncGenerator
+
+from hypothesis import settings
+
+from snektest import fixture, test_schema
+
+
+@fixture(scope="session")
+async def api_url() -> AsyncGenerator[str]:
+    yield "http://127.0.0.1:8123"
+
+
+@settings(max_examples=50, deadline=None)
+@test_schema("openapi.json", base_url=api_url(), mark="slow")
+async def test_api_contract() -> None:
+    ...
+```
+
+Each operation is independently selectable, for example
+`test_api_contract[GET /users/{user_id}]`. Custom checks run in addition to the
+server-error and response-schema checks. Pass a native Schemathesis auth provider
+class through `auth=` for login and refresh flows.
+
+Use `@test_schema_workflow` to generate sequences from explicit OpenAPI links and
+inferred producer-consumer relationships:
+
+<!-- snektest-doc: skip-run -->
+```python
+from hypothesis import settings
+
+from snektest import test_schema_workflow
+
+
+@settings(max_examples=50, stateful_step_count=8, deadline=None)
+@test_schema_workflow(
+    "openapi.json",
+    base_url="http://127.0.0.1:8123",
+    mark="slow",
+)
+async def test_api_workflows() -> None:
+    ...
+```
+
+A workflow is one Snektest result so Hypothesis can shrink the whole operation
+sequence. It accepts the same auth, checks, fixtures, timeout, marker, and
+Hypothesis settings as `@test_schema`. Linkless schemas and malformed links fail
+during collection with guidance. A workflow failure includes its minimized
+method/path/status sequence in console and JSON output without credentials,
+query values, or request bodies.
+
+Negative operation cases are named like
+`test_invalid_requests[negative POST /users]`. Auth, checks, filters, fixtures,
+response validation, and Hypothesis settings still apply. An operation with no
+negatable request constraints reports an error and should be excluded with
+`SchemaFilter`.
+
+Filter operations before case or workflow generation with
+`operations=SchemaFilter(...)`. A `SchemaOperationSelector` matches exact path,
+method, tag, and operation-ID fields with AND semantics; selector tuples are OR
+alternatives, excludes win, and `exclude_deprecated=True` removes deprecated
+operations. Workflow filters must retain both ends of at least one link.
 
 ## Benchmarks
 
@@ -158,6 +229,7 @@ snektest --example async
 snektest --example benchmark
 snektest --example memory
 snektest --example parametrize
+snektest --example schema
 ```
 """
 
@@ -168,6 +240,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "fixtures": "fixtures.py",
     "memory": "memory.py",
     "parametrize": "parametrize.py",
+    "schema": "schema.py",
 }
 
 

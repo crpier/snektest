@@ -35,12 +35,24 @@ from snektest.decorators import (
 from snektest.models import Param as Param
 from snektest.models import Scope as Scope
 from snektest.models import UnreachableError as UnreachableError
+from snektest.schema import (
+    SchemaAuthProvider,
+    SchemaCheck,
+    SchemaFilter,
+    SchemaOperationSelector,
+    test_schema,
+    test_schema_workflow,
+)
 
 __all__ = [
     "AsyncFixture",
     "Fixture",
     "Marker",
     "Param",
+    "SchemaAuthProvider",
+    "SchemaCheck",
+    "SchemaFilter",
+    "SchemaOperationSelector",
     "Scope",
     "UnreachableError",
     "assert_benchmark",
@@ -68,4 +80,6 @@ __all__ = [
     "load_fixture",
     "test",
     "test_hypothesis",
+    "test_schema",
+    "test_schema_workflow",
 ]
