@@ -9,7 +9,12 @@ from snektest import assert_benchmark, test
 def test_list_copy_latency() -> None:
     """Assert a synchronous operation's median latency."""
     with assert_benchmark(
-        name="list copy", median_below=0.01, rounds=20, warmup=3
+        name="list copy",
+        median_below=0.01,
+        median_regression_below=0.10,
+        regression_noise_floor=0.000001,
+        rounds=20,
+        warmup=3,
     ) as timing:
         for _ in timing.rounds:
             _ = list(range(100))
@@ -19,7 +24,12 @@ def test_list_copy_latency() -> None:
 async def test_async_checkpoint_latency() -> None:
     """Assert async latency directly on snektest's event loop."""
     with assert_benchmark(
-        name="async checkpoint", median_below=0.01, rounds=20, warmup=3
+        name="async checkpoint",
+        median_below=0.01,
+        median_regression_below=0.10,
+        regression_noise_floor=0.000001,
+        rounds=20,
+        warmup=3,
     ) as timing:
         for _ in timing.rounds:
             await asyncio.sleep(0)

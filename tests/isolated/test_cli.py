@@ -128,6 +128,39 @@ def test_parse_cli_args_s_flag_disables_capture() -> None:
 
 
 @test()
+def test_parse_cli_args_benchmark_baseline() -> None:
+    options = parse_cli_args(["--benchmark-baseline", "benchmarks.json", "."])
+    options = assert_isinstance(options, CliOptions)
+
+    assert_eq(options.benchmark_baseline, "benchmarks.json")
+    assert_eq(options.update_benchmark_baseline, None)
+
+
+@test()
+def test_parse_cli_args_update_benchmark_baseline() -> None:
+    options = parse_cli_args(["--update-benchmark-baseline", "benchmarks.json", "."])
+    options = assert_isinstance(options, CliOptions)
+
+    assert_eq(options.benchmark_baseline, None)
+    assert_eq(options.update_benchmark_baseline, "benchmarks.json")
+
+
+@test()
+def test_parse_cli_args_rejects_baseline_mode_conflict() -> None:
+    result = parse_cli_args(
+        [
+            "--benchmark-baseline",
+            "old.json",
+            "--update-benchmark-baseline",
+            "new.json",
+        ]
+    )
+    result = assert_isinstance(result, ParseError)
+
+    assert_in("Only one --benchmark-baseline", result.message)
+
+
+@test()
 def test_parse_cli_args_agent_docs_action() -> None:
     options = parse_cli_args(["--agent-docs"])
     options = assert_isinstance(options, CliOptions)
@@ -289,6 +322,209 @@ def test_one() -> None:
 
     assert_eq(result, 0)
     assert_eq(json.loads(buffer.getvalue())["passed"], 1)
+
+
+@test(mark="medium")
+async def test_run_script_updates_and_compares_benchmark_baseline() -> None:
+    """The non-interactive CLI can create and then enforce a baseline snapshot."""
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        test_file = temporary_path / "test_baseline_cli.py"
+        baseline_path = temporary_path / "benchmarks.json"
+        _ = test_file.write_text(
+            """
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_timed_region() -> None:
+    with assert_benchmark(
+        name="region",
+        median_below=1,
+        median_regression_below=0.01,
+        regression_noise_floor=1,
+        rounds=1,
+        warmup=0,
+    ) as timing:
+        for _ in timing.rounds:
+            pass
+""".lstrip()
+        )
+
+        update_output = StringIO()
+        with contextlib.redirect_stdout(update_output):
+            update_exit = await run_script(
+                [
+                    "--json-output",
+                    "--update-benchmark-baseline",
+                    str(baseline_path),
+                    str(test_file),
+                ]
+            )
+
+        compare_output = StringIO()
+        with contextlib.redirect_stdout(compare_output):
+            compare_exit = await run_script(
+                [
+                    "--json-output",
+                    "--benchmark-baseline",
+                    str(baseline_path),
+                    str(test_file),
+                ]
+            )
+
+    update_json = json.loads(update_output.getvalue())
+    compare_json = json.loads(compare_output.getvalue())
+    assert_eq(update_exit, 0)
+    assert_eq(update_json["benchmark_baseline"]["written"], True)
+    assert_eq(update_json["benchmark_baseline"]["updated_entries"], 1)
+    assert_eq(compare_exit, 0)
+    comparison = compare_json["tests"][0]["benchmark_measurements"][0][
+        "baseline_comparison"
+    ]
+    assert_eq(comparison["verdict"], "passed")
+
+
+@test(mark="medium")
+async def test_json_baseline_error_is_machine_readable() -> None:
+    """Malformed baseline errors do not leak Rich text into JSON mode."""
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        baseline_path = Path(temporary_directory) / "benchmarks.json"
+        _ = baseline_path.write_text('{"schema_version": 2}')
+        output = StringIO()
+
+        with contextlib.redirect_stdout(output):
+            exit_code = await run_script(
+                ["--json-output", "--benchmark-baseline", str(baseline_path), "."]
+            )
+
+    payload = json.loads(output.getvalue())
+    assert_eq(exit_code, 2)
+    assert_eq(payload["error"]["type"], "BadRequestError")
+    assert_in("Invalid benchmark baseline", payload["error"]["message"])
+
+
+@test(mark="medium")
+async def test_update_error_does_not_print_success_summary() -> None:
+    """Persistence must succeed before the console declares the run successful."""
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        test_file = temporary_path / "test_baseline_update_error.py"
+        baseline_path = temporary_path / "benchmarks.json"
+        _ = baseline_path.write_text('{"schema_version": 2}')
+        _ = test_file.write_text(
+            """
+from snektest import assert_benchmark, test
+
+
+@test(mark="fast")
+def test_timed_region() -> None:
+    with assert_benchmark(
+        name="region",
+        median_below=1,
+        median_regression_below=0.10,
+        rounds=1,
+        warmup=0,
+    ) as timing:
+        for _ in timing.rounds:
+            pass
+""".lstrip()
+        )
+        output = StringIO()
+
+        with contextlib.redirect_stdout(output), assert_raises(BadRequestError):
+            _ = await run_script(
+                [
+                    "--update-benchmark-baseline",
+                    str(baseline_path),
+                    str(test_file),
+                ]
+            )
+
+    rendered = output.getvalue()
+    assert_in("OK", rendered)
+    assert_eq("SUMMARY" in rendered, False)
+
+
+@test(mark="medium")
+async def test_overlapping_filters_execute_each_test_once() -> None:
+    """Alternate filter spellings neither re-import nor duplicate a test."""
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        test_file = temporary_path / "test_overlapping_filters.py"
+        import_count_file = temporary_path / "import-count.txt"
+        _ = test_file.write_text(
+            f"""
+from pathlib import Path
+
+from snektest import test
+
+import_count_file = Path({str(import_count_file)!r})
+import_count = int(import_count_file.read_text()) if import_count_file.exists() else 0
+_ = import_count_file.write_text(str(import_count + 1))
+
+
+@test(mark="fast")
+def test_once() -> None:
+    pass
+""".lstrip()
+        )
+        relative_directory = temporary_path.relative_to(Path.cwd())
+
+        summary = await run_tests_programmatic(
+            [FilterItem(str(relative_directory)), FilterItem(str(test_file))]
+        )
+        import_count = int(import_count_file.read_text())
+
+    assert_eq(summary.total_tests, 1)
+    assert_eq(summary.passed, 1)
+    assert_eq(import_count, 1)
+
+
+@test(mark="medium")
+async def test_failed_run_does_not_update_benchmark_baseline() -> None:
+    """An intentional update remains atomic when any test fails."""
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        test_file = temporary_path / "test_failed_baseline_update.py"
+        baseline_path = temporary_path / "benchmarks.json"
+        _ = test_file.write_text(
+            """
+from snektest import assert_benchmark, fail, test
+
+
+@test(mark="fast")
+def test_timed_region() -> None:
+    with assert_benchmark(
+        name="region",
+        median_below=1,
+        median_regression_below=0.10,
+        rounds=1,
+        warmup=0,
+    ) as timing:
+        for _ in timing.rounds:
+            pass
+    fail("not accepted")
+""".lstrip()
+        )
+        output = StringIO()
+
+        with contextlib.redirect_stdout(output):
+            exit_code = await run_script(
+                [
+                    "--json-output",
+                    "--update-benchmark-baseline",
+                    str(baseline_path),
+                    str(test_file),
+                ]
+            )
+
+        baseline_exists = baseline_path.exists()
+
+    payload = json.loads(output.getvalue())
+    assert_eq(exit_code, 1)
+    assert_eq(baseline_exists, False)
+    assert_eq(payload["benchmark_baseline"]["written"], False)
 
 
 @test()

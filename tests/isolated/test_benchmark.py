@@ -27,6 +27,7 @@ from snektest.models import (
     AssertionFailure,
     BadRequestError,
     BenchmarkMeasurement,
+    FailedResult,
     PassedResult,
     TestCase,
     TestName,
@@ -241,6 +242,86 @@ def test_benchmark_rejects_blank_name() -> None:
 
 
 @test(mark="fast")
+def test_regression_gate_requires_stable_name() -> None:
+    """A persisted comparison cannot rely on an unnamed region's call order."""
+    with (
+        assert_raises(BadRequestError),
+        assert_benchmark(
+            median_below=1,
+            median_regression_below=0.1,
+            rounds=1,
+            warmup=0,
+        ) as timing,
+    ):
+        for _ in timing.rounds:
+            pass
+
+
+@test(mark="fast")
+def test_benchmark_rejects_invalid_regression_policy() -> None:
+    """Relative limits and absolute floors must be finite and meaningful."""
+    for regression_limit in (0, -1, float("inf"), float("nan")):
+        with (
+            assert_raises(BadRequestError),
+            assert_benchmark(
+                name="query",
+                median_below=1,
+                median_regression_below=regression_limit,
+                rounds=1,
+                warmup=0,
+            ) as timing,
+        ):
+            for _ in timing.rounds:
+                pass
+
+    with (
+        assert_raises(BadRequestError),
+        assert_benchmark(
+            name="query",
+            median_below=1,
+            regression_noise_floor=0.1,
+            rounds=1,
+            warmup=0,
+        ) as timing,
+    ):
+        for _ in timing.rounds:
+            pass
+
+
+@test(mark="fast")
+async def test_absolute_failure_retains_completed_measurement() -> None:
+    """A complete timing remains reportable when its local budget fails."""
+
+    def benchmark_body() -> None:
+        timing = BenchmarkContext(
+            median_below=0.000001,
+            rounds=1,
+            warmup=0,
+            disable_gc=False,
+            clock=_Clock([0, 1_000]),
+        )
+        with timing:
+            for _ in timing.rounds:
+                pass
+
+    test_result = await execute_test(
+        TestCase(
+            function=benchmark_body,
+            markers=("fast",),
+            name=TestName(
+                file_path=Path("test_benchmark.py"),
+                func_name="benchmark_body",
+                params_part="",
+            ),
+        )
+    )
+
+    failure = assert_isinstance(test_result.result, FailedResult)
+    assert_eq(len(failure.benchmarks), 1)
+    assert_eq(failure.benchmarks[0].median_seconds, 0.000001)
+
+
+@test(mark="fast")
 def test_benchmark_requires_rounds_iterator() -> None:
     """A benchmark block that never loops cannot produce a measurement."""
     with assert_raises(BadRequestError), assert_benchmark(median_below=1):
@@ -281,7 +362,7 @@ def test_benchmark_body_error_does_not_record_measurement() -> None:
             msg = "body failed"
             raise RuntimeError(msg)
 
-    assert_eq(measurements, [])
+    assert_eq(measurements.measurements, [])
 
 
 @test(mark="fast")

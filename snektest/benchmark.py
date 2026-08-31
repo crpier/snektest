@@ -6,28 +6,47 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from dataclasses import dataclass, field, replace
 from math import ceil, isfinite
 from statistics import fmean, median, pstdev
 from types import TracebackType
 from typing import Self, overload
 
-from snektest.models import AssertionFailure, BadRequestError, BenchmarkMeasurement
+from snektest.models import (
+    AssertionFailure,
+    BadRequestError,
+    BenchmarkComparison,
+    BenchmarkMeasurement,
+)
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 
-_benchmark_sink: ContextVar[list[BenchmarkMeasurement] | None] = ContextVar(
+
+@dataclass
+class BenchmarkCapture:
+    """Completed measurements and baseline comparisons from one test body."""
+
+    compare: Callable[[BenchmarkMeasurement], BenchmarkComparison] | None = None
+    comparisons: list[BenchmarkComparison] = field(default_factory=list)
+    measurements: list[BenchmarkMeasurement] = field(default_factory=list)
+
+
+_benchmark_sink: ContextVar[BenchmarkCapture | None] = ContextVar(
     "snektest_benchmark_sink", default=None
 )
 _benchmark_context_lock = threading.Lock()
 
 
-def _summarize(
+def _summarize(  # noqa: PLR0913
     durations_ns: list[int],
     *,
     name: str | None,
     warmup: int,
     median_budget_seconds: float | None,
     p95_budget_seconds: float | None,
+    disable_gc: bool,
+    median_regression_below: float | None,
+    regression_noise_floor_seconds: float,
 ) -> BenchmarkMeasurement:
     """Reduce measured rounds using a nearest-rank p95."""
     ordered = sorted(durations_ns)
@@ -43,13 +62,49 @@ def _summarize(
         stddev_seconds=pstdev(ordered) / _NANOSECONDS_PER_SECOND,
         median_budget_seconds=median_budget_seconds,
         p95_budget_seconds=p95_budget_seconds,
+        disable_gc=disable_gc,
+        median_regression_below=median_regression_below,
+        regression_noise_floor_seconds=regression_noise_floor_seconds,
     )
 
 
 def _record(measurement: BenchmarkMeasurement) -> None:
     sink = _benchmark_sink.get()
     if sink is not None:
-        sink.append(measurement)
+        sink.measurements.append(measurement)
+
+
+def _compare_with_baseline(measurement: BenchmarkMeasurement) -> None:
+    """Apply the run-bound baseline policy after local absolute budgets pass."""
+    sink = _benchmark_sink.get()
+    if (
+        sink is None
+        or sink.compare is None
+        or measurement.median_regression_below is None
+    ):
+        return
+    comparison = sink.compare(measurement)
+    comparison = replace(
+        comparison,
+        measurement_index=len(sink.measurements) - 1,
+    )
+    sink.comparisons.append(comparison)
+    if comparison.verdict == "passed":
+        return
+    message = (
+        f"benchmark[{comparison.name}] median {comparison.observed_median_seconds:.9g}s "
+        f"regressed {comparison.change_ratio:+.1%} from baseline "
+        f"{comparison.baseline_median_seconds:.9g}s; allowed increase is below "
+        f"{comparison.regression_below:.1%} or "
+        f"{comparison.noise_floor_seconds:.9g}s "
+        f"(limit {comparison.limit_seconds:.9g}s)"
+    )
+    raise AssertionFailure(
+        message,
+        actual=comparison.observed_median_seconds,
+        expected=comparison.limit_seconds,
+        operator="<",
+    )
 
 
 @overload
@@ -61,6 +116,8 @@ def assert_benchmark(
     rounds: int = 100,
     warmup: int = 10,
     disable_gc: bool = True,
+    median_regression_below: float | None = None,
+    regression_noise_floor: float = 0.0,
 ) -> BenchmarkContext: ...
 
 
@@ -73,6 +130,8 @@ def assert_benchmark(
     rounds: int = 100,
     warmup: int = 10,
     disable_gc: bool = True,
+    median_regression_below: float | None = None,
+    regression_noise_floor: float = 0.0,
 ) -> BenchmarkContext: ...
 
 
@@ -84,6 +143,8 @@ def assert_benchmark(  # noqa: PLR0913
     rounds: int = 100,
     warmup: int = 10,
     disable_gc: bool = True,
+    median_regression_below: float | None = None,
+    regression_noise_floor: float = 0.0,
 ) -> BenchmarkContext:
     """Assert the median and/or p95 duration of a repeated region.
 
@@ -100,6 +161,10 @@ def assert_benchmark(  # noqa: PLR0913
 
     Sync and async work are both supported because the caller owns the loop body.
     GC is suspended during measured rounds by default and restored on exit.
+    `median_regression_below` opts a named region into machine-bound baseline
+    comparison when the runner receives `--benchmark-baseline`; the value is a
+    fractional increase. `regression_noise_floor` supplies an absolute allowance
+    in seconds. Ordinary runs continue to enforce only the absolute budgets.
     """
     return BenchmarkContext(
         median_below=median_below,
@@ -108,6 +173,8 @@ def assert_benchmark(  # noqa: PLR0913
         rounds=rounds,
         warmup=warmup,
         disable_gc=disable_gc,
+        median_regression_below=median_regression_below,
+        regression_noise_floor=regression_noise_floor,
     )
 
 
@@ -124,6 +191,8 @@ class BenchmarkContext:
         p95_below: float | None = None,
         name: str | None = None,
         clock: Callable[[], int] = time.perf_counter_ns,
+        median_regression_below: float | None = None,
+        regression_noise_floor: float = 0.0,
     ) -> None:
         self._median_below: float | None = median_below
         self._p95_below: float | None = p95_below
@@ -132,6 +201,8 @@ class BenchmarkContext:
         self._warmup: int = warmup
         self._disable_gc: bool = disable_gc
         self._clock: Callable[[], int] = clock
+        self._median_regression_below: float | None = median_regression_below
+        self._regression_noise_floor: float = regression_noise_floor
         self._context_lock_acquired: bool = False
         self._durations_ns: list[int] = []
         self._rounds_iter: Generator[int] | None = None
@@ -140,7 +211,7 @@ class BenchmarkContext:
         self._measurement: BenchmarkMeasurement | None = None
         self.has_exited: bool = False
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> Self:  # noqa: C901
         if self._rounds < 1:
             msg = f"assert_benchmark rounds must be positive, got {self._rounds}."
             raise BadRequestError(msg)
@@ -152,6 +223,33 @@ class BenchmarkContext:
             raise BadRequestError(msg)
         if self._name is not None and not self._name.strip():
             msg = "assert_benchmark name cannot be empty or whitespace."
+            raise BadRequestError(msg)
+        if self._median_regression_below is not None and self._name is None:
+            msg = "assert_benchmark requires name when median_regression_below is set."
+            raise BadRequestError(msg)
+        if self._median_regression_below is not None and (
+            not isfinite(self._median_regression_below)
+            or self._median_regression_below <= 0
+        ):
+            msg = (
+                "assert_benchmark median_regression_below must be finite and positive, "
+                f"got {self._median_regression_below}."
+            )
+            raise BadRequestError(msg)
+        if (
+            not isfinite(self._regression_noise_floor)
+            or self._regression_noise_floor < 0
+        ):
+            msg = (
+                "assert_benchmark regression_noise_floor must be finite and nonnegative, "
+                f"got {self._regression_noise_floor}."
+            )
+            raise BadRequestError(msg)
+        if self._median_regression_below is None and self._regression_noise_floor != 0:
+            msg = (
+                "assert_benchmark regression_noise_floor requires "
+                "median_regression_below."
+            )
             raise BadRequestError(msg)
         for name, budget in (
             ("median_below", self._median_below),
@@ -270,8 +368,12 @@ class BenchmarkContext:
             warmup=self._warmup,
             median_budget_seconds=self._median_below,
             p95_budget_seconds=self._p95_below,
+            disable_gc=self._disable_gc,
+            median_regression_below=self._median_regression_below,
+            regression_noise_floor_seconds=self._regression_noise_floor,
         )
         measurement = self._measurement
+        _record(measurement)
         benchmark_label = (
             "benchmark"
             if measurement.name is None
@@ -305,15 +407,18 @@ class BenchmarkContext:
                 expected=self._p95_below,
                 operator="<",
             )
-        _record(measurement)
+        _compare_with_baseline(measurement)
 
 
 @contextmanager
-def collect_benchmarks() -> Generator[list[BenchmarkMeasurement]]:
+def collect_benchmarks(
+    *,
+    compare: Callable[[BenchmarkMeasurement], BenchmarkComparison] | None = None,
+) -> Generator[BenchmarkCapture]:
     """Bind a fresh benchmark sink for the duration of a test body."""
-    measurements: list[BenchmarkMeasurement] = []
-    token: Token[list[BenchmarkMeasurement] | None] = _benchmark_sink.set(measurements)
+    capture = BenchmarkCapture(compare=compare)
+    token: Token[BenchmarkCapture | None] = _benchmark_sink.set(capture)
     try:
-        yield measurements
+        yield capture
     finally:
         _benchmark_sink.reset(token)

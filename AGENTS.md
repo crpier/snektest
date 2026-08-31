@@ -231,11 +231,40 @@ identify multiple timed regions in console and JSON output. Benchmark contexts
 cannot overlap because concurrent regions distort timings and process-wide GC
 state.
 
+`median_regression_below=` opts a named region into a stored median comparison;
+the value is a fractional increase, and `regression_noise_floor=` supplies an
+absolute allowance in seconds. The effective allowance is the larger of the
+baseline-relative allowance and the noise floor, and the observed median must
+remain strictly below baseline plus that allowance. Existing absolute budgets
+still apply first. Complete benchmark measurements are retained on pass, failure,
+and error results so baseline diagnostics remain available in console and JSON.
+
+`--update-benchmark-baseline PATH` atomically updates opted-in regions after a
+fully successful run. Filtered runs replace only matching entries and preserve
+unselected entries; marked runs replace only observed tests. Baseline identity is
+the project-relative path, test function, parameter case, and required unique
+region name. Rounds, warmup, and GC policy are part of the stored measurement
+protocol. `--benchmark-baseline PATH` compares at context exit, before result
+reporting, so regressions are normal test failures with useful source tracebacks.
+Comparison ignores stale entries outside the observed run; a matching update
+prunes them. A rename is a missing current identity until an update covers both
+the old and new scope.
+Updates hold a sidecar lock across the read/merge/write cycle and use atomic
+replacement. A concurrent writer fails; a killed writer can leave a stale lock
+that must be removed explicitly.
+
+Snapshots store an exact machine fingerprint: Python implementation/version,
+operating system, architecture, CPU model, and logical CPU count. Load and update
+reject mismatches. No normalization is attempted. Shared hosted CI should create
+a base-branch snapshot and compare the candidate on the same job machine;
+committed snapshots require a pinned runner. Stored p95 gates, historical trend
+analysis, statistical significance, and cross-machine normalization are deferred.
+
 The normal `--timeout` bounds the complete async test, not an individual round;
 it cannot interrupt synchronous or CPU-bound work. Passing measurements flow
-through `benchmark.py` into `PassedResult.benchmarks`, the console result line,
-and `benchmark_measurements` in JSON output. Stored baselines and cross-machine
-normalization are deferred.
+through `benchmark.py` into each outcome's `benchmarks`, the console result line,
+and `benchmark_measurements` in JSON output. Completed measurements also remain
+attached to failed and error outcomes.
 
 ### Type Checking Configuration
 

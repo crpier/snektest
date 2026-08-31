@@ -5,12 +5,18 @@ import threading
 import traceback
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, cast
 
 from snektest.agent_docs import (
     get_agent_docs,
     get_example_source,
     get_examples_listing,
+)
+from snektest.benchmark_baseline import (
+    BenchmarkBaseline,
+    MachineFingerprint,
+    discover_project_root,
 )
 from snektest.collection import TestsQueue, load_tests_from_filters
 from snektest.execution import run_tests
@@ -27,7 +33,12 @@ from snektest.models import (
     UnreachableError,
 )
 from snektest.presenter import print_error
-from snektest.reporting import ConsoleRunReporter, NullRunReporter, RunReporter
+from snektest.reporting import (
+    ConsoleRunReporter,
+    DeferredRunReporter,
+    NullRunReporter,
+    RunReporter,
+)
 
 
 def _json_result_status(result: TestResult) -> str:
@@ -46,6 +57,23 @@ def _json_exception(
     return {"type": exc_type.__name__, "message": str(exc_value)}
 
 
+def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
+    """Keep baseline configuration errors machine-readable in JSON mode."""
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "error": {
+                        "type": type(error).__name__,
+                        "message": str(error),
+                    }
+                }
+            )
+        )
+        return 2
+    raise error
+
+
 def _json_test_entry(result: TestResult) -> dict[str, object]:
     entry: dict[str, object] = {
         "name": str(result.name),
@@ -58,7 +86,7 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
             entry["exception"] = _json_exception(exc_type, exc_value)
         case ErrorResult(exc_type=exc_type, exc_value=exc_value):
             entry["exception"] = _json_exception(exc_type, exc_value)
-        case PassedResult(measurements=measurements, benchmarks=benchmarks):
+        case PassedResult(measurements=measurements):
             if measurements:
                 entry["memory_measurements"] = [
                     {
@@ -70,22 +98,43 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
                     }
                     for measurement in measurements
                 ]
-            if benchmarks:
-                entry["benchmark_measurements"] = [
-                    {
-                        "name": benchmark.name,
-                        "rounds": benchmark.rounds,
-                        "warmup": benchmark.warmup,
-                        "min_seconds": benchmark.min_seconds,
-                        "median_seconds": benchmark.median_seconds,
-                        "p95_seconds": benchmark.p95_seconds,
-                        "mean_seconds": benchmark.mean_seconds,
-                        "stddev_seconds": benchmark.stddev_seconds,
-                        "median_budget_seconds": benchmark.median_budget_seconds,
-                        "p95_budget_seconds": benchmark.p95_budget_seconds,
-                    }
-                    for benchmark in benchmarks
-                ]
+    benchmarks = result.result.benchmarks
+    comparisons_by_index = {
+        comparison.measurement_index: comparison
+        for comparison in result.result.benchmark_comparisons
+    }
+    if benchmarks:
+        benchmark_entries: list[dict[str, object]] = []
+        for index, benchmark in enumerate(benchmarks):
+            benchmark_entry: dict[str, object] = {
+                "name": benchmark.name,
+                "rounds": benchmark.rounds,
+                "warmup": benchmark.warmup,
+                "disable_gc": benchmark.disable_gc,
+                "min_seconds": benchmark.min_seconds,
+                "median_seconds": benchmark.median_seconds,
+                "p95_seconds": benchmark.p95_seconds,
+                "mean_seconds": benchmark.mean_seconds,
+                "stddev_seconds": benchmark.stddev_seconds,
+                "median_budget_seconds": benchmark.median_budget_seconds,
+                "p95_budget_seconds": benchmark.p95_budget_seconds,
+                "median_regression_below": benchmark.median_regression_below,
+                "regression_noise_floor_seconds": benchmark.regression_noise_floor_seconds,
+            }
+            comparison = comparisons_by_index.get(index)
+            if comparison is not None:
+                benchmark_entry["baseline_comparison"] = {
+                    "verdict": comparison.verdict,
+                    "baseline_median_seconds": comparison.baseline_median_seconds,
+                    "observed_median_seconds": comparison.observed_median_seconds,
+                    "change_ratio": comparison.change_ratio,
+                    "regression_below": comparison.regression_below,
+                    "noise_floor_seconds": comparison.noise_floor_seconds,
+                    "allowed_increase_seconds": comparison.allowed_increase_seconds,
+                    "limit_seconds": comparison.limit_seconds,
+                }
+            benchmark_entries.append(benchmark_entry)
+        entry["benchmark_measurements"] = benchmark_entries
     if result.fixture_teardown_failures:
         entry["fixture_teardown_failures"] = [
             {
@@ -98,7 +147,7 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
 
 
 def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
-    return {
+    output: dict[str, object] = {
         "passed": summary.passed,
         "failed": summary.failed,
         "errors": summary.errors,
@@ -113,6 +162,37 @@ def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
         ],
         "tests": [_json_test_entry(result) for result in summary.test_results],
     }
+    baseline = getattr(summary, "benchmark_baseline", None)
+    if isinstance(baseline, BenchmarkBaselineRun):
+        machine_output: dict[str, object] | None = None
+        if baseline.machine is not None:
+            machine_output = {
+                "architecture": baseline.machine.architecture,
+                "logical_cpu_count": baseline.machine.logical_cpu_count,
+                "processor": baseline.machine.processor,
+                "python_implementation": baseline.machine.python_implementation,
+                "python_version": baseline.machine.python_version,
+                "system": baseline.machine.system,
+            }
+        output["benchmark_baseline"] = {
+            "mode": baseline.mode,
+            "path": baseline.path,
+            "machine": machine_output,
+            "written": baseline.written,
+            "updated_entries": baseline.updated_entries,
+        }
+    return output
+
+
+@dataclass(frozen=True)
+class BenchmarkBaselineRun:
+    """Machine-readable metadata for one compare or update CLI mode."""
+
+    mode: Literal["compare", "update"]
+    path: str
+    machine: MachineFingerprint | None = None
+    updated_entries: int = 0
+    written: bool = False
 
 
 @dataclass
@@ -127,6 +207,7 @@ class TestRunSummary:
     session_teardown_failed: int
     test_results: list[TestResult]
     session_teardown_failures: list[TeardownFailure]
+    benchmark_baseline: BenchmarkBaselineRun | None = None
 
 
 type CliAction = Literal["agent_docs", "help", "list_examples", "show_example"]
@@ -137,6 +218,7 @@ _DEFAULT_TIMEOUT_SECONDS = 60.0
 @dataclass(frozen=True)
 class CliOptions:
     action: CliAction | None = None
+    benchmark_baseline: str | None = None
     capture_output: bool = True
     example_name: str | None = None
     filters: tuple[str, ...] = ()
@@ -144,6 +226,7 @@ class CliOptions:
     pdb_on_failure: bool = False
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
+    update_benchmark_baseline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +260,10 @@ Options:
   --examples        List bundled examples
   --example NAME    Print a bundled example
   --json-output     Print machine-readable JSON summary
+  --benchmark-baseline PATH
+                    Compare opted-in benchmarks with a machine-bound baseline
+  --update-benchmark-baseline PATH
+                    Atomically update opted-in benchmarks after a passing run
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   --timeout SECONDS Override the 60-second async-test timeout
   --no-timeout      Disable the default async-test timeout
@@ -291,7 +378,7 @@ def _print_cli_action(options: CliOptions) -> int:
     return 0
 
 
-def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0911, PLR0912
+def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """Parse argv into CliOptions, or a ParseError on invalid usage.
 
     Pure: never prints. The caller renders any ParseError once. Value-taking
@@ -304,6 +391,7 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
     complexity metric would only re-spread parsing state across helpers.
     """
     action: CliAction | None = None
+    benchmark_baseline: str | None = None
     capture_output = True
     example_name: str | None = None
     json_output = False
@@ -311,6 +399,7 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
     pdb_on_failure = False
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
     timeout_option_seen = False
+    update_benchmark_baseline: str | None = None
     filters: list[str] = []
     duplicate_action = ParseError("Only one help/docs/examples command is supported")
 
@@ -332,6 +421,19 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
             capture_output = False
         elif arg == "--json-output":
             json_output = True
+        elif arg in {"--benchmark-baseline", "--update-benchmark-baseline"}:
+            if benchmark_baseline is not None or update_benchmark_baseline is not None:
+                return ParseError(
+                    "Only one --benchmark-baseline or --update-benchmark-baseline option is supported"
+                )
+            consumed = _consume_flag_value(argv, index, arg)
+            if isinstance(consumed, ParseError):
+                return consumed
+            baseline_path, index = consumed
+            if arg == "--benchmark-baseline":
+                benchmark_baseline = baseline_path
+            else:
+                update_benchmark_baseline = baseline_path
         elif arg == "--pdb":
             pdb_on_failure = True
         elif arg == "--mark":
@@ -360,15 +462,20 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
             filters.append(arg)
         index += 1
 
-    if action is not None and filters:
+    if action is not None and (
+        filters
+        or benchmark_baseline is not None
+        or update_benchmark_baseline is not None
+    ):
         return ParseError(
-            "Cannot combine help/docs/examples commands with test filters"
+            "Cannot combine help/docs/examples commands with test filters or baseline options"
         )
     if action is None and not filters:
         filters.append(".")
 
     return CliOptions(
         action=action,
+        benchmark_baseline=benchmark_baseline,
         capture_output=capture_output,
         example_name=example_name,
         filters=tuple(filters),
@@ -376,6 +483,7 @@ def parse_cli_args(argv: list[str]) -> CliOptions | ParseError:  # noqa: C901, P
         mark=mark,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
+        update_benchmark_baseline=update_benchmark_baseline,
     )
 
 
@@ -387,6 +495,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
+    benchmark_baseline: BenchmarkBaseline | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure]]:
     queue = TestsQueue()
     collection_exception: list[BaseException] = []
@@ -412,6 +521,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
             timeout=timeout,
             collection_failed=lambda: bool(collection_exception),
             reporter=reporter,
+            benchmark_baseline=benchmark_baseline,
         )
     finally:
         producer_thread.join()
@@ -439,6 +549,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
+    benchmark_baseline: BenchmarkBaseline | None = None,
 ) -> TestRunSummary:
     """Run tests and return structured results instead of printing.
 
@@ -463,6 +574,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         mark=mark,
         timeout=timeout,
         reporter=reporter or NullRunReporter(),
+        benchmark_baseline=benchmark_baseline,
     )
 
     return TestRunSummary(
@@ -479,7 +591,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     )
 
 
-async def run_script(
+async def run_script(  # noqa: C901, PLR0911, PLR0912
     argv: list[str] | None = None,
     *,
     run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
@@ -502,8 +614,30 @@ async def run_script(
         print_error(str(e))
         return 2
 
+    project_root = discover_project_root()
+    benchmark_baseline: BenchmarkBaseline | None = None
+    if options.benchmark_baseline is not None:
+        try:
+            benchmark_baseline = await asyncio.to_thread(
+                BenchmarkBaseline.load,
+                Path(options.benchmark_baseline),
+                project_root=project_root,
+            )
+        except BadRequestError as error:
+            return _baseline_cli_error(error, json_output=options.json_output)
+
     runner = run_tests_programmatic_fn or run_tests_programmatic
-    reporter = NullRunReporter() if options.json_output else ConsoleRunReporter()
+    deferred_reporter: DeferredRunReporter | None = None
+    if options.json_output:
+        reporter: RunReporter = NullRunReporter()
+    elif (
+        options.update_benchmark_baseline is not None
+        or options.benchmark_baseline is not None
+    ):
+        deferred_reporter = DeferredRunReporter(ConsoleRunReporter())
+        reporter = deferred_reporter
+    else:
+        reporter = ConsoleRunReporter()
     try:
         summary = cast(
             "TestRunSummary",
@@ -514,10 +648,53 @@ async def run_script(
                 mark=options.mark,
                 timeout=options.timeout,
                 reporter=reporter,
+                benchmark_baseline=benchmark_baseline,
             ),
         )
     except asyncio.CancelledError:
         return 2
+    except BadRequestError as error:
+        return _baseline_cli_error(error, json_output=options.json_output)
+
+    if benchmark_baseline is not None:
+        summary.benchmark_baseline = BenchmarkBaselineRun(
+            machine=benchmark_baseline.machine,
+            mode="compare",
+            path=options.benchmark_baseline or "",
+        )
+    elif options.update_benchmark_baseline is not None:
+        baseline_run = BenchmarkBaselineRun(
+            mode="update",
+            path=options.update_benchmark_baseline,
+        )
+        if exit_code_from_summary(summary) == 0:
+            try:
+                baseline_update = await asyncio.to_thread(
+                    BenchmarkBaseline.update,
+                    Path(options.update_benchmark_baseline),
+                    project_root=project_root,
+                    test_results=summary.test_results,
+                    filter_items=filter_items,
+                    mark=options.mark,
+                )
+            except BadRequestError as error:
+                return _baseline_cli_error(error, json_output=options.json_output)
+            baseline_run = BenchmarkBaselineRun(
+                machine=baseline_update.baseline.machine,
+                mode="update",
+                path=options.update_benchmark_baseline,
+                updated_entries=baseline_update.updated_entries,
+                written=True,
+            )
+            if not options.json_output:
+                print(
+                    f"Updated {baseline_update.updated_entries} benchmark baseline "
+                    f"entries in {options.update_benchmark_baseline}"
+                )
+        summary.benchmark_baseline = baseline_run
+
+    if deferred_reporter is not None:
+        deferred_reporter.finish()
 
     if options.json_output:
         print(json.dumps(build_json_summary(summary)))

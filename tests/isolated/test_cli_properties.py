@@ -28,6 +28,8 @@ _KNOWN_TOKENS = [
     "example",
     "-s",
     "--json-output",
+    "--benchmark-baseline",
+    "--update-benchmark-baseline",
     "--pdb",
     "--mark",
     "--no-timeout",
