@@ -8,7 +8,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
 from multiprocessing.context import SpawnContext
@@ -33,6 +33,7 @@ from snektest.models import (
     FilterItem,
     FixtureError,
     RunInfrastructureError,
+    RunTeardownDiagnostics,
     TeardownFailure,
     TestCase,
     TestName,
@@ -135,12 +136,14 @@ class _Shutdown: ...
 class _WorkerStopped:
     session_teardown_failures: tuple[TeardownFailure, ...]
     session_teardown_output: str | None
+    session_teardown_warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class _HostStopped:
     run_teardown_failures: tuple[TeardownFailure, ...]
     run_teardown_output: str | None
+    run_teardown_warnings: tuple[str, ...]
 
 
 type _ParentToWorker = (
@@ -236,12 +239,15 @@ def _host_main(
         while True:
             message = cast("object", connection.recv())
             if isinstance(message, _Shutdown):
-                with maybe_capture_output(capture_output) as (output, _):
-                    failures = runner.run(registry.teardown_run_fixtures())
+                with maybe_capture_output(capture_output) as (output, warnings):
+                    failures = runner.run(
+                        registry.teardown_run_fixtures(cleanup_timeout=timeout)
+                    )
                 connection.send(
                     _HostStopped(
                         tuple(failures),
                         output.getvalue() or None,
+                        tuple(warnings),
                     )
                 )
                 break
@@ -415,13 +421,16 @@ def _run_worker(  # noqa: PLR0913
             if run_fixture_loader.process_control(message):
                 continue
             if isinstance(message, _Shutdown):
-                failures, output = runner.run(
-                    teardown_session_fixtures(capture_output=capture_output)
+                failures, output, warnings = runner.run(
+                    teardown_session_fixtures(
+                        capture_output=capture_output, cleanup_timeout=timeout
+                    )
                 )
                 connection.send(
                     _WorkerStopped(
                         session_teardown_failures=tuple(failures),
                         session_teardown_output=output,
+                        session_teardown_warnings=warnings,
                     )
                 )
                 break
@@ -667,6 +676,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     reporter: RunReporter,
     timeout: float | None,  # noqa: ASYNC109
     workers: int | Literal["auto"],
+    teardown_diagnostics: RunTeardownDiagnostics | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
     """Run a canonical plan across persistent spawn workers."""
     started_at = time.monotonic()
@@ -852,6 +862,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         session_failures: list[TeardownFailure] = []
         session_outputs: list[str] = []
+        session_warnings: list[str] = []
         for worker in worker_processes:
             worker.connection.send(_Shutdown())
         for worker in worker_processes:
@@ -862,6 +873,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             session_failures.extend(message.session_teardown_failures)
             if message.session_teardown_output:
                 session_outputs.append(message.session_teardown_output)
+            session_warnings.extend(message.session_teardown_warnings)
             worker.connection.close()
             await asyncio.to_thread(worker.process.join)
 
@@ -873,20 +885,38 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         run_failures = list(host_message.run_teardown_failures)
         host_connection.close()
         await asyncio.to_thread(host_process.join)
+        run_output = host_message.run_teardown_output
+        run_warnings = host_message.run_teardown_warnings
+        session_output = "".join(session_outputs) or None
+        if teardown_diagnostics is not None:
+            teardown_diagnostics.run_output = run_output
+            teardown_diagnostics.run_warnings = run_warnings
+            teardown_diagnostics.session_output = session_output
+            teardown_diagnostics.session_warnings = tuple(session_warnings)
+        if reported_results and (session_warnings or run_warnings):
+            final_result = reported_results[-1]
+            reported_results[-1] = replace(
+                final_result,
+                warnings=(
+                    *final_result.warnings,
+                    *session_warnings,
+                    *run_warnings,
+                ),
+            )
         reporter.run_finished(
             run_teardown_failures=run_failures,
             run_teardown_output=(
                 "".join(
                     [
                         *run_lifecycle_outputs,
-                        host_message.run_teardown_output or "",
+                        run_output or "",
                     ]
                 )
                 or None
             ),
             test_results=reported_results,
             session_teardown_failures=session_failures,
-            session_teardown_output="".join(session_outputs) or None,
+            session_teardown_output=session_output,
             total_duration=time.monotonic() - started_at,
         )
         return reported_results, session_failures, run_failures

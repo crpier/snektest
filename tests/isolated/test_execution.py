@@ -18,7 +18,6 @@ from snektest import (
 from snektest.execution import execute_test, run_tests
 from snektest.fixtures import FixtureRegistry, teardown_fixture, use_registry
 from snektest.models import (
-    BadRequestError,
     ErrorResult,
     FailedResult,
     PassedResult,
@@ -84,7 +83,7 @@ async def _run_queue(
 
 
 @test()
-async def test_teardown_fixture_raises_on_multiple_yields() -> None:
+async def test_teardown_fixture_reports_multiple_yields() -> None:
     def fixture() -> Generator[int]:
         yield 1
         yield 2
@@ -92,8 +91,10 @@ async def test_teardown_fixture_raises_on_multiple_yields() -> None:
     gen = fixture()
     _ = next(gen)
 
-    with assert_raises(BadRequestError):
-        _ = await teardown_fixture("fixture", gen)
+    failure = assert_is_not_none(await teardown_fixture("fixture", gen))
+
+    assert_eq(failure.fixture_name, "fixture")
+    assert_eq(failure.exception.type_name, "BadRequestError")
 
 
 @test()

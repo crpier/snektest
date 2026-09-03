@@ -11,6 +11,9 @@ from typing import Any, Literal, override
 
 from snektest.annotations import Coroutine
 
+DEFAULT_CLEANUP_TIMEOUT_SECONDS = 60.0
+"""Maximum async cleanup time when no shorter run timeout is configured."""
+
 
 class CollectionError(BaseException): ...
 
@@ -43,6 +46,29 @@ class TestTimeoutError(Exception):
 
 class FixtureError(Exception):
     """When a fixture is defined or used incorrectly."""
+
+
+class FixtureTaskLeakError(Exception):
+    """Raised when fixture teardown leaves owned tasks pending."""
+
+    def __init__(self, fixture_name: str, task_count: int) -> None:
+        self.fixture_name = fixture_name
+        self.task_count = task_count
+        task_word = "task" if task_count == 1 else "tasks"
+        super().__init__(
+            f"fixture {fixture_name} leaked {task_count} pending {task_word}"
+        )
+
+
+class FixtureTeardownTimeoutError(Exception):
+    """Raised when an async fixture exceeds its cleanup ceiling."""
+
+    def __init__(self, fixture_name: str, timeout: float) -> None:
+        self.fixture_name = fixture_name
+        self.timeout = timeout
+        super().__init__(
+            f"fixture {fixture_name} teardown exceeded the cleanup timeout of {timeout:g}s"
+        )
 
 
 class AssertionFailure(AssertionError):  # noqa: N818
@@ -354,6 +380,16 @@ class ErrorResult:
     exception: ExceptionDiagnostic
     benchmarks: tuple[BenchmarkMeasurement, ...] = ()
     benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
+
+
+@dataclass
+class RunTeardownDiagnostics:
+    """Output and warnings collected after test-case execution finishes."""
+
+    run_output: str | None = None
+    run_warnings: tuple[str, ...] = ()
+    session_output: str | None = None
+    session_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
