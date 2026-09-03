@@ -146,6 +146,7 @@ def _run_async_example(
     loop: asyncio.AbstractEventLoop,
     test_func: Callable[..., Coroutine[None] | None],
     *,
+    active_tasks: set[asyncio.Task[None]],
     strategy_values: tuple[Any, ...],
     param_values: tuple[Any, ...],
 ) -> None:
@@ -164,11 +165,13 @@ def _run_async_example(
                 test_func(*strategy_values, *param_values),
             )
             task: asyncio.Task[None] = loop.create_task(res)
+            active_tasks.add(task)
         except BaseException as exc:
             done.set_exception(exc)
             return
 
         def on_done(task: asyncio.Task[None]) -> None:
+            active_tasks.discard(task)
             try:
                 task.result()
             except BaseException as exc:
@@ -180,6 +183,44 @@ def _run_async_example(
 
     _ = loop.call_soon_threadsafe(schedule)
     done.result()
+
+
+async def _run_async_hypothesis(
+    wrapper: Callable[..., object],
+    test_func: Callable[..., Coroutine[None] | None],
+    strategies: tuple[SearchStrategy[Any], ...],
+    *,
+    param_values: tuple[Any, ...],
+) -> None:
+    """Run Hypothesis in a worker and finish its unwind before cancellation."""
+    loop = asyncio.get_running_loop()
+    active_tasks: set[asyncio.Task[None]] = set()
+    worker_finished = asyncio.Event()
+
+    def run_one_example(*strategy_values: Any) -> None:
+        _run_async_example(
+            loop,
+            test_func,
+            active_tasks=active_tasks,
+            strategy_values=tuple(strategy_values),
+            param_values=param_values,
+        )
+
+    def run_hypothesis() -> None:
+        try:
+            _run_hypothesis(wrapper, strategies, run_one_example)
+        finally:
+            _ = loop.call_soon_threadsafe(worker_finished.set)
+
+    try:
+        await asyncio.to_thread(run_hypothesis)
+    except asyncio.CancelledError:
+        for task in tuple(active_tasks):
+            _ = task.cancel()
+        if active_tasks:
+            _ = await asyncio.gather(*active_tasks, return_exceptions=True)
+        await worker_finished.wait()
+        raise
 
 
 def test_hypothesis(
@@ -218,20 +259,12 @@ def test_hypothesis(
 
             @wraps(test_func)
             async def async_wrapper() -> None:
-                loop = asyncio.get_running_loop()
-
-                def run_one_example(*strategy_values: Any) -> None:
-                    _run_async_example(
-                        loop,
-                        test_func,
-                        strategy_values=tuple(strategy_values),
-                        param_values=(),
-                    )
-
-                def run_hypothesis() -> None:
-                    _run_hypothesis(async_wrapper, strategies_tuple, run_one_example)
-
-                await asyncio.to_thread(run_hypothesis)
+                await _run_async_hypothesis(
+                    async_wrapper,
+                    test_func,
+                    strategies_tuple,
+                    param_values=(),
+                )
 
             mark_test_function(async_wrapper, (), markers, normalized_mutex)
             return async_wrapper

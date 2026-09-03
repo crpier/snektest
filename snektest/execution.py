@@ -4,7 +4,10 @@ import asyncio
 import pdb  # noqa: T100
 import sys
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import replace
 from inspect import iscoroutine
 from pathlib import Path
 from types import TracebackType
@@ -21,11 +24,13 @@ from snektest.diagnostics import (
 from snektest.fixtures import FixtureRegistry, current_registry, use_registry
 from snektest.memory import collect_measurements
 from snektest.models import (
+    DEFAULT_CLEANUP_TIMEOUT_SECONDS,
     AssertionFailure,
     BadRequestError,
     ErrorResult,
     FailedResult,
     PassedResult,
+    RunTeardownDiagnostics,
     TeardownFailure,
     TestCase,
     TestResult,
@@ -34,6 +39,21 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
+from snektest.task_cleanup import TaskCleanup, cancel_tasks
+
+_test_task_owner: ContextVar[object | None] = ContextVar(
+    "snektest_test_task_owner", default=None
+)
+
+
+@contextmanager
+def _test_task_scope(owner: object) -> Generator[None]:
+    """Tag child tasks with the test whose execution context created them."""
+    token = _test_task_owner.set(owner)
+    try:
+        yield
+    finally:
+        _test_task_owner.reset(token)
 
 
 async def _await_test_body(
@@ -60,36 +80,53 @@ async def _await_test_body(
         raise
 
 
-async def _await_test_body_with_task_check(
-    coro: Coroutine[Any, Any, object],
-    timeout: float | None,  # noqa: ASYNC109
-    *,
-    tasks_before: set[asyncio.Task[Any]],
-) -> None:
-    """Await an async test and cancel tasks it leaves pending."""
-    body_completed = False
-    leaked_tasks: set[asyncio.Task[Any]] = set()
-    try:
-        await _await_test_body(coro, timeout)
-        body_completed = True
-    finally:
-        leaked_tasks = {
+async def _cancel_pending_test_tasks(
+    owner: object,
+    registry: FixtureRegistry,
+    cleanup_timeout: float,
+) -> TaskCleanup:
+    """Cancel tasks owned by one test after its fixtures have torn down."""
+    return await cancel_tasks(
+        {
             task
             for task in asyncio.all_tasks()
-            if task not in tasks_before and not task.done()
-        }
-        for task in leaked_tasks:
-            _ = task.cancel()
-        if leaked_tasks:
-            _ = await asyncio.gather(*leaked_tasks, return_exceptions=True)
-
-    if body_completed and leaked_tasks:
-        task_word = "task" if len(leaked_tasks) == 1 else "tasks"
-        message = f"async test leaked {len(leaked_tasks)} pending {task_word}"
-        raise AssertionFailure(message)
+            if task.get_context().get(_test_task_owner) is owner
+            and not task.done()
+            and not registry.owns_task(task)
+        },
+        timeout=cleanup_timeout,
+    )
 
 
-async def execute_test(  # noqa: C901
+def _task_leak_result(
+    leaked_task_count: int,
+    passed_result: PassedResult,
+    *,
+    cleanup_timeout: float,
+    resistant_task_count: int,
+) -> FailedResult:
+    """Build the failure reported after fixture teardown leaves tasks pending."""
+    task_word = "task" if leaked_task_count == 1 else "tasks"
+    message = f"async test leaked {leaked_task_count} pending {task_word}"
+    if resistant_task_count:
+        message += (
+            f"; {resistant_task_count} resisted cancellation for {cleanup_timeout:g}s"
+        )
+    try:
+        raise AssertionFailure(message)  # noqa: TRY301
+    except AssertionFailure as error:
+        traceback = error.__traceback__
+        if traceback is None:
+            msg = "Task leak failure had no traceback. This shouldn't be possible!"
+            raise UnreachableError(msg) from None
+        return FailedResult(
+            exception=snapshot_exception(type(error), error, traceback),
+            benchmarks=passed_result.benchmarks,
+            benchmark_comparisons=passed_result.benchmark_comparisons,
+        )
+
+
+async def execute_test(  # noqa: C901, PLR0912, PLR0915
     test_case: TestCase,
     *,
     capture_output: bool = True,
@@ -106,27 +143,28 @@ async def execute_test(  # noqa: C901
         else None
     )
     bad_request: BadRequestError | None = None
+    interruption: BaseException | None = None
     result: PassedResult | FailedResult | ErrorResult | None = None
+    registry = current_registry()
+    test_task_owner = object()
     with (
+        _test_task_scope(test_task_owner),
         maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
         collect_benchmarks(compare=compare_benchmark) as benchmark_capture,
         collect_measurements() as measurements,
     ):
         test_start = time.monotonic()
         try:
-            tasks_before = asyncio.all_tasks()
             res = test_case.call()
             if iscoroutine(res):
-                await _await_test_body_with_task_check(
-                    res, timeout, tasks_before=tasks_before
-                )
+                await _await_test_body(res, timeout)
             duration = time.monotonic() - test_start
             result = PassedResult(
                 measurements=tuple(measurements),
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
-        except (AssertionFailure, asyncio.CancelledError):
+        except AssertionFailure:
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()
             if exc_type is None or exc_value is None or traceback is None:
@@ -141,6 +179,25 @@ async def execute_test(  # noqa: C901
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
+        except asyncio.CancelledError as error:
+            duration = time.monotonic() - test_start
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                interruption = error
+            else:
+                exc_type, exc_value, traceback = exc_info_provider()
+                if exc_type is None or exc_value is None or traceback is None:
+                    msg = "Invalid exception info gathered. This shouldn't be possible!"
+                    raise UnreachableError(msg) from None
+                result = FailedResult(
+                    exception=snapshot_exception(
+                        cast("type[BaseException]", exc_type),
+                        cast("BaseException", exc_value),
+                        traceback,
+                    ),
+                    benchmarks=tuple(benchmark_capture.measurements),
+                    benchmark_comparisons=tuple(benchmark_capture.comparisons),
+                )
         except Exception:
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()
@@ -159,17 +216,37 @@ async def execute_test(  # noqa: C901
         except BadRequestError as error:
             duration = time.monotonic() - test_start
             bad_request = error
+        except BaseException as error:
+            duration = time.monotonic() - test_start
+            interruption = error
 
-    with maybe_capture_output(capture_output) as (
-        fixture_teardown_buffer,
-        _,
+    with (
+        _test_task_scope(test_task_owner),
+        maybe_capture_output(capture_output) as (
+            fixture_teardown_buffer,
+            fixture_teardown_warnings,
+        ),
     ):
-        fixture_teardown_failures = (
-            await current_registry().teardown_function_fixtures()
+        fixture_teardown_failures = await registry.teardown_function_fixtures(
+            cleanup_timeout=timeout
         )
 
     fixture_teardown_output_value = fixture_teardown_buffer.getvalue() or None
 
+    cleanup_timeout = DEFAULT_CLEANUP_TIMEOUT_SECONDS if timeout is None else timeout
+    task_cleanup = await _cancel_pending_test_tasks(
+        test_task_owner, registry, cleanup_timeout
+    )
+    if isinstance(result, PassedResult) and task_cleanup.total:
+        result = _task_leak_result(
+            task_cleanup.total,
+            result,
+            cleanup_timeout=cleanup_timeout,
+            resistant_task_count=task_cleanup.resistant,
+        )
+
+    if interruption is not None:
+        raise interruption
     if bad_request is not None and fixture_teardown_failures:
         traceback = bad_request.__traceback__
         if traceback is None:
@@ -199,28 +276,38 @@ async def execute_test(  # noqa: C901
         fixture_teardown_failures=tuple(fixture_teardown_failures),
         fixture_teardown_output=fixture_teardown_output_value,
         ordinal=test_case.ordinal,
-        warnings=tuple(captured_warnings),
+        warnings=(*captured_warnings, *fixture_teardown_warnings),
     )
 
 
 async def teardown_session_fixtures(
-    *, capture_output: bool
-) -> tuple[list[TeardownFailure], str | None]:
+    *, capture_output: bool, cleanup_timeout: float | None = None
+) -> tuple[list[TeardownFailure], str | None, tuple[str, ...]]:
     """Teardown all session fixtures and return failures and output."""
-    with maybe_capture_output(capture_output) as (teardown_output, _):
-        session_teardown_failures = await current_registry().teardown_session_fixtures()
+    with maybe_capture_output(capture_output) as (
+        teardown_output,
+        teardown_warnings,
+    ):
+        session_teardown_failures = await current_registry().teardown_session_fixtures(
+            cleanup_timeout=cleanup_timeout
+        )
 
     output_value = teardown_output.getvalue() or None
-    return session_teardown_failures, output_value
+    return session_teardown_failures, output_value, tuple(teardown_warnings)
 
 
 async def teardown_run_fixtures(
-    *, capture_output: bool
-) -> tuple[list[TeardownFailure], str | None]:
+    *, capture_output: bool, cleanup_timeout: float | None = None
+) -> tuple[list[TeardownFailure], str | None, tuple[str, ...]]:
     """Tear down host-owned run fixtures and return failures and output."""
-    with maybe_capture_output(capture_output) as (teardown_output, _):
-        failures = await current_registry().teardown_run_fixtures()
-    return failures, teardown_output.getvalue() or None
+    with maybe_capture_output(capture_output) as (
+        teardown_output,
+        teardown_warnings,
+    ):
+        failures = await current_registry().teardown_run_fixtures(
+            cleanup_timeout=cleanup_timeout
+        )
+    return failures, teardown_output.getvalue() or None, tuple(teardown_warnings)
 
 
 def has_any_failures(
@@ -373,6 +460,7 @@ async def run_tests(  # noqa: PLR0913
     reporter: RunReporter | None = None,
     resolver: Callable[[Path], Path] = Path.resolve,
     benchmark_baseline: BenchmarkBaseline | None = None,
+    teardown_diagnostics: RunTeardownDiagnostics | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
     """Run all tests from the queue and report progress through a small seam."""
     if reporter is None:
@@ -415,10 +503,32 @@ async def run_tests(  # noqa: PLR0913
                 (
                     session_teardown_failures,
                     session_output,
-                ) = await teardown_session_fixtures(capture_output=capture_output)
-                run_teardown_failures, run_output = await teardown_run_fixtures(
-                    capture_output=capture_output
+                    session_warnings,
+                ) = await teardown_session_fixtures(
+                    capture_output=capture_output, cleanup_timeout=timeout
                 )
+                (
+                    run_teardown_failures,
+                    run_output,
+                    run_warnings,
+                ) = await teardown_run_fixtures(
+                    capture_output=capture_output, cleanup_timeout=timeout
+                )
+                if teardown_diagnostics is not None:
+                    teardown_diagnostics.run_output = run_output
+                    teardown_diagnostics.run_warnings = run_warnings
+                    teardown_diagnostics.session_output = session_output
+                    teardown_diagnostics.session_warnings = session_warnings
+                if test_results and (session_warnings or run_warnings):
+                    final_result = test_results[-1]
+                    test_results[-1] = replace(
+                        final_result,
+                        warnings=(
+                            *final_result.warnings,
+                            *session_warnings,
+                            *run_warnings,
+                        ),
+                    )
                 if not pdb_triggered and _maybe_debug_session_teardown(
                     session_teardown_failures,
                     live_diagnostics=live_diagnostics,

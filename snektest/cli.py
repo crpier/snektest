@@ -30,6 +30,7 @@ from snektest.models import (
     FilterItem,
     PassedResult,
     RunInfrastructureError,
+    RunTeardownDiagnostics,
     TeardownFailure,
     TestResult,
     UnreachableError,
@@ -79,8 +80,10 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
     entry: dict[str, object] = {
         "name": str(result.name),
         "duration": result.duration,
+        "fixture_teardown_output": result.fixture_teardown_output,
         "markers": list(result.markers),
         "status": _json_result_status(result),
+        "warnings": list(result.warnings),
     }
     match result.result:
         case FailedResult(exception=exception):
@@ -155,6 +158,12 @@ def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
         "fixture_teardown_failed": summary.fixture_teardown_failed,
         "run_teardown_failed": summary.run_teardown_failed,
         "session_teardown_failed": summary.session_teardown_failed,
+        "run_teardown_output": getattr(summary, "run_teardown_output", None),
+        "run_teardown_warnings": list(getattr(summary, "run_teardown_warnings", ())),
+        "session_teardown_output": getattr(summary, "session_teardown_output", None),
+        "session_teardown_warnings": list(
+            getattr(summary, "session_teardown_warnings", ())
+        ),
         "run_teardown_failures": [
             {
                 "fixture_name": failure.fixture_name,
@@ -218,6 +227,10 @@ class TestRunSummary:
     session_teardown_failures: list[TeardownFailure]
     run_teardown_failed: int = 0
     run_teardown_failures: list[TeardownFailure] = field(default_factory=list)
+    run_teardown_output: str | None = None
+    run_teardown_warnings: tuple[str, ...] = ()
+    session_teardown_output: str | None = None
+    session_teardown_warnings: tuple[str, ...] = ()
     benchmark_baseline: BenchmarkBaselineRun | None = None
 
 
@@ -280,7 +293,7 @@ Options:
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   -n, --workers N   Run in N worker processes, or use auto
   --timeout SECONDS Override the 60-second async-test timeout
-  --no-timeout      Disable the default async-test timeout
+  --no-timeout      Disable async-test body timeout; cleanup remains bounded
   --pdb             Drop into post-mortem debugger on first failure
 
 Example commands:
@@ -554,6 +567,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
+    teardown_diagnostics: RunTeardownDiagnostics | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
     queue = TestsQueue()
     collection_exception: list[BaseException] = []
@@ -584,6 +598,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
             collection_failed=lambda: bool(collection_exception),
             reporter=reporter,
             benchmark_baseline=benchmark_baseline,
+            teardown_diagnostics=teardown_diagnostics,
         )
     finally:
         producer_thread.join()
@@ -639,6 +654,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         raise BadRequestError(msg)
 
     selected_reporter = reporter or NullRunReporter()
+    teardown_diagnostics = RunTeardownDiagnostics()
     if workers is None:
         (
             test_results,
@@ -652,6 +668,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             timeout=timeout,
             reporter=selected_reporter,
             benchmark_baseline=benchmark_baseline,
+            teardown_diagnostics=teardown_diagnostics,
         )
     else:
         if pdb_on_failure:
@@ -669,6 +686,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             timeout=timeout,
             workers=workers,
             benchmark_baseline=benchmark_baseline,
+            teardown_diagnostics=teardown_diagnostics,
         )
 
     return TestRunSummary(
@@ -682,8 +700,12 @@ async def run_tests_programmatic(  # noqa: PLR0913
         run_teardown_failed=len(run_teardown_failures),
         session_teardown_failed=len(session_teardown_failures),
         run_teardown_failures=run_teardown_failures,
+        run_teardown_output=teardown_diagnostics.run_output,
+        run_teardown_warnings=teardown_diagnostics.run_warnings,
         test_results=test_results,
         session_teardown_failures=session_teardown_failures,
+        session_teardown_output=teardown_diagnostics.session_output,
+        session_teardown_warnings=teardown_diagnostics.session_warnings,
     )
 
 

@@ -267,8 +267,12 @@ async def test_async_operation() -> None:
 ```
 
 Async tests fail if they finish with tasks they created still pending. Snektest
-cancels and awaits those tasks so they cannot contaminate later tests. Await
-background work before returning from a test.
+tears down function fixtures first, then cancels test-owned tasks. A task created
+during fixture setup belongs to that fixture and remains alive through its
+teardown; the fixture must stop it before returning. Session-owned tasks may stay
+alive between tests. Snektest reports tasks abandoned by fixture teardown against
+the responsible fixture. Tasks created by an embedding host application are not
+touched.
 
 ### Performance Benchmarks
 
@@ -450,7 +454,7 @@ snektest -n auto
 # Override the default 60-second async-test timeout
 snektest --timeout 5
 
-# Disable the default timeout
+# Disable the async-test body timeout; cleanup remains bounded
 snektest --no-timeout
 
 # Disable stdout/stderr capture
@@ -481,7 +485,8 @@ still runs. Outside a Git worktree, snektest checks every matching `test_*.py` f
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output. Use `--json-output` for a pure
-machine-readable summary with per-test exception messages.
+machine-readable summary with per-test exception messages, teardown failures,
+teardown output, and warnings.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
@@ -496,11 +501,19 @@ blocked case and run unrelated work. A mutex is not an OS lock and does not
 coordinate other snektest commands or leaked subprocesses.
 
 The CLI applies a 60-second timeout to every async test by default. Use
-`--timeout SECONDS` to override it or `--no-timeout` to disable it. The timeout
-is best-effort: it only fires while a test is suspended on an `await`, so a hung
-`await` is reported as an error and the run continues, but a test stuck in
-synchronous or CPU-bound work cannot be interrupted. A timed-out test still
-runs its function-fixture teardown.
+`--timeout SECONDS` to override it or `--no-timeout` to disable the test-body
+limit. The timeout is best-effort: it only fires while a test is suspended on an
+`await`, so a hung `await` is reported as an error and the run continues, but a
+test stuck in synchronous or CPU-bound work cannot be interrupted.
+
+Cleanup has a separate guarantee. Snektest tears down every established fixture
+in reverse setup order, even after test failure, interruption, or parent
+cancellation. It then propagates parent cancellation. Each async fixture teardown
+and task-cancellation attempt uses the configured `--timeout`; without one,
+including under `--no-timeout`, cleanup keeps a 60-second ceiling. A timeout or
+abandoned fixture task is attributed to its fixture, and one teardown failure
+does not skip the remaining fixtures. Synchronous teardown cannot be interrupted
+in-process, so CI still needs an outer job timeout.
 
 Interactions to know about:
 

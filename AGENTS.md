@@ -145,24 +145,37 @@ uses children. `--pdb` with workers and `-s --json-output` are usage errors.
 
 ### Async Hygiene
 
-After a successful async test body, `execute_test` compares event-loop task
-snapshots. Newly created tasks still pending are cancelled and awaited, and the
-test becomes a failure. Pending tasks are also cancelled when the body fails or
-errors, but the original result is preserved. Sync tests are not checked.
+`execute_test` tags child tasks by execution context instead of comparing global
+event-loop snapshots. Function fixtures tear down before test-owned tasks are
+classified. Tasks created during fixture setup inherit that fixture's owner and
+remain alive through its teardown; session-owned tasks may survive between tests.
+A fixture that returns while its tasks remain pending receives an attributed
+teardown failure. Test-owned leaks are cancelled after function teardown. New
+tasks from an unrelated embedding application have no test owner and are left
+alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
+the owning test or fixture fails.
 
 ### Timeouts
 
 CLI runs apply a 60-second timeout to every async test by default.
-`--timeout SECONDS` overrides it, while `--no-timeout` disables it. The CLI
-passes that run-wide ceiling to `execute_test`, which wraps the awaited test body
-in `asyncio.timeout`. It is async-only and best-effort: the timeout only fires
-while the test is suspended on an `await`, so a hung `await` becomes an error
-(`TestTimeoutError`, reported as ERROR) and the run continues, while synchronous
-or CPU-bound work cannot be interrupted. A `TimeoutError` the test raised itself
-is distinguished from a fired timeout via `Timeout.expired()` and passes through
-unchanged. Timed-out tests still run function-fixture teardown. There is no
-per-test timeout. Direct programmatic runner calls remain unbounded unless they
-pass `timeout`.
+`--timeout SECONDS` overrides it, while `--no-timeout` disables the test-body
+limit. The CLI passes that run-wide ceiling to `execute_test`, which wraps the
+awaited test body in `asyncio.timeout`. It is async-only and best-effort: the
+timeout only fires while the test is suspended on an `await`, so a hung `await`
+becomes an error (`TestTimeoutError`, reported as ERROR) and the run continues,
+while synchronous or CPU-bound work cannot be interrupted. A `TimeoutError` the
+test raised itself is distinguished from a fired timeout via `Timeout.expired()`
+and passes through unchanged. There is no per-test timeout. Direct programmatic
+runner calls leave test bodies unbounded unless they pass `timeout`.
+
+Cleanup remains bounded when the body timeout is disabled. Each async fixture
+teardown and task-cancellation attempt gets the configured timeout, or 60 seconds
+when `timeout=None`. Cleanup failures identify the fixture and do not stop later
+teardown attempts. Function teardown runs before task-leak classification.
+`SystemExit`, `KeyboardInterrupt`, and parent task cancellation propagate only
+after cleanup; explicit test-raised `CancelledError` remains a failed test.
+Synchronous teardown cannot be interrupted on the local event-loop thread and
+requires an outer process or CI timeout.
 
 Interactions:
 
