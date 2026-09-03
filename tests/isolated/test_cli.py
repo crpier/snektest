@@ -41,6 +41,7 @@ from snektest.models import (
     UnexpectedPassResult,
     UnreachableError,
 )
+from snektest.reporting import ConsoleRunReporter
 
 
 @test()
@@ -663,6 +664,78 @@ def test_one() -> None:
 
     assert_eq(summary.passed, 1)
     assert_eq(buffer.getvalue(), "")
+
+
+@test(mark="medium")
+async def test_console_reporter_discards_passing_output_after_reporting() -> None:
+    """Console runs do not retain output that no later report consumes."""
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        test_file = Path(temporary_directory) / "test_noisy_pass.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_noisy_pass() -> None:
+    print("noise")
+""".lstrip()
+        )
+
+        with contextlib.redirect_stdout(StringIO()):
+            summary = await run_tests_programmatic(
+                [FilterItem(str(test_file))],
+                reporter=ConsoleRunReporter(),
+            )
+
+    assert_eq(summary.test_results[0].captured_output, "")
+
+
+@test(mark="medium")
+async def test_programmatic_reporter_retains_passing_output() -> None:
+    """Structured callers keep passing output unless their reporter opts out."""
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        test_file = Path(temporary_directory) / "test_programmatic_pass.py"
+        _ = test_file.write_text(
+            """
+from snektest import test
+
+@test()
+def test_noisy_pass() -> None:
+    print("needed by caller")
+""".lstrip()
+        )
+
+        summary = await run_tests_programmatic([FilterItem(str(test_file))])
+
+    assert_eq(summary.test_results[0].captured_output, "needed by caller\n")
+
+
+@test(mark="medium")
+async def test_console_reporter_retains_failing_output() -> None:
+    """Failure diagnostics keep captured output regardless of pass policy."""
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        test_file = Path(temporary_directory) / "test_noisy_failure.py"
+        _ = test_file.write_text(
+            """
+from snektest import fail, test
+
+@test()
+def test_noisy_failure() -> None:
+    print("failure context")
+    fail("boom")
+""".lstrip()
+        )
+
+        with contextlib.redirect_stdout(StringIO()):
+            summary = await run_tests_programmatic(
+                [FilterItem(str(test_file))],
+                reporter=ConsoleRunReporter(),
+            )
+
+    assert_eq(summary.test_results[0].captured_output, "failure context\n")
 
 
 @test(mark="medium")

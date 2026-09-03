@@ -1,6 +1,5 @@
 """Test discovery and collection into executable test cases."""
 
-import asyncio
 import os
 import subprocess
 from collections.abc import Callable, Sequence
@@ -41,7 +40,6 @@ from snektest.utils import (
 
 TEST_FILE_PREFIX = "test_"
 
-TestsQueue = asyncio.Queue[TestCase]
 _COLLECTION_LOCK = Lock()
 
 
@@ -249,29 +247,6 @@ def collect_tests_from_file(  # noqa: PLR0913
     )
 
 
-def load_tests_from_file(  # noqa: PLR0913
-    file_path: PyFilePath,
-    filter_item: FilterItem,
-    queue: TestsQueue,
-    loop: asyncio.AbstractEventLoop,
-    *,
-    mark: str | None = None,
-    spec_loader: Callable[..., object] = spec_from_file_location,
-    collection_root: Path | None = None,
-) -> _CollectionMatchStats:
-    """Collect one file and publish its cases to an event-loop queue."""
-    collected = collect_tests_from_file(
-        file_path,
-        filter_item,
-        mark=mark,
-        spec_loader=spec_loader,
-        collection_root=collection_root,
-    )
-    for test_case in collected.cases:
-        _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
-    return collected.stats
-
-
 def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
     """Generate a list of valid file paths for given filter item."""
 
@@ -403,38 +378,17 @@ def collect_tests_from_filters(
     return collected_cases
 
 
-def load_tests_from_filters(  # noqa: PLR0913
+def collect_test_plan(
     filter_items: list[FilterItem],
-    queue: TestsQueue,
-    loop: asyncio.AbstractEventLoop,
     *,
     allow_empty: bool = False,
     capture_output: bool = False,
     mark: str | None = None,
-    exception_holder: list[BaseException] | None = None,
-) -> None:
-    """Load tests from all filter items and populate the queue.
-
-    Args:
-        filter_items: List of filter items to load tests from
-        queue: Queue to populate with tests
-        loop: Event loop for thread-safe queue operations
-        exception_holder: Optional list to store exception if one occurs during collection
-    """
-    try:
-        with _COLLECTION_LOCK, maybe_capture_output(capture_output):
-            test_cases = collect_tests_from_filters(
-                filter_items, allow_empty=allow_empty, mark=mark
-            )
-        for test_case in test_cases:
-            _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
-    except BaseException as exc:
-        if exception_holder is not None:
-            if isinstance(exc, CollectionError):
-                exception_holder.append(exc)
-            else:
-                collection_error = CollectionError(f"Error during collection: {exc}")
-                collection_error.__cause__ = exc
-                exception_holder.append(collection_error)
-    finally:
-        _ = loop.call_soon_threadsafe(queue.shutdown)
+) -> list[TestCase]:
+    """Collect one complete plan under process-global import/output guards."""
+    with _COLLECTION_LOCK, maybe_capture_output(capture_output):
+        return collect_tests_from_filters(
+            filter_items,
+            allow_empty=allow_empty,
+            mark=mark,
+        )

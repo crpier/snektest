@@ -50,23 +50,13 @@ def _test_case(
     )
 
 
-async def _run_queue(
+async def _run_plan(
     entries: list[TestCase],
     *,
     pdb_on_failure: bool = False,
     post_mortem: Callable[[TracebackType], None] | None = None,
     resolver: Callable[[Path], Path] | None = None,
 ) -> None:
-    queue: asyncio.Queue[TestCase] = asyncio.Queue()
-    for entry in entries:
-        queue.put_nowait(entry)
-
-    async def shutdown_soon() -> None:
-        await asyncio.sleep(0)
-        queue.shutdown()
-
-    shutdown_task = asyncio.create_task(shutdown_soon())
-
     def base_post_mortem(_: TracebackType) -> None:
         return None
 
@@ -74,12 +64,41 @@ async def _run_queue(
         return path.resolve()
 
     _results, _session_failures, _run_failures = await run_tests(
-        queue,
+        entries,
         pdb_on_failure=pdb_on_failure,
         post_mortem=post_mortem or base_post_mortem,
         resolver=resolver or base_resolver,
     )
-    await shutdown_task
+
+
+@test()
+async def test_run_tests_consumes_completed_plan_in_order() -> None:
+    """Serial execution preserves complete-plan order without queue scheduling."""
+    execution_order: list[str] = []
+
+    def first() -> None:
+        execution_order.append("first")
+
+    def second() -> None:
+        execution_order.append("second")
+
+    test_cases = [
+        _test_case(
+            TestName(file_path=Path("plan.py"), func_name="first", params_part=""),
+            first,
+        ),
+        _test_case(
+            TestName(file_path=Path("plan.py"), func_name="second", params_part=""),
+            second,
+        ),
+    ]
+
+    results, session_failures, run_failures = await run_tests(test_cases)
+
+    assert_eq(execution_order, ["first", "second"])
+    assert_eq([result.name.func_name for result in results], execution_order)
+    assert_eq(session_failures, [])
+    assert_eq(run_failures, [])
 
 
 @test()
@@ -149,7 +168,7 @@ async def test_debug_paths_cover_resolve_and_selected_none() -> None:
     def debug_noop_post_mortem(_: TracebackType) -> None:
         return None
 
-    await _run_queue(
+    await _run_plan(
         [_test_case(name, failing)],
         pdb_on_failure=True,
         post_mortem=debug_noop_post_mortem,
@@ -173,7 +192,7 @@ async def test_debug_fixture_teardown_branch() -> None:
     def fixture_noop_post_mortem(_: TracebackType) -> None:
         return None
 
-    await _run_queue(
+    await _run_plan(
         [_test_case(name, test_body)],
         pdb_on_failure=True,
         post_mortem=fixture_noop_post_mortem,
@@ -197,7 +216,7 @@ async def test_debug_session_teardown_branch_and_output() -> None:
     def session_noop_post_mortem(_: TracebackType) -> None:
         return None
 
-    await _run_queue(
+    await _run_plan(
         [_test_case(name, test_body)],
         pdb_on_failure=True,
         post_mortem=session_noop_post_mortem,
@@ -247,27 +266,18 @@ async def test_run_tests_continues_after_cancelled_test() -> None:
     def passing() -> None:
         return None
 
-    queue: asyncio.Queue[TestCase] = asyncio.Queue()
-    queue.put_nowait(
+    test_cases = [
         _test_case(
             TestName(file_path=Path("x.py"), func_name="cancelled", params_part=""),
             cancelled,
-        )
-    )
-    queue.put_nowait(
+        ),
         _test_case(
             TestName(file_path=Path("x.py"), func_name="passing", params_part=""),
             passing,
-        )
-    )
+        ),
+    ]
 
-    async def shutdown_soon() -> None:
-        await asyncio.sleep(0)
-        queue.shutdown()
-
-    shutdown_task = asyncio.create_task(shutdown_soon())
-    results, session_failures, run_failures = await run_tests(queue)
-    await shutdown_task
+    results, session_failures, run_failures = await run_tests(test_cases)
 
     assert_eq(len(results), 2)
     _ = assert_isinstance(results[0].result, FailedResult)

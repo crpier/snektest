@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import linecache
+import traceback as traceback_module
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -274,8 +275,11 @@ def snapshot_exception(
         depth=0,
         seen=set(),
     )
-    if traceback is not None and (store := _live_diagnostic_store.get()) is not None:
-        store.tracebacks[id(diagnostic)] = traceback
+    if traceback is not None:
+        if (store := _live_diagnostic_store.get()) is not None:
+            store.tracebacks[id(diagnostic)] = traceback
+        else:
+            traceback_module.clear_frames(traceback)
     return diagnostic
 
 

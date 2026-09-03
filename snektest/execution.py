@@ -4,8 +4,8 @@ import asyncio
 import pdb  # noqa: T100
 import sys
 import time
-from collections.abc import Callable, Coroutine, Generator
-from contextlib import contextmanager
+from collections.abc import Callable, Coroutine, Generator, Sequence
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import replace
 from inspect import iscoroutine
@@ -15,7 +15,6 @@ from typing import Any, cast
 
 from snektest.benchmark import collect_benchmarks
 from snektest.benchmark_baseline import BenchmarkBaseline
-from snektest.collection import TestsQueue
 from snektest.diagnostics import (
     LiveDiagnosticStore,
     snapshot_exception,
@@ -44,7 +43,7 @@ from snektest.models import (
     _SkipSignal,
 )
 from snektest.output import maybe_capture_output
-from snektest.reporting import ConsoleRunReporter, RunReporter
+from snektest.reporting import ConsoleRunReporter, RunReporter, result_for_retention
 from snektest.task_cleanup import TaskCleanup, cancel_tasks
 from snektest.thread_observation import observe_background_failures
 
@@ -556,19 +555,18 @@ def _maybe_debug_session_teardown(
 
 
 async def run_tests(  # noqa: PLR0913
-    queue: TestsQueue,
+    test_cases: Sequence[TestCase],
     *,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
     timeout: float | None = None,  # noqa: ASYNC109
-    collection_failed: Callable[[], bool] = lambda: False,
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
     reporter: RunReporter | None = None,
     resolver: Callable[[Path], Path] = Path.resolve,
     benchmark_baseline: BenchmarkBaseline | None = None,
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
-    """Run all tests from the queue and report progress through a small seam."""
+    """Run a completed test plan and report progress through a small seam."""
     if reporter is None:
         reporter = ConsoleRunReporter()
 
@@ -578,21 +576,20 @@ async def run_tests(  # noqa: PLR0913
     run_teardown_failures: list[TeardownFailure] = []
     pdb_triggered = False
     live_diagnostics = LiveDiagnosticStore()
-    with (
-        use_live_diagnostic_store(live_diagnostics),
-        use_registry(FixtureRegistry()),
-    ):
+    diagnostic_context = (
+        use_live_diagnostic_store(live_diagnostics) if pdb_on_failure else nullcontext()
+    )
+    with diagnostic_context, use_registry(FixtureRegistry()):
         try:
-            while True:
-                test_case = await queue.get()
+            for test_case in test_cases:
                 test_result = await execute_test(
                     test_case,
                     capture_output=capture_output,
                     timeout=timeout,
                     benchmark_baseline=benchmark_baseline,
                 )
-                test_results.append(test_result)
                 reporter.test_finished(test_result)
+                test_results.append(result_for_retention(reporter, test_result))
                 if not pdb_triggered and _maybe_debug_test_result(
                     test_result,
                     live_diagnostics=live_diagnostics,
@@ -602,74 +599,71 @@ async def run_tests(  # noqa: PLR0913
                 ):
                     pdb_triggered = True
                     break
-        except asyncio.QueueShutDown:
-            pass
         finally:
-            if not collection_failed():
-                (
-                    session_teardown_failures,
-                    session_output,
-                    session_warnings,
-                ) = await teardown_session_fixtures(
-                    capture_output=capture_output, cleanup_timeout=timeout
-                )
-                (
-                    run_teardown_failures,
-                    run_output,
-                    run_warnings,
-                ) = await teardown_run_fixtures(
-                    capture_output=capture_output, cleanup_timeout=timeout
-                )
-                if teardown_diagnostics is not None:
-                    teardown_diagnostics.run_output = run_output
-                    teardown_diagnostics.run_warnings = run_warnings
-                    teardown_diagnostics.session_output = session_output
-                    teardown_diagnostics.session_warnings = session_warnings
-                if test_results and (session_warnings or run_warnings):
-                    final_result = test_results[-1]
-                    test_results[-1] = replace(
-                        final_result,
-                        warnings=(
-                            *final_result.warnings,
-                            *session_warnings,
-                            *run_warnings,
-                        ),
-                    )
-                if not pdb_triggered and _maybe_debug_session_teardown(
-                    session_teardown_failures,
-                    live_diagnostics=live_diagnostics,
-                    pdb_on_failure=pdb_on_failure,
-                    post_mortem=post_mortem,
-                ):
-                    pdb_triggered = True
-
-                (
-                    has_test_failures,
-                    has_fixture_teardown_failures,
-                    has_session_teardown_failures,
-                    has_run_teardown_failures,
-                ) = has_any_failures(
-                    test_results,
-                    session_teardown_failures,
-                    run_teardown_failures,
-                )
-
-                session_output_for_display = None
-                if session_output and (
-                    has_test_failures
-                    or has_fixture_teardown_failures
-                    or has_session_teardown_failures
-                ):
-                    session_output_for_display = session_output
-
-                reporter.run_finished(
-                    run_teardown_failures=run_teardown_failures,
-                    run_teardown_output=(
-                        run_output if run_output and has_run_teardown_failures else None
+            (
+                session_teardown_failures,
+                session_output,
+                session_warnings,
+            ) = await teardown_session_fixtures(
+                capture_output=capture_output, cleanup_timeout=timeout
+            )
+            (
+                run_teardown_failures,
+                run_output,
+                run_warnings,
+            ) = await teardown_run_fixtures(
+                capture_output=capture_output, cleanup_timeout=timeout
+            )
+            if teardown_diagnostics is not None:
+                teardown_diagnostics.run_output = run_output
+                teardown_diagnostics.run_warnings = run_warnings
+                teardown_diagnostics.session_output = session_output
+                teardown_diagnostics.session_warnings = session_warnings
+            if test_results and (session_warnings or run_warnings):
+                final_result = test_results[-1]
+                test_results[-1] = replace(
+                    final_result,
+                    warnings=(
+                        *final_result.warnings,
+                        *session_warnings,
+                        *run_warnings,
                     ),
-                    test_results=test_results,
-                    session_teardown_failures=session_teardown_failures,
-                    session_teardown_output=session_output_for_display,
-                    total_duration=time.monotonic() - total_duration,
                 )
+            if not pdb_triggered and _maybe_debug_session_teardown(
+                session_teardown_failures,
+                live_diagnostics=live_diagnostics,
+                pdb_on_failure=pdb_on_failure,
+                post_mortem=post_mortem,
+            ):
+                pdb_triggered = True
+
+            (
+                has_test_failures,
+                has_fixture_teardown_failures,
+                has_session_teardown_failures,
+                has_run_teardown_failures,
+            ) = has_any_failures(
+                test_results,
+                session_teardown_failures,
+                run_teardown_failures,
+            )
+
+            session_output_for_display = None
+            if session_output and (
+                has_test_failures
+                or has_fixture_teardown_failures
+                or has_session_teardown_failures
+            ):
+                session_output_for_display = session_output
+
+            reporter.run_finished(
+                run_teardown_failures=run_teardown_failures,
+                run_teardown_output=(
+                    run_output if run_output and has_run_teardown_failures else None
+                ),
+                test_results=test_results,
+                session_teardown_failures=session_teardown_failures,
+                session_teardown_output=session_output_for_display,
+                total_duration=time.monotonic() - total_duration,
+            )
     return test_results, session_teardown_failures, run_teardown_failures

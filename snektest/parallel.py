@@ -42,7 +42,7 @@ from snektest.models import (
     TestResult,
 )
 from snektest.output import maybe_capture_output
-from snektest.reporting import RunReporter
+from snektest.reporting import RunReporter, result_for_retention
 
 
 class _ProcessConnection(Protocol):
@@ -757,6 +757,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         next_report_ordinal = 0
         next_worker_identifier = requested_workers
         replacements_needed = 0
+        run_ahead_limit = requested_workers * 2
         run_fixture_requests: list[RunFixtureIdentity] = []
 
         while pending or receive_tasks or run_fixture_requests:
@@ -822,6 +823,12 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
             if not replacements_needed and not run_fixture_requests:
                 for worker in worker_processes:
+                    unreported_case_count = len(results_by_ordinal) + sum(
+                        active_worker.active_ordinal is not None
+                        for active_worker in worker_processes
+                    )
+                    if unreported_case_count >= run_ahead_limit:
+                        break
                     if (
                         worker.active_ordinal is not None
                         or worker.waiting_for_run_fixture is not None
@@ -884,9 +891,9 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 results_by_ordinal[ordinal] = message.result
 
             while next_report_ordinal in results_by_ordinal:
-                test_result = results_by_ordinal[next_report_ordinal]
+                test_result = results_by_ordinal.pop(next_report_ordinal)
                 reporter.test_finished(test_result)
-                reported_results.append(test_result)
+                reported_results.append(result_for_retention(reporter, test_result))
                 next_report_ordinal += 1
 
         session_failures: list[TeardownFailure] = []

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import tempfile
 from collections.abc import Callable
@@ -18,7 +17,7 @@ from snektest.cli import (
     build_json_summary,
     parse_cli_args,
 )
-from snektest.collection import TestsQueue, load_tests_from_file
+from snektest.collection import collect_tests_from_file
 from snektest.models import FilterItem, PassedResult, TestName, TestResult
 from snektest.utils import get_test_function_markers, get_test_function_mutex
 
@@ -94,10 +93,9 @@ def test_mutex_rejects_empty_untrimmed_and_non_string_values() -> None:
 
 
 @test()
-async def test_load_tests_from_file_filters_on_marker() -> None:
+def test_collect_tests_from_file_filters_on_marker() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-        test_file = tmp_dir / "test_collection_markers.py"
+        test_file = Path(tmp) / "test_collection_markers.py"
         _ = test_file.write_text(
             """
 from snektest import test
@@ -116,33 +114,13 @@ def test_unmarked() -> None:
             "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
         )
         filter_item = FilterItem(str(test_file))
-        loop = asyncio.get_running_loop()
 
-        queue: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(
-            file_path,
-            filter_item,
-            queue,
-            loop,
-            mark="fast",
-        )
-        test_case = await asyncio.wait_for(queue.get(), timeout=1)
-        assert_eq(test_case.name.func_name, "test_fast")
-        assert_eq(test_case.markers, ("fast",))
-        queue.shutdown()
+        fast = collect_tests_from_file(file_path, filter_item, mark="fast")
+        medium = collect_tests_from_file(file_path, filter_item, mark="medium")
 
-        queue_empty: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(
-            file_path,
-            filter_item,
-            queue_empty,
-            loop,
-            mark="medium",
-        )
-        queue_empty.shutdown()
-        with assert_raises(asyncio.QueueShutDown):
-            _ = await queue_empty.get()
-        await asyncio.sleep(0)
+        assert_eq(fast.cases[0].name.func_name, "test_fast")
+        assert_eq(fast.cases[0].markers, ("fast",))
+        assert_eq(medium.cases, ())
 
 
 @test()

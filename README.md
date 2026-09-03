@@ -478,7 +478,10 @@ def test_needs_a_timing_budget() -> None:
 
 Run the same test with different inputs. Every parameter list must be non-empty.
 Case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
-rendered case filters remain unambiguous.
+rendered case filters remain unambiguous. Multiple lists form a Cartesian
+product. One decorated test may expand to at most 10,000 cases; larger products
+raise `BadRequestError` during collection. Split exhaustive matrices or use
+`@test_hypothesis` to sample a large input space.
 
 ```python
 from snektest import Param, assert_eq, test
@@ -696,14 +699,26 @@ a worker thread or provide a parallel threaded executor.
 
 ## Execution Model
 
-Snektest completes deterministic collection before any test starts. Omit
-`--workers` for in-process sequential execution on one event loop. Explicit
+Snektest completes deterministic collection before any test starts. Local mode
+passes that complete plan directly to the serial runner without a callback queue.
+Omit `--workers` for in-process sequential execution on one event loop. Explicit
 worker mode starts the requested number of persistent spawn workers, capped by
 the selected case count, plus one canonical collector/run-fixture host;
 `--workers 1` still uses real child processes. Each worker executes one test at
 a time on its own event loop and owns its session fixtures. Results are presented
-in canonical manifest order even when workers finish out of order. Repeated
-filters remain repeated invocations with distinct ordinals.
+in canonical manifest order even when workers finish out of order. Active and
+completed-but-unreported cases are capped at twice the worker count, so a slow
+early case cannot build an unbounded result backlog. Repeated filters remain
+repeated invocations with distinct ordinals.
+
+Console and JSON runs release captured output from clean passing tests after the
+reporter consumes each result. Failure output remains available for diagnostics.
+`run_tests_programmatic` retains passing output by default for callers that use
+the returned results. Exception results contain bounded immutable snapshots;
+normal runs clear ended traceback frames promptly, while `--pdb` keeps live
+frames only until it stops on the first failure. See
+[large-suite memory policy](docs/large-suite-memory.md) for budgets and measured
+1,000-case and 10,000-case scenarios.
 
 Teardown is dependency-first-in-reverse: function fixtures after each test,
 session fixtures when each worker exits, then run fixtures in the host. A worker

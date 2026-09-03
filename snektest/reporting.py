@@ -1,9 +1,9 @@
 """Adapters for reporting test run progress and completion."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
-from snektest.models import TeardownFailure, TestResult
+from snektest.models import PassedResult, TeardownFailure, TestResult
 from snektest.presenter import print_failures, print_summary, print_test_result
 
 
@@ -15,8 +15,11 @@ class RunReporter(Protocol):
     print progress while programmatic and JSON runs stay machine-readable.
     """
 
+    retain_passed_output: bool
+    """Whether completed passing results must keep their captured output."""
+
     def test_finished(self, test_result: TestResult) -> None:
-        """Observe one completed test result."""
+        """Observe one completed test result before retention policy is applied."""
 
     def run_finished(  # noqa: PLR0913
         self,
@@ -31,8 +34,28 @@ class RunReporter(Protocol):
         """Observe final run results after session fixture teardown."""
 
 
+def result_for_retention(
+    reporter: RunReporter,
+    test_result: TestResult,
+) -> TestResult:
+    """Drop clean passing output after a reporter has consumed the full result."""
+    if (
+        reporter.retain_passed_output
+        or not isinstance(test_result.result, PassedResult)
+        or test_result.fixture_teardown_failures
+    ):
+        return test_result
+    return replace(
+        test_result,
+        captured_output="",
+        fixture_teardown_output=None,
+    )
+
+
 class ConsoleRunReporter:
     """Reporter adapter that renders the human-readable console output."""
+
+    retain_passed_output = False
 
     def test_finished(self, test_result: TestResult) -> None:
         print_test_result(test_result)
@@ -64,6 +87,9 @@ class ConsoleRunReporter:
 
 class NullRunReporter:
     """Reporter adapter for callers that need structured results only."""
+
+    def __init__(self, *, retain_passed_output: bool = True) -> None:
+        self.retain_passed_output: bool = retain_passed_output
 
     def test_finished(self, test_result: TestResult) -> None:
         _ = test_result
@@ -104,6 +130,7 @@ class DeferredRunReporter:
     def __init__(self, reporter: RunReporter) -> None:
         self._reporter: RunReporter = reporter
         self._run_finished: _DeferredRunFinished | None = None
+        self.retain_passed_output: bool = reporter.retain_passed_output
 
     def test_finished(self, test_result: TestResult) -> None:
         self._reporter.test_finished(test_result)
