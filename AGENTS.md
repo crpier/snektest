@@ -157,6 +157,26 @@ tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
 the owning test or fixture fails.
 
+### Thread Observability
+
+Execution temporarily installs and chains `threading.excepthook` and
+`sys.unraisablehook` around each canonically sequential test, including function
+teardown and task cleanup. An unhandled thread or unraisable exception turns a
+pass into an error. New non-daemon threads alive afterward turn a pass into a
+failure; daemon and current event-loop default-executor threads are exempt.
+Additional background failures on an existing failure/error remain process-safe
+`BackgroundFailure` diagnostics in console and JSON. Hooks are process-global,
+so concurrent direct `execute_test` calls are unsupported. The standard runner
+never overlaps tests within one process.
+
+The supported blocking pattern is `await asyncio.to_thread(...)`. Context is
+copied there, but fixtures should still be loaded before offload; raw
+`threading.Thread` does not inherit the fixture-registry context. Threads cannot
+be cancelled. A timed-out `to_thread` await leaves its function running and it
+may delay event-loop shutdown. Raw leaked threads, sync or CPU-bound hangs,
+imports, and sync teardown still need an outer process/CI timeout. There is no
+threaded test executor.
+
 ### Timeouts
 
 CLI runs apply a 60-second timeout to every async test by default.

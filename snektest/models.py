@@ -425,6 +425,15 @@ class TeardownFailure:
 
 
 @dataclass(frozen=True)
+class BackgroundFailure:
+    """Process-neutral failure observed outside the test body's call stack."""
+
+    exception: ExceptionDiagnostic
+    label: str
+    origin: Literal["thread", "thread_leak", "unraisable"]
+
+
+@dataclass(frozen=True)
 class TestResult:
     captured_output: str
     duration: float
@@ -435,3 +444,4 @@ class TestResult:
     result: PassedResult | FailedResult | ErrorResult
     warnings: tuple[str, ...]
     ordinal: int = 0
+    background_failures: tuple[BackgroundFailure, ...] = ()

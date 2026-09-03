@@ -29,6 +29,18 @@ async def test_async_code() -> None:
     assert_eq(username.upper(), "ADA")
 
 
+def blocking_uppercase(value: str) -> str:
+    """Represent a blocking application call that cannot run on the event loop."""
+    return value.upper()
+
+
+@test(mark="medium")
+async def test_blocking_application_call() -> None:
+    """Offload blocking work explicitly; its thread cannot be cancelled."""
+    result = await asyncio.to_thread(blocking_uppercase, "snek")
+    assert_eq(result, "SNEK")
+
+
 async def serve_until_cancelled() -> None:
     """Represent background work owned by a fixture."""
     _ = await asyncio.Event().wait()

@@ -513,8 +513,8 @@ still runs. Outside a Git worktree, snektest checks every matching `test_*.py` f
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output. Use `--json-output` for a pure
-machine-readable summary with per-test exception messages, teardown failures,
-teardown output, and warnings.
+machine-readable summary with per-test exception messages, supplemental
+background failures, teardown failures, teardown output, and warnings.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
@@ -559,6 +559,30 @@ Interactions to know about:
   already been unwound by cancellation, so the debugger lands on snektest's
   internal timeout machinery, not the line in your test that hung. `--pdb` is of
   limited help for locating a timeout; use it for ordinary failures.
+
+### Blocking and threaded work
+
+Keep async tests responsive by offloading blocking calls with
+`await asyncio.to_thread(...)`. Load fixtures before offloading application work.
+`asyncio.to_thread` copies the current context, while a raw `threading.Thread`
+does not inherit snektest's fixture registry and must not call `load_fixture`.
+
+An unhandled exception from a thread during a test, or an exception reported by
+`sys.unraisablehook`, makes an otherwise passing test an error. A new non-daemon
+thread still alive after function-fixture teardown makes an otherwise passing
+test fail; joined threads pass, daemon threads are ignored, and persistent
+workers owned by the event loop's default executor are exempt. Existing process
+hooks are called and restored. When the body already failed or errored,
+additional background failures remain visible in console output and the JSON
+`background_failures` field.
+
+Snektest reports a live raw thread but cannot cancel or join it. Such a thread may
+still delay interpreter shutdown. Timing out an `await asyncio.to_thread(...)`
+stops awaiting the result but cannot stop the underlying function, which may
+continue consuming resources or delay event-loop shutdown. Deadlocked raw
+threads, synchronous tests, CPU-bound code, imports, and synchronous teardown
+still require an outer process or CI timeout. Snektest does not move sync tests to
+a worker thread or provide a parallel threaded executor.
 
 ## Execution Model
 

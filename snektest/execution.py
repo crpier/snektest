@@ -26,6 +26,7 @@ from snektest.memory import collect_measurements
 from snektest.models import (
     DEFAULT_CLEANUP_TIMEOUT_SECONDS,
     AssertionFailure,
+    BackgroundFailure,
     BadRequestError,
     ErrorResult,
     FailedResult,
@@ -40,6 +41,7 @@ from snektest.models import (
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
 from snektest.task_cleanup import TaskCleanup, cancel_tasks
+from snektest.thread_observation import observe_background_failures
 
 _test_task_owner: ContextVar[object | None] = ContextVar(
     "snektest_test_task_owner", default=None
@@ -126,7 +128,62 @@ def _task_leak_result(
         )
 
 
-async def execute_test(  # noqa: C901, PLR0912, PLR0915
+def _with_background_failures(
+    test_result: TestResult,
+    failures: list[BackgroundFailure],
+) -> TestResult:
+    if not failures:
+        return test_result
+    if not isinstance(test_result.result, PassedResult):
+        return replace(test_result, background_failures=tuple(failures))
+
+    primary = next(
+        (failure for failure in failures if failure.origin != "thread_leak"),
+        failures[0],
+    )
+    passed = test_result.result
+    if primary.origin == "thread_leak":
+        result: FailedResult | ErrorResult = FailedResult(
+            exception=primary.exception,
+            benchmarks=passed.benchmarks,
+            benchmark_comparisons=passed.benchmark_comparisons,
+        )
+    else:
+        result = ErrorResult(
+            exception=primary.exception,
+            benchmarks=passed.benchmarks,
+            benchmark_comparisons=passed.benchmark_comparisons,
+        )
+    return replace(
+        test_result,
+        result=result,
+        background_failures=tuple(failures),
+    )
+
+
+async def execute_test(
+    test_case: TestCase,
+    *,
+    capture_output: bool = True,
+    timeout: float | None = None,  # noqa: ASYNC109
+    benchmark_baseline: BenchmarkBaseline | None = None,
+    exc_info_provider: Callable[
+        [], tuple[object | None, object | None, TracebackType | None]
+    ] = sys.exc_info,
+) -> TestResult:
+    """Execute one test while observing failures outside its call stack."""
+    with observe_background_failures() as background_failures:
+        test_result = await _execute_test(
+            test_case,
+            capture_output=capture_output,
+            timeout=timeout,
+            benchmark_baseline=benchmark_baseline,
+            exc_info_provider=exc_info_provider,
+        )
+    return _with_background_failures(test_result, background_failures)
+
+
+async def _execute_test(  # noqa: C901, PLR0912, PLR0915
     test_case: TestCase,
     *,
     capture_output: bool = True,
