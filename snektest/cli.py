@@ -588,6 +588,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
             "queue": queue,
             "loop": asyncio.get_running_loop(),
             "allow_empty": allow_empty,
+            "capture_output": capture_output,
             "mark": mark,
             "exception_holder": collection_exception,
         },

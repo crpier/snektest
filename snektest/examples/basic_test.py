@@ -1,4 +1,4 @@
-"""Basic snektest examples."""
+"""Basic tests retain source order after every selected module finishes import."""
 
 from snektest import assert_eq, assert_in, test
 

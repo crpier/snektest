@@ -433,6 +433,15 @@ and Hypothesis strategies can be checked by `ty`.
 
 ## Running Tests
 
+Collection completes before execution. Directory files are ordered by normalized
+path, test cases retain source definition order, and filters retain command-line
+order. Absolute and relative paths resolve to the same module identity;
+package-relative imports work. A module imports once when overlapping filters
+select it in one run and imports fresh in a later run. Decorated functions
+imported from another module are not collected as local tests. With output
+capture enabled, import output and warnings are kept out of test results and
+cannot corrupt JSON stdout.
+
 ```sh
 # Run all tests
 snektest

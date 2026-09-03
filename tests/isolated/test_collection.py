@@ -169,13 +169,19 @@ def test_one() -> None:
 
 
 @test()
-async def test_load_tests_from_file_caches_module() -> None:
+async def test_load_tests_from_file_reimports_in_a_new_session() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         test_file = tmp_dir / "test_collection_generated.py"
+        event_file = tmp_dir / "import-events"
         _ = test_file.write_text(
-            """
+            f"""
+from pathlib import Path
+
 from snektest import test
+
+with Path({str(event_file)!r}).open("a") as events:
+    _ = events.write("imported\\n")
 
 @test()
 def test_one() -> None:
@@ -196,6 +202,8 @@ def test_one() -> None:
         queue2: TestsQueue = TestsQueue()
         _ = load_tests_from_file(file_path, filter_item, queue2, loop, mark=None)
         _ = await asyncio.wait_for(queue2.get(), timeout=1)
+
+        assert_eq(event_file.read_text().splitlines(), ["imported", "imported"])
 
 
 @test()

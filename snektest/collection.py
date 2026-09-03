@@ -4,18 +4,23 @@ import asyncio
 import os
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
+from importlib import import_module
 from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import isfunction
 from pathlib import Path
 from shutil import which
 from sys import modules
+from threading import Lock
+from types import ModuleType
 from typing import TypeGuard, cast
 
 from pydantic import ValidationError
 
 from snektest.annotations import PyFilePath, validate_PyFilePath
+from snektest.decorators import reset_run_fixture_catalog
 from snektest.models import (
     BadRequestError,
     CollectionError,
@@ -25,6 +30,7 @@ from snektest.models import (
     TestCase,
     TestName,
 )
+from snektest.output import maybe_capture_output
 from snektest.utils import (
     get_test_function_markers,
     get_test_function_mutex,
@@ -35,6 +41,89 @@ from snektest.utils import (
 TEST_FILE_PREFIX = "test_"
 
 TestsQueue = asyncio.Queue[TestCase]
+_COLLECTION_LOCK = Lock()
+
+
+@dataclass
+class _CollectionModuleLoader:
+    """Import test modules once per canonical path within one collection run."""
+
+    _cache: dict[Path, ModuleType] = field(default_factory=dict)
+    _initialized_roots: set[Path] = field(default_factory=set)
+
+    @staticmethod
+    def _package_context(file_path: Path) -> tuple[Path, tuple[str, ...]]:
+        package_parts: list[str] = []
+        cursor = file_path.parent
+        while (cursor / "__init__.py").is_file():
+            package_parts.append(cursor.name)
+            cursor = cursor.parent
+        return cursor, tuple(reversed(package_parts))
+
+    @staticmethod
+    def _namespace(root: Path) -> str:
+        digest = sha256(str(root).encode()).hexdigest()[:16]
+        return f"_snektest_collection_{digest}"
+
+    def _initialize_root(self, root: Path, namespace: str) -> None:
+        if root in self._initialized_roots:
+            return
+        for module_name in tuple(modules):
+            if module_name == namespace or module_name.startswith(f"{namespace}."):
+                modules.pop(module_name, None)
+        root_module = ModuleType(namespace)
+        root_module.__package__ = namespace
+        root_module.__path__ = [str(root)]
+        root_module.__spec__ = ModuleSpec(namespace, loader=None, is_package=True)
+        modules[namespace] = root_module
+        self._initialized_roots.add(root)
+
+    def load(
+        self,
+        file_path: Path,
+        *,
+        spec_loader: Callable[..., object],
+    ) -> ModuleType:
+        canonical_file_path = file_path.resolve()
+        cached = self._cache.get(canonical_file_path)
+        if cached is not None:
+            return cached
+
+        root, package_parts = self._package_context(canonical_file_path)
+        namespace = self._namespace(root)
+        self._initialize_root(root, namespace)
+        if package_parts:
+            package_name = ".".join((namespace, *package_parts))
+            _ = import_module(package_name)
+            module_name = f"{package_name}.{canonical_file_path.stem}"
+            existing_module = modules.get(module_name)
+            existing_file = getattr(existing_module, "__file__", None)
+            if (
+                isinstance(existing_module, ModuleType)
+                and isinstance(existing_file, str)
+                and Path(existing_file).resolve() == canonical_file_path
+            ):
+                self._cache[canonical_file_path] = existing_module
+                return existing_module
+        else:
+            leaf_digest = sha256(str(canonical_file_path).encode()).hexdigest()[:16]
+            module_name = f"{namespace}._test_{leaf_digest}"
+        spec = spec_loader(module_name, canonical_file_path)
+        spec_value = cast("ModuleSpec", spec)
+        loader = getattr(spec_value, "loader", None)
+        if loader is None:
+            msg = f"Could not load spec from {file_path}"
+            raise CollectionError(msg)
+
+        module = module_from_spec(spec_value)
+        modules[module_name] = module
+        try:
+            loader.exec_module(module)
+        except BaseException:
+            modules.pop(module_name, None)
+            raise
+        self._cache[canonical_file_path] = module
+        return module
 
 
 @dataclass(frozen=True)
@@ -79,13 +168,14 @@ def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Pat
     )
 
 
-def collect_tests_from_file(
+def collect_tests_from_file(  # noqa: PLR0913
     file_path: PyFilePath,
     filter_item: FilterItem,
     *,
     mark: str | None = None,
     spec_loader: Callable[..., object] = spec_from_file_location,
     collection_root: Path | None = None,
+    module_loader: _CollectionModuleLoader | None = None,
 ) -> _CollectedFile:
     """Import one module and return selected cases in definition order."""
     path_root = collection_root or Path.cwd()
@@ -94,24 +184,11 @@ def collect_tests_from_file(
         if file_path.is_absolute()
         else (path_root / file_path).resolve()
     )
-    module_name = ".".join(canonical_file_path.with_suffix("").parts)
-    if spec_loader is spec_from_file_location and module_name in modules:
-        module = modules[module_name]
-    else:
-        spec = spec_loader(module_name, file_path)
-        spec_value = cast("ModuleSpec", spec)
-        loader = getattr(spec_value, "loader", None)
-        if loader is None:
-            msg = f"Could not load spec from {file_path}"
-            raise CollectionError(msg)
-
-        module = module_from_spec(spec_value)
-        modules[module_name] = module
-        try:
-            loader.exec_module(module)
-        except BaseException:
-            modules.pop(module_name, None)
-            raise
+    active_module_loader = module_loader or _CollectionModuleLoader()
+    module = active_module_loader.load(
+        canonical_file_path,
+        spec_loader=spec_loader,
+    )
 
     test_functions = [
         func
@@ -263,6 +340,8 @@ def collect_tests_from_filters(
     """Build one complete canonical plan before any selected test executes."""
     collected_cases: list[TestCase] = []
     empty_filters: list[FilterItem] = []
+    module_loader = _CollectionModuleLoader()
+    reset_run_fixture_catalog()
     try:
         for filter_item in filter_items:
             collected_before_filter = len(collected_cases)
@@ -275,6 +354,7 @@ def collect_tests_from_filters(
                     filter_item=filter_item,
                     mark=mark,
                     collection_root=Path.cwd().resolve(),
+                    module_loader=module_loader,
                 )
                 function_matched = (
                     function_matched or collected_file.stats.function_matched
@@ -327,6 +407,7 @@ def load_tests_from_filters(  # noqa: PLR0913
     loop: asyncio.AbstractEventLoop,
     *,
     allow_empty: bool = False,
+    capture_output: bool = False,
     mark: str | None = None,
     exception_holder: list[BaseException] | None = None,
 ) -> None:
@@ -339,9 +420,10 @@ def load_tests_from_filters(  # noqa: PLR0913
         exception_holder: Optional list to store exception if one occurs during collection
     """
     try:
-        test_cases = collect_tests_from_filters(
-            filter_items, allow_empty=allow_empty, mark=mark
-        )
+        with _COLLECTION_LOCK, maybe_capture_output(capture_output):
+            test_cases = collect_tests_from_filters(
+                filter_items, allow_empty=allow_empty, mark=mark
+            )
         for test_case in test_cases:
             _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
     except BaseException as exc:

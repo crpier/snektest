@@ -435,6 +435,11 @@ def load_fixture[R](fix: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
     return cast("R | Coroutine[R]", registry.load_function(fix))
 
 
+def reset_run_fixture_catalog() -> None:
+    """Forget registrations from an earlier in-process collection run."""
+    _run_fixture_catalog.clear()
+
+
 def get_run_fixture_catalog() -> dict[
     RunFixtureIdentity, Callable[[], Fixture[Any] | AsyncFixture[Any]]
 ]:
