@@ -6,10 +6,10 @@ read back after the fact, and allocation-heavy work often runs in executor
 threads. Only `TracemallocBackend` is implemented today; memray slots in later
 behind the same `MemoryBackend` protocol without touching call sites.
 
-The module also owns two run-scoped context variables that `assert_memory`
-leans on: a nesting guard (a second `assert_memory` inside an active one would
-corrupt the outer peak watermark) and a measurement sink drained into the test
-result on success.
+The module also owns process-global measurement ownership, a task-local nesting
+guard, and a run-scoped measurement sink drained into the test result on
+success. Ownership rejects overlapping tasks or threads before either can reset
+the process-global tracer.
 """
 
 import tracemalloc
@@ -17,6 +17,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from threading import Lock
 from typing import Literal, Protocol
 
 from snektest.models import BadRequestError, MemoryMeasurement
@@ -44,11 +45,12 @@ class MemoryBackend(Protocol):
     """Thread-inclusive memory tracer used by `assert_memory`.
 
     `start()` establishes a baseline; `reset_peak()` drops the peak watermark to
-    the current level and re-baselines the peak against it, so each round's peak
-    measures only that round's transient allocation and a leak retained from
-    earlier rounds cannot inflate it; `sample()` reads retained bytes above the
-    start baseline and peak bytes above the last `reset_peak()`; `stop()` undoes
-    `start()`, never tearing down tracing the backend did not itself begin.
+    the current level and re-baselines the peak against it when the backend owns
+    tracing. A borrowed tracemalloc session keeps its caller-visible historical
+    peak, so samples conservatively include that prior high watermark. `sample()`
+    reads retained bytes above the start baseline and peak bytes above the last
+    software baseline; `stop()` undoes `start()`, never tearing down tracing the
+    backend did not itself begin.
     """
 
     def start(self) -> None: ...
@@ -65,13 +67,13 @@ class TracemallocBackend:
     tracing (frame depth 1, totals only) and baselines afterwards so
     tracemalloc's own allocations are subtracted out. `stop()` stops tracing
     only when the backend started it, leaving a caller's pre-existing tracing
-    session untouched.
+    session, traceback depth, live traces, and historical peak untouched.
 
-    `reset_peak()` re-baselines the peak against the current retained total, so
-    `sample().peak_bytes` reports the peak above the *most recent* reset rather
-    than above the start baseline. In rounds mode this makes each round's peak
-    its own transient allocation; in whole-block mode the single reset at
-    `__enter__` sits at the start baseline, preserving whole-block semantics.
+    When tracing is owned, `reset_peak()` drops the global watermark and
+    re-baselines against current retained memory, so each round reports its own
+    transient allocation. When tracing is borrowed, the global watermark cannot
+    be restored through the stdlib API, so it is not reset; prior peak history is
+    included conservatively rather than risking an understated passing result.
     """
 
     def __init__(self) -> None:
@@ -89,7 +91,8 @@ class TracemallocBackend:
         self._peak_baseline_bytes = self._baseline_bytes
 
     def reset_peak(self) -> None:
-        tracemalloc.reset_peak()
+        if self._owns_tracing:
+            tracemalloc.reset_peak()
         self._peak_baseline_bytes = tracemalloc.get_traced_memory()[0]
 
     def sample(self) -> Sample:
@@ -116,6 +119,7 @@ def create_backend(name: BackendName) -> MemoryBackend:
     raise BadRequestError(msg)
 
 
+_measurement_lock = Lock()
 _measurement_active: ContextVar[bool] = ContextVar(
     "snektest_memory_measurement_active", default=False
 )
@@ -130,13 +134,26 @@ def is_measurement_active() -> bool:
 
 
 def enter_measurement() -> Token[bool]:
-    """Mark a measurement as active, returning the token to reset it on exit."""
-    return _measurement_active.set(True)
+    """Claim process-global tracing and mark the current context active."""
+    if not _measurement_lock.acquire(blocking=False):
+        msg = (
+            "assert_memory measurement is already active in this process; "
+            "memory measurements cannot overlap across tasks or threads."
+        )
+        raise BadRequestError(msg)
+    try:
+        return _measurement_active.set(True)
+    except BaseException:
+        _measurement_lock.release()
+        raise
 
 
 def exit_measurement(token: Token[bool]) -> None:
-    """Clear the active-measurement flag set by `enter_measurement`."""
-    _measurement_active.reset(token)
+    """Clear context ownership and release process-global tracing."""
+    try:
+        _measurement_active.reset(token)
+    finally:
+        _measurement_lock.release()
 
 
 def record_measurement(measurement: MemoryMeasurement) -> None:

@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Generator
 from contextvars import Token
 from statistics import median
@@ -84,6 +85,9 @@ _MIN_SLOPE_ROUNDS = 10
 _MIN_SLOPE_POINTS = 2
 """Fewest retained-bytes samples a Theil-Sen slope can be fit through."""
 
+_MAX_MEMORY_ROUNDS = 1000
+"""Largest accepted sample count, bounding the quadratic Theil-Sen fit."""
+
 
 def _theil_sen_slope(values: list[int]) -> float:
     """Median of pairwise slopes of `values` against their 0-based index.
@@ -143,8 +147,10 @@ def assert_memory(
     ```
 
     Budgets are enforced on `__exit__` (raising `AssertionFailure`); `m.peak_bytes`
-    and `m.growth_slope` stay readable afterwards for custom assertions. Cannot
-    be nested. `backend` is generic so swapping tracers never edits call sites.
+    and `m.growth_slope` stay readable afterwards for custom assertions. Rounds
+    must be between 1 and 1000 and warmup must be non-negative. Measurements
+    cannot nest, overlap another task/thread, or yield to the event loop while
+    open. `backend` is generic so swapping tracers never edits call sites.
     """
     return MemoryContext(
         peak_below=peak_below,
@@ -161,7 +167,8 @@ class MemoryContext:
     Whole-block mode (default `rounds=1`, `m.rounds` untouched) takes a single
     peak/retained sample over the block. Rounds mode iterates `warmup + rounds`
     times through `m.rounds`, resetting the peak watermark each round and
-    dropping warmup samples from the Theil-Sen slope fit.
+    dropping warmup samples from the Theil-Sen slope fit. The 1000-round maximum
+    bounds that fit's quadratic pairwise-slope allocation.
     """
 
     def __init__(
@@ -183,6 +190,8 @@ class MemoryContext:
         self._rounds_iter: Generator[int] | None = None
         self._exhausted: bool = False
         self._guard_token: Token[bool] | None = None
+        self._loop_probe: asyncio.Handle | None = None
+        self._loop_advanced: bool = False
         self.has_exited: bool = False
         self._peak_bytes: int | None = None
         self._growth_slope: float | None = None
@@ -197,6 +206,18 @@ class MemoryContext:
         if self._peak_below is None and self._slope_below is None:
             msg = "assert_memory requires at least one of peak_below or slope_below."
             raise BadRequestError(msg)
+        if self._rounds <= 0:
+            msg = f"assert_memory rounds must be positive, got {self._rounds}."
+            raise BadRequestError(msg)
+        if self._warmup < 0:
+            msg = f"assert_memory warmup must be non-negative, got {self._warmup}."
+            raise BadRequestError(msg)
+        if self._rounds > _MAX_MEMORY_ROUNDS:
+            msg = (
+                f"assert_memory rounds must be at most {_MAX_MEMORY_ROUNDS} to bound "
+                "growth-slope computation."
+            )
+            raise BadRequestError(msg)
         if self._slope_below is not None and self._rounds < _MIN_SLOPE_ROUNDS:
             msg = (
                 f"assert_memory(slope_below=...) needs rounds >= {_MIN_SLOPE_ROUNDS} "
@@ -204,8 +225,22 @@ class MemoryContext:
             )
             raise BadRequestError(msg)
         self._guard_token = enter_measurement()
-        self._backend.start()
-        self._backend.reset_peak()
+        try:
+            self._backend.start()
+            self._backend.reset_peak()
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self._loop_probe = loop.call_soon(self._mark_loop_advanced)
+        except BaseException:
+            try:
+                self._backend.stop()
+            finally:
+                exit_measurement(self._guard_token)
+                self._guard_token = None
+            raise
         return self
 
     def __exit__(
@@ -215,15 +250,29 @@ class MemoryContext:
         traceback: TracebackType | None,
     ) -> bool:
         self.has_exited = True
+        if self._loop_probe is not None:
+            self._loop_probe.cancel()
         try:
             if exc_type is not None:
                 return False
+            if self._loop_advanced:
+                msg = (
+                    "assert_memory body must not await or otherwise yield to the "
+                    "event loop; sibling-task allocations would contaminate the "
+                    "process-global measurement."
+                )
+                raise BadRequestError(msg)
             self._finalize()
         finally:
-            self._backend.stop()
-            if self._guard_token is not None:
-                exit_measurement(self._guard_token)
+            try:
+                self._backend.stop()
+            finally:
+                if self._guard_token is not None:
+                    exit_measurement(self._guard_token)
         return False
+
+    def _mark_loop_advanced(self) -> None:
+        self._loop_advanced = True
 
     @property
     def rounds(self) -> Generator[int]:

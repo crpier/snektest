@@ -1,4 +1,4 @@
-"""Memory-budget examples: peak allocation and leak detection."""
+"""Non-yielding memory budgets: 1..1000 rounds and non-negative warmup."""
 
 from snektest import assert_memory, test
 

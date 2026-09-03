@@ -4,10 +4,25 @@ Allocations are kept large (hundreds of KB to ~1MB) so budgets dominate
 allocator/GC noise and the leak-vs-flat verdicts stay deterministic.
 """
 
-from snektest import assert_ge, assert_lt, assert_memory, assert_raises, test
+import asyncio
+from threading import Event, Thread
+
+from snektest import (
+    Param,
+    assert_eq,
+    assert_false,
+    assert_ge,
+    assert_in,
+    assert_lt,
+    assert_memory,
+    assert_raises,
+    assert_true,
+    test,
+)
 from snektest.models import AssertionFailure, BadRequestError
 
 _MB = 1024 * 1024
+_MAX_MEMORY_ROUNDS = 1000
 
 
 @test(mark="fast")
@@ -88,6 +103,121 @@ async def test_flat_body_slope_stays_near_zero() -> None:
         for _ in measurement.rounds:
             pass
     assert_lt(measurement.growth_slope, 64)
+
+
+@test(
+    [
+        Param(value=(0, 0), name="zero-rounds"),
+        Param(value=(-1, 0), name="negative-rounds"),
+        Param(value=(1, -1), name="negative-warmup"),
+    ],
+    mark="fast",
+)
+def test_invalid_round_counts_fail_before_user_work(
+    configuration: tuple[int, int],
+) -> None:
+    """Accepted configurations cannot skip every requested measurement."""
+    rounds, warmup = configuration
+    body_ran = False
+
+    with (
+        assert_raises(BadRequestError),
+        assert_memory(peak_below=1, rounds=rounds, warmup=warmup),
+    ):
+        body_ran = True
+
+    assert_false(body_ran)
+
+
+@test(mark="fast")
+def test_memory_round_limit_is_checked_before_user_work() -> None:
+    """The Theil-Sen fit cannot accidentally allocate an unbounded pair list."""
+    body_ran = False
+
+    with (
+        assert_raises(BadRequestError) as raised,
+        assert_memory(peak_below=_MB, rounds=_MAX_MEMORY_ROUNDS + 1),
+    ):
+        body_ran = True
+
+    assert_false(body_ran)
+    assert_in("at most 1000", str(raised.exception))
+
+
+@test(mark="fast")
+def test_memory_round_limit_boundary_is_accepted() -> None:
+    """The documented maximum is accepted before normal iterator enforcement."""
+    body_ran = False
+
+    with (
+        assert_raises(RuntimeError),
+        assert_memory(peak_below=_MB, rounds=_MAX_MEMORY_ROUNDS),
+    ):
+        body_ran = True
+        raise RuntimeError
+
+    assert_eq(body_ran, True)
+
+
+@test(mark="fast")
+async def test_sibling_tasks_cannot_overlap_memory_measurements() -> None:
+    """Task-local context cannot permit two owners of process-global tracing."""
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def hold_measurement() -> None:
+        with assert_raises(BadRequestError), assert_memory(peak_below=_MB):
+            first_entered.set()
+            await release_first.wait()
+
+    first = asyncio.create_task(hold_measurement())
+    await first_entered.wait()
+    try:
+        with assert_raises(BadRequestError) as raised, assert_memory(peak_below=_MB):
+            pass
+        assert_in("already active", str(raised.exception))
+    finally:
+        release_first.set()
+        await first
+
+
+@test(mark="medium")
+def test_threads_cannot_overlap_memory_measurements() -> None:
+    """The process-wide owner also coordinates independent thread contexts."""
+    first_entered = Event()
+    release_first = Event()
+    thread_errors: list[BaseException] = []
+
+    def hold_measurement() -> None:
+        try:
+            with assert_memory(peak_below=8 * _MB):
+                first_entered.set()
+                _ = release_first.wait(timeout=1)
+        except BaseException as error:
+            thread_errors.append(error)
+
+    first = Thread(target=hold_measurement)
+    first.start()
+    assert_true(first_entered.wait(timeout=1))
+    try:
+        with assert_raises(BadRequestError) as raised, assert_memory(peak_below=_MB):
+            pass
+        assert_in("already active", str(raised.exception))
+    finally:
+        release_first.set()
+        first.join(timeout=1)
+
+    assert_false(first.is_alive())
+    assert_eq(thread_errors, [])
+
+
+@test(mark="fast")
+async def test_memory_measurement_cannot_yield_to_sibling_tasks() -> None:
+    """Suspending a process-global measurement would admit unrelated allocations."""
+    with assert_raises(BadRequestError) as raised, assert_memory(peak_below=_MB):
+        await asyncio.sleep(0)
+
+    assert_in("must not await", str(raised.exception))
 
 
 @test(mark="fast")

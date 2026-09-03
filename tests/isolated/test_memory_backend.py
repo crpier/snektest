@@ -3,8 +3,10 @@
 import tracemalloc
 
 from snektest import (
+    assert_eq,
     assert_false,
     assert_ge,
+    assert_is_not_none,
     assert_isinstance,
     assert_lt,
     assert_true,
@@ -82,12 +84,31 @@ def test_owned_tracing_is_stopped() -> None:
 
 @test()
 def test_borrowed_tracing_is_preserved() -> None:
-    """A backend that found tracing already active never stops it."""
-    tracemalloc.start()
+    """Borrowing preserves caller ownership, traces, depth, and peak history."""
+    tracemalloc.start(7)
     try:
+        traced_payload = bytearray(_KB)
+        trace_before = assert_is_not_none(
+            tracemalloc.get_object_traceback(traced_payload)
+        )
+        spike = bytearray(500 * _KB)
+        del spike
+        peak_before = tracemalloc.get_traced_memory()[1]
+
         backend = TracemallocBackend()
         backend.start()
+        backend.reset_peak()
+        sample = backend.sample()
         backend.stop()
+
         assert_true(tracemalloc.is_tracing())
+        assert_eq(tracemalloc.get_traceback_limit(), 7)
+        assert_eq(
+            tracemalloc.get_object_traceback(traced_payload),
+            trace_before,
+        )
+        assert_ge(tracemalloc.get_traced_memory()[1], peak_before)
+        assert_ge(sample.peak_bytes, 400 * _KB)
+        del traced_payload
     finally:
         tracemalloc.stop()

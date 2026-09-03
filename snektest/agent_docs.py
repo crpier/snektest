@@ -65,10 +65,15 @@ def test_needs_parentheses() -> None:
   pure assertion.
 - `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)` is a
   context-manager assertion for memory budgets (bytes as `int`). Wrap a region
-  for a whole-block peak budget, or loop work over `m.rounds` (needs
-  `rounds >= 10` for a `slope_below` leak check). At least one budget is
-  required — a budgetless call is a type error. `m.peak_bytes` /
-  `m.growth_slope` stay readable after the block. Cannot be nested.
+  for a whole-block peak budget, or loop work over `m.rounds`. `rounds` must be
+  1 through 1000, `warmup` must be non-negative, and a `slope_below` check needs
+  at least 10 rounds. The maximum bounds the quadratic Theil-Sen fit. At least
+  one budget is required — a budgetless call is a type error. `m.peak_bytes` /
+  `m.growth_slope` stay readable after the block. Process-global tracing means
+  measurements cannot nest or overlap sibling tasks/threads, and an async
+  measured region must not `await` or yield to the event loop. Collection ends
+  before the baseline. A borrowed tracemalloc session keeps the caller's depth,
+  traces, peak history, and ownership; prior peaks are included conservatively.
 - `assert_benchmark(median_below=..., p95_below=..., rounds=..., warmup=...)`
   asserts a sync or async region's typical and/or tail duration in seconds. At
   least one budget is required. Put setup before the context and loop timed work
