@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -23,11 +24,14 @@ _TIMEOUT_SECONDS = 60
 
 
 def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("COVERAGE_PROCESS_START", None)
     return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         check=False,
+        env=environment,
         text=True,
         timeout=_TIMEOUT_SECONDS,
     )
