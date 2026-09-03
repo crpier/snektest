@@ -31,8 +31,9 @@ uv run snektest tests/test_myfeature.py::test_something[case-name]
 uv run snektest --mark fast
 ```
 
-Explicit test-name and parameter-case filters are expected to error when the
-requested test or case does not exist.
+Every filter must select at least one test by default. `--allow-empty` permits
+empty files, directories, marker selections, and filters only when intentional;
+explicit missing test-name and parameter-case filters remain errors.
 
 ### Type Checking & Linting
 ```bash
@@ -61,7 +62,7 @@ This project uses `uv` for dependency management. The project requires Python >=
 ### Test Collection & Execution Flow
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
-2. **Canonical Collection** (`collect_tests_from_filters`): Sort directory candidates, preserve source and filter order, finish all imports, reject empty/colliding plans, and assign an ordinal to every occurrence. Explicit files bypass Git ignore checks; repeated filters remain repeated cases.
+2. **Canonical Collection** (`collect_tests_from_filters`): Sort directory candidates, preserve source and filter order, finish all imports, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
 3. **Local Execution**: With workers omitted, publish the complete plan to `run_tests`, which executes sequentially in process on one event loop.
 4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order.
 5. **Test Execution** (`execute_test`): Capture stdout/stderr, execute one sync or async test, teardown function fixtures, and return a process-neutral `TestResult`.
@@ -198,9 +199,11 @@ Interactions:
 ### Parameterization
 
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
-each list built from `Param(value=..., name=...)`. `Param.to_dict()` creates all
-combinations using `itertools.product`, keyed by param names. Each combination
-becomes a separate test execution.
+each non-empty list built from `Param(value=..., name=...)`. Case names are
+non-empty, unique, and exclude `, `, `[` and `]` so CLI filters are unambiguous.
+`Param.to_dict()` creates all combinations using `itertools.product`; each
+combination becomes a separate test execution and cardinality is the product of
+axis sizes.
 
 ### OpenAPI Contract Testing
 

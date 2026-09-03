@@ -16,7 +16,15 @@ from typing import TypeGuard, cast
 from pydantic import ValidationError
 
 from snektest.annotations import PyFilePath, validate_PyFilePath
-from snektest.models import CollectionError, FilterItem, TestCase, TestName
+from snektest.models import (
+    BadRequestError,
+    CollectionError,
+    EmptyCollectionError,
+    FilterItem,
+    InvalidTestDefinitionError,
+    TestCase,
+    TestName,
+)
 from snektest.utils import (
     get_test_function_markers,
     get_test_function_mutex,
@@ -219,15 +227,45 @@ def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
     )
 
 
+def _record_empty_filter(
+    filter_item: FilterItem,
+    *,
+    collected_before_filter: int,
+    collected_cases: list[TestCase],
+    empty_filters: list[FilterItem],
+) -> None:
+    if len(collected_cases) == collected_before_filter:
+        empty_filters.append(filter_item)
+
+
+def _validate_nonempty_plan(
+    collected_cases: list[TestCase],
+    empty_filters: list[FilterItem],
+    *,
+    allow_empty: bool,
+) -> None:
+    if allow_empty:
+        return
+    if empty_filters:
+        msg = f"No tests selected for filter `{empty_filters[0]}`"
+        raise EmptyCollectionError(msg)
+    if not collected_cases:
+        msg = "No tests selected"
+        raise EmptyCollectionError(msg)
+
+
 def collect_tests_from_filters(
     filter_items: list[FilterItem],
     *,
+    allow_empty: bool = False,
     mark: str | None = None,
 ) -> list[TestCase]:
     """Build one complete canonical plan before any selected test executes."""
     collected_cases: list[TestCase] = []
+    empty_filters: list[FilterItem] = []
     try:
         for filter_item in filter_items:
+            collected_before_filter = len(collected_cases)
             function_matched = filter_item.function_name is None
             params_matched = filter_item.params is None
             selection_names: set[TestName] = set()
@@ -265,22 +303,30 @@ def collect_tests_from_filters(
                     f"filter `{filter_item}`"
                 )
                 raise CollectionError(msg)  # noqa: TRY301
-        if not collected_cases:
-            msg = "No tests selected"
-            raise CollectionError(msg)  # noqa: TRY301
+            _record_empty_filter(
+                filter_item,
+                collected_before_filter=collected_before_filter,
+                collected_cases=collected_cases,
+                empty_filters=empty_filters,
+            )
+        _validate_nonempty_plan(collected_cases, empty_filters, allow_empty=allow_empty)
     except CollectionError:
         raise
+    except BadRequestError as exc:
+        msg = f"Invalid test definition: {exc}"
+        raise InvalidTestDefinitionError(msg) from exc
     except BaseException as exc:
         msg = f"Error during collection: {exc}"
         raise CollectionError(msg) from exc
     return collected_cases
 
 
-def load_tests_from_filters(
+def load_tests_from_filters(  # noqa: PLR0913
     filter_items: list[FilterItem],
     queue: TestsQueue,
     loop: asyncio.AbstractEventLoop,
     *,
+    allow_empty: bool = False,
     mark: str | None = None,
     exception_holder: list[BaseException] | None = None,
 ) -> None:
@@ -293,7 +339,9 @@ def load_tests_from_filters(
         exception_holder: Optional list to store exception if one occurs during collection
     """
     try:
-        test_cases = collect_tests_from_filters(filter_items, mark=mark)
+        test_cases = collect_tests_from_filters(
+            filter_items, allow_empty=allow_empty, mark=mark
+        )
         for test_case in test_cases:
             _ = loop.call_soon_threadsafe(queue.put_nowait, test_case)
     except BaseException as exc:

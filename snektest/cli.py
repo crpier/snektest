@@ -24,10 +24,12 @@ from snektest.models import (
     ArgsError,
     BadRequestError,
     CollectionError,
+    EmptyCollectionError,
     ErrorResult,
     ExceptionDiagnostic,
     FailedResult,
     FilterItem,
+    InvalidTestDefinitionError,
     PassedResult,
     RunInfrastructureError,
     RunTeardownDiagnostics,
@@ -243,6 +245,7 @@ _DEFAULT_TIMEOUT_SECONDS = 60.0
 @dataclass(frozen=True)
 class CliOptions:
     action: CliAction | None = None
+    allow_empty: bool = False
     benchmark_baseline: str | None = None
     capture_output: bool = True
     example_name: str | None = None
@@ -286,6 +289,7 @@ Options:
   --examples        List bundled examples
   --example NAME    Print a bundled example
   --json-output     Print machine-readable JSON summary
+  --allow-empty     Exit successfully when no tests are selected
   --benchmark-baseline PATH
                     Compare opted-in benchmarks with a machine-bound baseline
   --update-benchmark-baseline PATH
@@ -445,6 +449,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     complexity metric would only re-spread parsing state across helpers.
     """
     action: CliAction | None = None
+    allow_empty = False
     benchmark_baseline: str | None = None
     capture_output = True
     example_name: str | None = None
@@ -477,6 +482,8 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             capture_output = False
         elif arg == "--json-output":
             json_output = True
+        elif arg == "--allow-empty":
+            allow_empty = True
         elif arg in {"--benchmark-baseline", "--update-benchmark-baseline"}:
             if benchmark_baseline is not None or update_benchmark_baseline is not None:
                 return ParseError(
@@ -545,6 +552,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
 
     return CliOptions(
         action=action,
+        allow_empty=allow_empty,
         benchmark_baseline=benchmark_baseline,
         capture_output=capture_output,
         example_name=example_name,
@@ -561,6 +569,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
 async def _run_tests_with_producer_thread(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
+    allow_empty: bool,
     capture_output: bool,
     pdb_on_failure: bool,
     mark: str | None = None,
@@ -578,6 +587,7 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
             "filter_items": filter_items,
             "queue": queue,
             "loop": asyncio.get_running_loop(),
+            "allow_empty": allow_empty,
             "mark": mark,
             "exception_holder": collection_exception,
         },
@@ -622,6 +632,7 @@ def exit_code_from_summary(summary: TestRunSummary) -> int:
 async def run_tests_programmatic(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
+    allow_empty: bool = False,
     capture_output: bool = True,
     pdb_on_failure: bool = False,
     mark: str | None = None,
@@ -662,6 +673,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             run_teardown_failures,
         ) = await _run_tests_with_producer_thread(
             filter_items,
+            allow_empty=allow_empty,
             capture_output=capture_output,
             pdb_on_failure=pdb_on_failure,
             mark=mark,
@@ -680,6 +692,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             run_teardown_failures,
         ) = await run_tests_parallel(
             filter_items,
+            allow_empty=allow_empty,
             capture_output=capture_output,
             mark=mark,
             reporter=selected_reporter,
@@ -761,6 +774,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
             "TestRunSummary",
             await runner(
                 filter_items,
+                allow_empty=options.allow_empty,
                 capture_output=options.capture_output,
                 pdb_on_failure=options.pdb_on_failure,
                 mark=options.mark,
@@ -772,6 +786,20 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
         )
     except asyncio.CancelledError:
         return 2
+    except (EmptyCollectionError, InvalidTestDefinitionError) as error:
+        if options.json_output:
+            print(
+                json.dumps(
+                    {
+                        "error": {
+                            "type": "CollectionError",
+                            "message": str(error),
+                        }
+                    }
+                )
+            )
+            return 2
+        raise
     except BadRequestError as error:
         return _baseline_cli_error(error, json_output=options.json_output)
 

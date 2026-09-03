@@ -53,11 +53,19 @@ def test_parse_cli_args_defaults_to_dot() -> None:
 
     assert_eq(options.filters, (".",))
     assert_eq(options.action, None)
+    assert_eq(options.allow_empty, False)
     assert_eq(options.capture_output, True)
     assert_eq(options.json_output, False)
     assert_eq(options.pdb_on_failure, False)
     assert_eq(options.mark, None)
     assert_eq(options.workers, None)
+
+
+@test()
+def test_parse_cli_args_allow_empty() -> None:
+    options = assert_isinstance(parse_cli_args(["--allow-empty", "."]), CliOptions)
+
+    assert_eq(options.allow_empty, True)
 
 
 @test()
@@ -326,6 +334,14 @@ async def test_run_script_forwards_default_timeout() -> None:
 
 
 @test()
+async def test_run_tests_programmatic_allows_intentional_empty_plan() -> None:
+    summary = await run_tests_programmatic([], allow_empty=True)
+
+    assert_eq(summary.total_tests, 0)
+    assert_eq(summary.test_results, [])
+
+
+@test()
 async def test_run_tests_programmatic_rejects_unknown_marker() -> None:
     with assert_raises(BadRequestError):
         _ = await run_tests_programmatic([FilterItem(".")], mark="needs-s3")
@@ -347,6 +363,10 @@ def test_one() -> None:
 
         with assert_raises(CollectionError) as raised:
             _ = await run_tests_programmatic([FilterItem(f"{test_file}::aaa")])
+        with assert_raises(CollectionError):
+            _ = await run_tests_programmatic(
+                [FilterItem(f"{test_file}::aaa")], allow_empty=True
+            )
 
     assert_in("No test named `aaa`", str(raised.exception))
 

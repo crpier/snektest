@@ -1,4 +1,4 @@
-"""Parameterized snektest examples."""
+"""Parameterized tests use non-empty lists and unique, filter-safe case names."""
 
 from snektest import Param, assert_eq, test
 
