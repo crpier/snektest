@@ -991,12 +991,22 @@ error. Budgets are checked on exit, raising `AssertionFailure`.
 
 For a whole-block peak budget, wrap the region directly. For leak detection,
 loop your work over `m.rounds` — a stateful iterator running `warmup + rounds`
-iterations; a `slope_below` budget needs `rounds >= 10`. The slope is a
-Theil–Sen fit of retained bytes per round (resistant to a single-round GC
-spike), and `peak_bytes` is the max single-round peak. `m.peak_bytes` and
-`m.growth_slope` stay readable after the block for custom assertions. On a pass,
-the measured numbers are shown on the result line (e.g.
-`peak=1.0MB (<8.0MB)`). `assert_memory` cannot be nested.
+iterations. `rounds` must be between 1 and 1000, `warmup` must be non-negative,
+and a `slope_below` budget needs `rounds >= 10`. The upper bound limits the
+quadratic memory used by the Theil–Sen fit of retained bytes per round
+(resistant to a single-round GC spike). `peak_bytes` is the max single-round
+peak. `m.peak_bytes` and `m.growth_slope` stay readable after the block for
+custom assertions. On a pass, the measured numbers are shown on the result line
+(e.g. `peak=1.0MB (<8.0MB)`).
+
+Because tracemalloc is process-global and thread-inclusive, `assert_memory`
+measurements cannot nest or overlap across sibling tasks or threads; a competing
+entry raises `BadRequestError`. A region in an async test must not `await` or
+otherwise yield to the event loop, because unrelated sibling allocations could
+contaminate it. Collection and imports finish before the measurement baseline.
+If tracing is already active, snektest leaves the caller's
+tracing depth, live traces, historical peak, and ownership intact. Prior peak
+history is then included conservatively in the measured peak rather than reset.
 
 ```python
 from snektest import assert_memory, test

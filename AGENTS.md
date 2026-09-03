@@ -289,15 +289,25 @@ through a pluggable `MemoryBackend` (`memory.py`) — a thread-inclusive seam th
 does not assume a synchronous `int` return, so a future memray backend slots in
 behind the same protocol. Only `TracemallocBackend` exists today; it baselines
 out tracemalloc's own allocations and never stops tracing it did not start.
+A process-global non-blocking owner guard rejects overlap across sibling tasks or
+threads; the contextvar separately provides same-context nesting diagnostics.
+An event-loop probe rejects an async region that suspends, because unrelated
+sibling allocations could contaminate the global trace. Borrowed tracing
+preserves the caller's depth, live traces, peak history, and
+ownership. Because stdlib cannot restore a historical peak after reset, borrowed
+measurements do not reset it and conservatively include prior peak history.
 
 - Whole-block mode (`rounds=1`, `m.rounds` untouched) takes one peak sample over
   the block; there is no warmup in this mode.
 - Rounds mode loops work over `m.rounds` (a stateful iterator of
   `warmup + rounds` iterations). `peak_bytes` is the max single-round peak;
   `growth_slope` is a Theil–Sen fit of retained bytes per round (bytes/round).
-  A `slope_below` budget requires `rounds >= 10` (`BadRequestError` otherwise).
-- Guarded misuse (all `BadRequestError`): nesting, a `slope_below` budget under
-  ten rounds, and a rounds iterator left unconsumed or partially consumed.
+  `rounds` must be 1 through 1000 and `warmup >= 0`; the upper bound caps the
+  fit's quadratic pairwise-slope allocation. A `slope_below` budget requires
+  `rounds >= 10` (`BadRequestError` otherwise).
+- Guarded misuse (all `BadRequestError`): nesting or process-wide overlap,
+  invalid round/warmup counts, a `slope_below` budget under ten rounds, and a
+  rounds iterator left unconsumed or partially consumed.
 - Passing measurements flow through a run-scoped contextvar sink
   (`memory.py`) into `PassedResult.measurements`, are rendered on the green
   result line by the presenter, and appear under `memory_measurements` in
