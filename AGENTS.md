@@ -168,13 +168,12 @@ Interactions:
 
 - **`@test_hypothesis`.** An async property test runs every example inside a
   single `await asyncio.to_thread(run_hypothesis)` (`decorators.py`), so the
-  timeout wraps the whole property run, not each example. When it fires,
-  `asyncio.timeout` cancels the `await` but the worker thread keeps running to
-  completion — threads aren't cancellable — so a runaway property test is reported
-  as timed out while still burning CPU in the background. Sync property tests are
-  not coroutines, so the timeout never applies. Prefer Hypothesis's own
-  `deadline`/`max_examples` for per-example bounds; use `--no-timeout` if the
-  complete property run must remain unbounded.
+  timeout wraps the whole property run, not each example. If it fires while an
+  example is suspended, task cancellation completes the cross-thread handoff and
+  lets the Hypothesis worker stop. Synchronous or CPU-bound work in that thread
+  remains uninterruptible. Sync property tests are not coroutines, so the timeout
+  never applies. Prefer Hypothesis's own `deadline`/`max_examples` for per-example
+  bounds; use `--no-timeout` if the complete property run must remain unbounded.
 - **`--pdb`.** `TestTimeoutError` flows through the normal error path, so
   `_maybe_debug_test_result` will post-mortem on it. The cancellation unwinds the
   test's own `await` frame before `TestTimeoutError` is raised (with `from None`)
