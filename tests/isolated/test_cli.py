@@ -32,10 +32,13 @@ from snektest.cli import (
 from snektest.models import (
     BadRequestError,
     CollectionError,
+    ExpectedFailureResult,
     FilterItem,
     PassedResult,
+    SkippedResult,
     TestName,
     TestResult,
+    UnexpectedPassResult,
     UnreachableError,
 )
 
@@ -662,6 +665,42 @@ def test_one() -> None:
     assert_eq(buffer.getvalue(), "")
 
 
+@test(mark="medium")
+async def test_programmatic_summary_exposes_outcome_types() -> None:
+    """Programmatic callers receive typed states, reasons, and counts."""
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        test_file = Path(temporary_directory) / "test_programmatic_outcomes.py"
+        _ = test_file.write_text(
+            """
+from snektest import skip, test, xfail
+
+@test()
+def test_skip() -> None:
+    skip("environment unavailable")
+
+@test()
+def test_xfail() -> None:
+    xfail("known defect")
+
+@test(xfail="fixed defect")
+def test_xpass() -> None:
+    pass
+""".lstrip()
+        )
+
+        summary = await run_tests_programmatic([FilterItem(str(test_file))])
+
+    skipped = assert_isinstance(summary.test_results[0].result, SkippedResult)
+    expected = assert_isinstance(summary.test_results[1].result, ExpectedFailureResult)
+    unexpected = assert_isinstance(summary.test_results[2].result, UnexpectedPassResult)
+    assert_eq(summary.skipped, 1)
+    assert_eq(summary.expected_failures, 1)
+    assert_eq(summary.unexpected_passes, 1)
+    assert_eq(skipped.reason, "environment unavailable")
+    assert_eq(expected.reason, "known defect")
+    assert_eq(unexpected.reason, "fixed defect")
+
+
 @test()
 async def test_run_script_json_output_includes_markers() -> None:
     async def fake_run(*args: object, **kwargs: object) -> object:
@@ -683,6 +722,9 @@ async def test_run_script_json_output_includes_markers() -> None:
             (),
             {
                 "passed": 1,
+                "skipped": 0,
+                "expected_failures": 0,
+                "unexpected_passes": 0,
                 "failed": 0,
                 "errors": 0,
                 "fixture_teardown_failed": 0,

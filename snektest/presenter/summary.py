@@ -8,10 +8,13 @@ from rich.text import Text
 from snektest.models import (
     ErrorResult,
     ExceptionDiagnostic,
+    ExpectedFailureResult,
     FailedResult,
     PassedResult,
+    SkippedResult,
     TeardownFailure,
     TestResult,
+    UnexpectedPassResult,
 )
 
 
@@ -20,6 +23,9 @@ class RunCounts:
     passed: int
     failed: int
     errors: int
+    skipped: int
+    expected_failures: int
+    unexpected_passes: int
     fixture_teardown_failed: int
     run_teardown_failed: int
     session_teardown_failed: int
@@ -117,6 +123,27 @@ def _print_test_errors(console: Console, test_results: list[TestResult]) -> None
             )
 
 
+def _print_outcomes(console: Console, test_results: list[TestResult]) -> None:
+    """List non-pass outcomes with the same labels used during progress."""
+    for test_result in test_results:
+        match test_result.result:
+            case SkippedResult(reason=reason):
+                label = ("SKIPPED", "cyan")
+            case ExpectedFailureResult(reason=reason):
+                label = ("XFAIL", "yellow")
+            case UnexpectedPassResult(reason=reason):
+                label = ("XPASS", "red")
+            case _:
+                continue
+        _print_named_summary_entry(
+            console,
+            label=label,
+            test_name=str(test_result.name),
+            detail_prefix=" - ",
+            detail=reason,
+        )
+
+
 def _print_fixture_teardown_failures(
     console: Console, test_results: list[TestResult]
 ) -> None:
@@ -164,10 +191,15 @@ def _has_failures(counts: RunCounts) -> bool:
     return (
         counts.failed > 0
         or counts.errors > 0
+        or counts.unexpected_passes > 0
         or counts.fixture_teardown_failed > 0
         or counts.run_teardown_failed > 0
         or counts.session_teardown_failed > 0
     )
+
+
+def _has_summary_entries(counts: RunCounts) -> bool:
+    return _has_failures(counts) or counts.skipped > 0 or counts.expected_failures > 0
 
 
 def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str, str]:
@@ -178,6 +210,12 @@ def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str
         status_text += f"{counts.failed} failed, "
     if counts.errors > 0:
         status_text += f"{counts.errors} error, "
+    if counts.unexpected_passes > 0:
+        status_text += f"{counts.unexpected_passes} unexpected pass, "
+    if counts.skipped > 0:
+        status_text += f"{counts.skipped} skipped, "
+    if counts.expected_failures > 0:
+        status_text += f"{counts.expected_failures} expected failure, "
     if counts.fixture_teardown_failed > 0:
         status_text += f"{counts.fixture_teardown_failed} fixture teardown failed, "
     if counts.session_teardown_failed > 0:
@@ -210,8 +248,17 @@ def print_summary(
         1 for result in test_results if isinstance(result.result, FailedResult)
     )
     errors = sum(1 for result in test_results if isinstance(result.result, ErrorResult))
+    skipped = sum(
+        1 for result in test_results if isinstance(result.result, SkippedResult)
+    )
+    expected_failures = sum(
+        1 for result in test_results if isinstance(result.result, ExpectedFailureResult)
+    )
+    unexpected_passes = sum(
+        1 for result in test_results if isinstance(result.result, UnexpectedPassResult)
+    )
     fixture_teardown_failed = sum(
-        len(result.fixture_teardown_failures) for result in test_results
+        1 for result in test_results if result.fixture_teardown_failures
     )
     session_teardown_failed = len(session_teardown_failures)
     run_teardown_failed = len(run_teardown_failures)
@@ -220,6 +267,9 @@ def print_summary(
         passed=passed,
         failed=failed,
         errors=errors,
+        skipped=skipped,
+        expected_failures=expected_failures,
+        unexpected_passes=unexpected_passes,
         fixture_teardown_failed=fixture_teardown_failed,
         run_teardown_failed=run_teardown_failed,
         session_teardown_failed=session_teardown_failed,
@@ -227,8 +277,9 @@ def print_summary(
 
     _print_warnings(console, test_results)
 
-    if _has_failures(counts):
+    if _has_summary_entries(counts):
         console.rule("SUMMARY", style="wheat1")
+        _print_outcomes(console, test_results)
         _print_test_failures(console, test_results)
         _print_test_errors(console, test_results)
         _print_fixture_teardown_failures(console, test_results)

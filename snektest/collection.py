@@ -35,6 +35,7 @@ from snektest.utils import (
     get_test_function_markers,
     get_test_function_mutex,
     get_test_function_params,
+    get_test_function_xfail,
     is_test_function,
 )
 
@@ -230,6 +231,7 @@ def collect_tests_from_file(  # noqa: PLR0913
                 resolved_file_path=canonical_file_path,
             )
             test_case = TestCase(
+                expected_failure_reason=get_test_function_xfail(func),
                 function=func,
                 markers=markers,
                 mutex=get_test_function_mutex(func),

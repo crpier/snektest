@@ -10,6 +10,7 @@ Notable user-facing changes are recorded here.
 - Added a deliberate public API and background-thread failure diagnostics.
 - Added one cross-platform release gate and trusted, attested PyPI publishing.
 - Rejected non-finite timeouts and documented the verified runtime and hard-timeout boundaries.
+- Added reasoned SKIP, XFAIL, and strict XPASS outcomes across console, JSON, and programmatic runs.
 
 ## 0.16.0
 

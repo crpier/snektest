@@ -4,11 +4,14 @@ from snektest.models import (
     BenchmarkComparison,
     BenchmarkMeasurement,
     ErrorResult,
+    ExpectedFailureResult,
     FailedResult,
     MemoryMeasurement,
     PassedResult,
+    SkippedResult,
     TeardownFailure,
     TestResult,
+    UnexpectedPassResult,
 )
 from snektest.presenter.errors import print_failures as _print_failures
 from snektest.presenter.summary import print_summary as _print_summary
@@ -153,6 +156,30 @@ def print_test_result_to_console(console: Console, result: TestResult) -> None:
                 f"OK ({result.duration:.2f}s){_format_measurements(measurements)}{_format_benchmarks(benchmarks, benchmark_comparisons)}",
                 highlight=False,
                 style="green",
+                markup=False,
+                soft_wrap=True,
+            )
+        case SkippedResult(reason=reason):
+            console.print(
+                f"SKIP ({result.duration:.2f}s) - {reason}",
+                highlight=False,
+                style="cyan",
+                markup=False,
+                soft_wrap=True,
+            )
+        case ExpectedFailureResult(reason=reason):
+            console.print(
+                f"XFAIL ({result.duration:.2f}s) - {reason}",
+                highlight=False,
+                style="yellow",
+                markup=False,
+                soft_wrap=True,
+            )
+        case UnexpectedPassResult(reason=reason):
+            console.print(
+                f"XPASS ({result.duration:.2f}s) - {reason}",
+                highlight=False,
+                style="red",
                 markup=False,
                 soft_wrap=True,
             )

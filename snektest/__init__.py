@@ -33,8 +33,10 @@ from snektest.decorators import (
     Marker,
     fixture,
     load_fixture,
+    skip,
     test,
     test_hypothesis,
+    xfail,
 )
 from snektest.models import AssertionFailure as AssertionFailure
 from snektest.models import BadRequestError as BadRequestError
@@ -94,8 +96,10 @@ __all__ = [
     "fail",
     "fixture",
     "load_fixture",
+    "skip",
     "test",
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",
+    "xfail",
 ]

@@ -304,6 +304,55 @@ alive between tests. Snektest reports tasks abandoned by fixture teardown agains
 the responsible fixture. Tasks created by an embedding host application are not
 touched.
 
+### Skips and known defects
+
+Call `skip(reason)` when the current environment cannot run a test. Call
+`xfail(reason)` when the test reaches a known defect dynamically. Every reason
+must be a non-empty, already-trimmed string.
+
+Use `xfail=` on `@test` when the whole test tracks a known assertion defect. A
+Snektest assertion failure then reports XFAIL. If the assertion starts passing,
+the test reports XPASS and the command exits with status 1 until you remove the
+stale declaration. Unexpected exceptions remain errors rather than being hidden
+as expected failures.
+
+```python
+import os
+
+from snektest import assert_eq, skip, test
+
+
+@test(mark="fast")
+def test_optional_payment_service() -> None:
+    if os.environ.get("PAYMENTS_URL") is None:
+        skip("PAYMENTS_URL is not configured")
+
+
+@test(mark="fast", xfail="comparison normalization is not fixed yet")
+def test_known_comparison_defect() -> None:
+    assert_eq("snektest", "SNEKTEST")
+```
+
+SKIP and XFAIL do not fail the command. XPASS is strict and does. Function
+fixtures established before a dynamic outcome still tear down; any teardown
+failure is reported and makes the command fail. Console output, JSON output, and
+`run_tests_programmatic` retain each state and reason.
+
+| Test outcome | JSON status | Summary count | Exit status by itself |
+| --- | --- | --- | --- |
+| Pass | `passed` | `passed` | 0 |
+| Skip | `skipped` | `skipped` | 0 |
+| Expected failure | `expected_failure` | `expected_failures` | 0 |
+| Unexpected pass | `unexpected_pass` | `unexpected_passes` | 1 |
+| Assertion failure | `failed` | `failed` | 1 |
+| Unexpected exception | `error` | `errors` | 1 |
+
+Fixture teardown does not replace the test outcome. Function teardown increments
+`fixture_teardown_failed` once for each affected test, while retaining every
+failure in that test's `fixture_teardown_failures`. Session and run teardown
+failures have separate counts. Any teardown failure makes the command exit 1.
+Mixed runs exit 1 if any row or teardown condition says 1.
+
 ### Performance Benchmarks
 
 Use `assert_benchmark(median_below=..., p95_below=...)` to assert the typical

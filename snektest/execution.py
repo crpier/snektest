@@ -29,14 +29,19 @@ from snektest.models import (
     BackgroundFailure,
     BadRequestError,
     ErrorResult,
+    ExpectedFailureResult,
     FailedResult,
     PassedResult,
     RunTeardownDiagnostics,
+    SkippedResult,
     TeardownFailure,
     TestCase,
     TestResult,
     TestTimeoutError,
+    UnexpectedPassResult,
     UnreachableError,
+    _ExpectedFailureSignal,
+    _SkipSignal,
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter
@@ -102,7 +107,9 @@ async def _cancel_pending_test_tasks(
 
 def _task_leak_result(
     leaked_task_count: int,
-    passed_result: PassedResult,
+    outcome_result: (
+        PassedResult | SkippedResult | ExpectedFailureResult | UnexpectedPassResult
+    ),
     *,
     cleanup_timeout: float,
     resistant_task_count: int,
@@ -123,8 +130,8 @@ def _task_leak_result(
             raise UnreachableError(msg) from None
         return FailedResult(
             exception=snapshot_exception(type(error), error, traceback),
-            benchmarks=passed_result.benchmarks,
-            benchmark_comparisons=passed_result.benchmark_comparisons,
+            benchmarks=outcome_result.benchmarks,
+            benchmark_comparisons=outcome_result.benchmark_comparisons,
         )
 
 
@@ -134,25 +141,25 @@ def _with_background_failures(
 ) -> TestResult:
     if not failures:
         return test_result
-    if not isinstance(test_result.result, PassedResult):
+    if isinstance(test_result.result, (FailedResult, ErrorResult)):
         return replace(test_result, background_failures=tuple(failures))
 
     primary = next(
         (failure for failure in failures if failure.origin != "thread_leak"),
         failures[0],
     )
-    passed = test_result.result
+    outcome = test_result.result
     if primary.origin == "thread_leak":
         result: FailedResult | ErrorResult = FailedResult(
             exception=primary.exception,
-            benchmarks=passed.benchmarks,
-            benchmark_comparisons=passed.benchmark_comparisons,
+            benchmarks=outcome.benchmarks,
+            benchmark_comparisons=outcome.benchmark_comparisons,
         )
     else:
         result = ErrorResult(
             exception=primary.exception,
-            benchmarks=passed.benchmarks,
-            benchmark_comparisons=passed.benchmark_comparisons,
+            benchmarks=outcome.benchmarks,
+            benchmark_comparisons=outcome.benchmark_comparisons,
         )
     return replace(
         test_result,
@@ -201,7 +208,15 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
     )
     bad_request: BadRequestError | None = None
     interruption: BaseException | None = None
-    result: PassedResult | FailedResult | ErrorResult | None = None
+    result: (
+        PassedResult
+        | SkippedResult
+        | ExpectedFailureResult
+        | UnexpectedPassResult
+        | FailedResult
+        | ErrorResult
+        | None
+    ) = None
     registry = current_registry()
     test_task_owner = object()
     with (
@@ -216,8 +231,29 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
             if iscoroutine(res):
                 await _await_test_body(res, timeout)
             duration = time.monotonic() - test_start
-            result = PassedResult(
-                measurements=tuple(measurements),
+            if test_case.expected_failure_reason is None:
+                result = PassedResult(
+                    measurements=tuple(measurements),
+                    benchmarks=tuple(benchmark_capture.measurements),
+                    benchmark_comparisons=tuple(benchmark_capture.comparisons),
+                )
+            else:
+                result = UnexpectedPassResult(
+                    reason=test_case.expected_failure_reason,
+                    benchmarks=tuple(benchmark_capture.measurements),
+                    benchmark_comparisons=tuple(benchmark_capture.comparisons),
+                )
+        except _ExpectedFailureSignal as expected_failure:
+            duration = time.monotonic() - test_start
+            result = ExpectedFailureResult(
+                reason=expected_failure.reason,
+                benchmarks=tuple(benchmark_capture.measurements),
+                benchmark_comparisons=tuple(benchmark_capture.comparisons),
+            )
+        except _SkipSignal as skipped:
+            duration = time.monotonic() - test_start
+            result = SkippedResult(
+                reason=skipped.reason,
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
@@ -227,15 +263,24 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
             if exc_type is None or exc_value is None or traceback is None:
                 msg = "Invalid exception info gathered. This shouldn't be possible!"
                 raise UnreachableError(msg) from None
-            result = FailedResult(
-                exception=snapshot_exception(
-                    cast("type[BaseException]", exc_type),
-                    cast("BaseException", exc_value),
-                    traceback,
-                ),
-                benchmarks=tuple(benchmark_capture.measurements),
-                benchmark_comparisons=tuple(benchmark_capture.comparisons),
+            diagnostic = snapshot_exception(
+                cast("type[BaseException]", exc_type),
+                cast("BaseException", exc_value),
+                traceback,
             )
+            if test_case.expected_failure_reason is None:
+                result = FailedResult(
+                    exception=diagnostic,
+                    benchmarks=tuple(benchmark_capture.measurements),
+                    benchmark_comparisons=tuple(benchmark_capture.comparisons),
+                )
+            else:
+                result = ExpectedFailureResult(
+                    reason=test_case.expected_failure_reason,
+                    exception=diagnostic,
+                    benchmarks=tuple(benchmark_capture.measurements),
+                    benchmark_comparisons=tuple(benchmark_capture.comparisons),
+                )
         except asyncio.CancelledError as error:
             duration = time.monotonic() - test_start
             current_task = asyncio.current_task()
@@ -294,7 +339,11 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
     task_cleanup = await _cancel_pending_test_tasks(
         test_task_owner, registry, cleanup_timeout
     )
-    if isinstance(result, PassedResult) and task_cleanup.total:
+    if (
+        result is not None
+        and not isinstance(result, (FailedResult, ErrorResult))
+        and task_cleanup.total
+    ):
         result = _task_leak_result(
             task_cleanup.total,
             result,
@@ -374,7 +423,7 @@ def has_any_failures(
 ) -> tuple[bool, bool, bool, bool]:
     """Check for test failures, fixture failures, and session failures."""
     has_test_failures = any(
-        isinstance(result.result, (FailedResult, ErrorResult))
+        isinstance(result.result, (FailedResult, ErrorResult, UnexpectedPassResult))
         for result in test_results
     )
     has_fixture_teardown_failures = any(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -23,11 +24,14 @@ _TIMEOUT_SECONDS = 60
 
 
 def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("COVERAGE_PROCESS_START", None)
     return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         check=False,
+        env=environment,
         text=True,
         timeout=_TIMEOUT_SECONDS,
     )
@@ -83,8 +87,10 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 Scope,
                 SnektestError,
                 fixture,
+                skip,
                 test,
                 test_hypothesis,
+                xfail,
             )
 
             @fixture(scope=Scope.SESSION)
@@ -97,6 +103,14 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             )
             def parameter_types(first: int, second: str) -> None:
                 pass
+
+            @test(xfail="known defect")
+            def expected_outcome() -> None:
+                xfail("known defect")
+
+            @test()
+            def conditional_outcome() -> None:
+                skip("optional dependency unavailable")
 
             @test_hypothesis(
                 st.integers(),
@@ -137,6 +151,8 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(payload["scope"], "session")
     assert_eq(payload["error"], "FixtureError")
     assert_true("SnektestError" in payload["all"])
+    assert_true("skip" in payload["all"])
+    assert_true("xfail" in payload["all"])
     assert_false("UnreachableError" in payload["all"])
 
     type_checker = Path(sys.executable).with_name("ty")

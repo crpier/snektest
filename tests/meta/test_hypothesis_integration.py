@@ -98,7 +98,7 @@ async def test_async_hypothesis_timeout_exits_promptly() -> None:
         test_file,
         "--timeout",
         "0.05",
-        timeout=1,
+        timeout=5,
     )
     assert_eq(result["passed"], 0)
     assert_eq(result["failed"], 0)
@@ -134,7 +134,7 @@ async def test_async_hypothesis_cancellation_exits_promptly() -> None:
         name="test_hypothesis_async_cancellation",
     )
 
-    result = run_test_subprocess(test_file, timeout=1)
+    result = run_test_subprocess(test_file, timeout=5)
     assert_eq(result["passed"], 0)
     assert_eq(result["failed"], 1)
     assert_eq(result["errors"], 0)

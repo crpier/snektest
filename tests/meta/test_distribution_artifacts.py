@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import email.parser
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -31,17 +32,21 @@ _REQUIRED_EXAMPLES = {
     "snektest/examples/benchmark.py",
     "snektest/examples/fixtures.py",
     "snektest/examples/memory.py",
+    "snektest/examples/outcomes.py",
     "snektest/examples/parametrize.py",
     "snektest/examples/schema.py",
 }
 
 
 def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("COVERAGE_PROCESS_START", None)
     return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         check=False,
+        env=environment,
         text=True,
         timeout=_TIMEOUT_SECONDS,
     )

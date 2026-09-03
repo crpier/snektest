@@ -11,13 +11,18 @@ from inspect import (
     iscoroutinefunction,
     signature,
 )
-from typing import Any, Literal, Protocol, TypeVar, cast, overload
+from typing import Any, Literal, Never, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
 from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope, Scope
 from snektest.fixtures import current_registry, load_run_fixture
-from snektest.models import BadRequestError, Param
+from snektest.models import (
+    BadRequestError,
+    Param,
+    _ExpectedFailureSignal,
+    _SkipSignal,
+)
 from snektest.utils import mark_test_function
 
 _given = cast("Any", given)
@@ -45,6 +50,25 @@ or other expensive external resources.
 
 
 VALID_MARKERS: tuple[Marker, ...] = ("slow", "medium", "fast")
+
+
+def _normalize_outcome_reason(reason: object) -> str:
+    """Require explanations that remain useful in summaries and stored output."""
+    if isinstance(reason, str) and reason and reason == reason.strip():
+        return reason
+    msg = "Outcome reason must be a non-empty, already-trimmed string"
+    raise TypeError(msg)
+
+
+def skip(reason: str) -> Never:
+    """Stop the current test and report it as skipped with `reason`."""
+    raise _SkipSignal(_normalize_outcome_reason(reason))
+
+
+def xfail(reason: str) -> Never:
+    """Stop the current test and report an expected failure with `reason`."""
+    raise _ExpectedFailureSignal(_normalize_outcome_reason(reason))
+
 
 type RunFixtureIdentity = tuple[str, str]
 _run_fixture_catalog: dict[
@@ -82,6 +106,7 @@ def test(
     *params: list[Param[Any]],
     mark: Marker | None = None,
     mutex: str | None = None,
+    xfail: str | None = None,
 ) -> Callable[
     [Callable[[*tuple[Any, ...]], Coroutine[None] | None]],
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
@@ -98,7 +123,15 @@ def test(
     def decorator(
         test_func: Callable[[*tuple[Any, ...]], Coroutine[None] | None],
     ) -> Callable[[*tuple[Any, ...]], Coroutine[None] | None]:
-        mark_test_function(test_func, params, markers, normalized_mutex)
+        mark_test_function(
+            test_func,
+            params,
+            markers,
+            normalized_mutex,
+            expected_failure_reason=(
+                None if xfail is None else _normalize_outcome_reason(xfail)
+            ),
+        )
         return test_func
 
     return decorator

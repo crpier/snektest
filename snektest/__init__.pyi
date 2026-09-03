@@ -35,6 +35,8 @@ from snektest.benchmark import assert_benchmark
 from snektest.decorators import Marker, SearchStrategy
 from snektest.decorators import fixture as fixture
 from snektest.decorators import load_fixture as load_fixture
+from snektest.decorators import skip as skip
+from snektest.decorators import xfail as xfail
 from snektest.models import (
     AssertionFailure,
     BadRequestError,
@@ -93,15 +95,20 @@ __all__ = [
     "fail",
     "fixture",
     "load_fixture",
+    "skip",
     "test",
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",
+    "xfail",
 ]
 
 @overload
 def test(
-    *, mark: Marker | None = None, mutex: str | None = None
+    *,
+    mark: Marker | None = None,
+    mutex: str | None = None,
+    xfail: str | None = None,
 ) -> Callable[
     [Callable[[], Coroutine[None] | None]], Callable[[], Coroutine[None] | None]
 ]: ...
@@ -111,6 +118,7 @@ def test[T](
     *,
     mark: Marker | None = None,
     mutex: str | None = None,
+    xfail: str | None = None,
 ) -> Callable[
     [Callable[[T], Coroutine[None] | None]], Callable[[T], Coroutine[None] | None]
 ]: ...
@@ -121,6 +129,7 @@ def test[T1, T2](
     *,
     mark: Marker | None = None,
     mutex: str | None = None,
+    xfail: str | None = None,
 ) -> Callable[
     [Callable[[T1, T2], Coroutine[None] | None]],
     Callable[[T1, T2], Coroutine[None] | None],
@@ -130,6 +139,7 @@ def test(
     *params: list[Param[Any]],
     mark: Marker | None = None,
     mutex: str | None = None,
+    xfail: str | None = None,
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]], Callable[..., Coroutine[None] | None]
 ]: ...

@@ -353,6 +353,9 @@ async def test_caught_gate_failure_does_not_shift_later_comparison() -> None:
     summary = TestRunSummary(
         total_tests=1,
         passed=1,
+        skipped=0,
+        expected_failures=0,
+        unexpected_passes=0,
         failed=0,
         errors=0,
         fixture_teardown_failed=0,
@@ -852,6 +855,9 @@ def test_failed_comparison_is_in_json_output() -> None:
     summary = TestRunSummary(
         total_tests=1,
         passed=0,
+        skipped=0,
+        expected_failures=0,
+        unexpected_passes=0,
         failed=1,
         errors=0,
         fixture_teardown_failed=0,
@@ -969,6 +975,9 @@ def test_ungated_duplicate_name_does_not_receive_comparison() -> None:
                 TestRunSummary(
                     total_tests=1,
                     passed=1,
+                    skipped=0,
+                    expected_failures=0,
+                    unexpected_passes=0,
                     failed=0,
                     errors=0,
                     fixture_teardown_failed=0,
