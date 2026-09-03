@@ -24,7 +24,7 @@ async def fetch_username() -> str:
 
 @test(mark="fast")
 async def test_async_code() -> None:
-    """Async tests await all work and have a 60-second CLI timeout by default."""
+    """Async tests await all work; the CLI accepts finite positive timeouts."""
     username = await fetch_username()
     assert_eq(username.upper(), "ADA")
 
@@ -36,7 +36,7 @@ def blocking_uppercase(value: str) -> str:
 
 @test(mark="medium")
 async def test_blocking_application_call() -> None:
-    """Offload blocking work explicitly; its thread cannot be cancelled."""
+    """Offload blocking work; an outer supervisor must bound its thread."""
     result = await asyncio.to_thread(blocking_uppercase, "snek")
     assert_eq(result, "SNEK")
 

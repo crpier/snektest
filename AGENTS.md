@@ -67,7 +67,7 @@ uv run ruff format .
 ```
 
 ### Package Management
-This project uses `uv` for dependency management. The project requires Python >=3.14.
+This project uses `uv` for dependency management. The project requires Python >=3.14. The verified support matrix is GIL-enabled CPython 3.14 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are unsupported; newer CPython versions are not yet verified.
 
 ### Distribution Metadata
 
@@ -207,15 +207,23 @@ threaded test executor.
 ### Timeouts
 
 CLI runs apply a 60-second timeout to every async test by default.
-`--timeout SECONDS` overrides it, while `--no-timeout` disables the test-body
-limit. The CLI passes that run-wide ceiling to `execute_test`, which wraps the
-awaited test body in `asyncio.timeout`. It is async-only and best-effort: the
-timeout only fires while the test is suspended on an `await`, so a hung `await`
-becomes an error (`TestTimeoutError`, reported as ERROR) and the run continues,
-while synchronous or CPU-bound work cannot be interrupted. A `TimeoutError` the
-test raised itself is distinguished from a fired timeout via `Timeout.expired()`
-and passes through unchanged. There is no per-test timeout. Direct programmatic
-runner calls leave test bodies unbounded unless they pass `timeout`.
+`--timeout SECONDS` accepts a finite positive value, while `--no-timeout`
+disables the test-body limit. The CLI passes that run-wide ceiling to
+`execute_test`, which wraps the awaited test body in `asyncio.timeout`. It is
+async-only and best-effort: the timeout only fires while the test is suspended
+on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported
+as ERROR) and the run continues. Synchronous or CPU-bound work cannot be
+interrupted. A `TimeoutError` the test raised itself is distinguished from a
+fired timeout via `Timeout.expired()` and passes through unchanged. There is no
+per-test timeout. Direct programmatic runner calls leave test bodies unbounded
+unless they pass `timeout`.
+
+Local collection and imports have no Snektest timeout. In explicit worker mode,
+the configured timeout bounds each child bootstrap, but it is not a per-import
+guarantee. Persistent workers also cannot enforce hard sync-body deadlines.
+Hard sync and import limits require process-per-case isolation plus separately
+isolated collection. Snektest deliberately leaves those hard limits to an outer
+process or CI timeout; its release jobs use 15 minutes.
 
 Cleanup remains bounded when the body timeout is disabled. Each async fixture
 teardown and task-cancellation attempt gets the configured timeout, or 60 seconds

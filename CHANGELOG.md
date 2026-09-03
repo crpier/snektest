@@ -9,6 +9,7 @@ Notable user-facing changes are recorded here.
 - Added process workers, run fixtures, memory assertions, and benchmark baselines.
 - Added a deliberate public API and background-thread failure diagnostics.
 - Added one cross-platform release gate and trusted, attested PyPI publishing.
+- Rejected non-finite timeouts and documented the verified runtime and hard-timeout boundaries.
 
 ## 0.16.0
 

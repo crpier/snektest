@@ -5,6 +5,7 @@ import threading
 import traceback
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Literal, cast
 
@@ -326,7 +327,7 @@ Options:
                     Atomically update opted-in benchmarks after a passing run
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   -n, --workers N   Run in N worker processes, or use auto
-  --timeout SECONDS Override the 60-second async-test timeout
+  --timeout SECONDS Set a finite positive async-test timeout (default: 60)
   --no-timeout      Disable async-test body timeout; cleanup remains bounded
   --pdb             Drop into post-mortem debugger on first failure
 
@@ -399,7 +400,7 @@ def _parse_mark_flag(
 def _parse_timeout_flag(
     argv: list[str], index: int, *, timeout_option_seen: bool
 ) -> tuple[float, int] | ParseError:
-    """Parse `--timeout` and its value, rejecting repeats and non-positive numbers.
+    """Parse `--timeout`, rejecting repeats and non-finite or non-positive values.
 
     Returns the timeout in seconds with the index its value was consumed from, or
     a ParseError.
@@ -414,6 +415,8 @@ def _parse_timeout_flag(
         timeout = float(raw_value)
     except ValueError:
         return ParseError(f"Invalid --timeout value: `{raw_value}`. Expected seconds.")
+    if not isfinite(timeout):
+        return ParseError(f"Invalid --timeout value: `{raw_value}`. Must be finite.")
     if timeout <= 0:
         return ParseError(f"Invalid --timeout value: `{raw_value}`. Must be positive.")
     return timeout, value_index

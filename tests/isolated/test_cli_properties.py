@@ -8,6 +8,8 @@ fields satisfy the parser's own invariants.
 
 from __future__ import annotations
 
+from math import isfinite
+
 from hypothesis import settings
 from hypothesis import strategies as st
 
@@ -42,7 +44,10 @@ _KNOWN_TOKENS = [
     "medium",
     "slow",
     "1.5",
+    "1e309",
     "auto",
+    "inf",
+    "nan",
     "0",
     "-bogus",
     ".",
@@ -84,7 +89,9 @@ def test_successful_parse_satisfies_invariants(argv: list[str]) -> None:
         assert_true(len(result.filters) >= 1)
 
     assert_true(result.mark is None or result.mark in VALID_MARKER_VALUES)
-    assert_true(result.timeout is None or result.timeout > 0)
+    assert_true(
+        result.timeout is None or (isfinite(result.timeout) and result.timeout > 0)
+    )
 
 
 @settings(deadline=None)
