@@ -137,6 +137,23 @@ def test_param_to_dict_rejects_colliding_case_names() -> None:
 
 
 @test()
+def test_param_to_dict_rejects_empty_parameter_list() -> None:
+    """Every declared parameter axis must contribute at least one case."""
+    with assert_raises(BadRequestError) as raised:
+        _ = Param.to_dict(([],))
+
+    assert_in("must not be empty", str(raised.exception))
+
+
+@test()
+def test_param_to_dict_rejects_ambiguous_case_identifiers() -> None:
+    """Case names must round-trip through the CLI filter grammar."""
+    for invalid_name in ("", "left, right", "left[right", "left]right"):
+        with assert_raises(BadRequestError):
+            _ = Param.to_dict(([Param(value=1, name=invalid_name)],))
+
+
+@test()
 def test_testname_str_no_params() -> None:
     """Test TestName string representation without params."""
     name = TestName(

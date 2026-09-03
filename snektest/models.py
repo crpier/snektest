@@ -18,6 +18,14 @@ DEFAULT_CLEANUP_TIMEOUT_SECONDS = 60.0
 class CollectionError(BaseException): ...
 
 
+class EmptyCollectionError(CollectionError):
+    """Raised when one or more filters produce no tests without explicit opt-in."""
+
+
+class InvalidTestDefinitionError(CollectionError):
+    """Raised when test metadata cannot produce a complete collection plan."""
+
+
 class ArgsError(BaseException): ...
 
 
@@ -274,6 +282,28 @@ class Param[T]:
         """
         if not params:
             return {"": ()}
+
+        for axis_index, axis in enumerate(params, start=1):
+            if not axis:
+                msg = (
+                    f"Parameterized test parameter list {axis_index} must not be empty"
+                )
+                raise BadRequestError(msg)
+            axis_names: set[str] = set()
+            for param in axis:
+                if not param.name:
+                    msg = "Parameterized case names must not be empty"
+                    raise BadRequestError(msg)
+                if any(token in param.name for token in (", ", "[", "]")):
+                    msg = (
+                        f"Parameterized case name `{param.name}` is ambiguous; "
+                        "names must not contain `, `, `[` or `]`"
+                    )
+                    raise BadRequestError(msg)
+                if param.name in axis_names:
+                    msg = f"Parameterized case name `{param.name}` is not unique"
+                    raise BadRequestError(msg)
+                axis_names.add(param.name)
 
         combinations = product(*params)
         result: dict[str, tuple[Param[Any], ...]] = {}

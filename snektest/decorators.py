@@ -17,7 +17,7 @@ from hypothesis import given
 
 from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope
 from snektest.fixtures import current_registry, load_run_fixture
-from snektest.models import Param, Scope
+from snektest.models import BadRequestError, Param, Scope
 from snektest.utils import mark_test_function
 
 _given = cast("Any", given)
@@ -87,6 +87,10 @@ def test(
     Callable[[*tuple[Any, ...]], Coroutine[None] | None],
 ]:
     """Mark a function as a test function with an optional built-in marker."""
+
+    if len(params) == 1 and callable(params[0]):
+        msg = "Bare @test is unsupported. Use @test() instead"
+        raise BadRequestError(msg)
 
     markers = _normalize_markers(mark)
     normalized_mutex = _normalize_mutex(mutex)

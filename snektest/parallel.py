@@ -28,10 +28,13 @@ from snektest.fixtures import (
     use_run_fixture_loader,
 )
 from snektest.models import (
+    CollectionError,
+    EmptyCollectionError,
     ErrorResult,
     ExceptionDiagnostic,
     FilterItem,
     FixtureError,
+    InvalidTestDefinitionError,
     RunInfrastructureError,
     RunTeardownDiagnostics,
     TeardownFailure,
@@ -63,6 +66,7 @@ class _BootstrapReady:
 
 @dataclass(frozen=True)
 class _BootstrapFailed:
+    exception_type: str
     message: str
 
 
@@ -182,10 +186,11 @@ def _manifest(test_cases: Sequence[TestCase]) -> tuple[CaseManifest, ...]:
 
 
 def _collect_child_plan(
-    raw_filters: tuple[str, ...], mark: str | None
+    raw_filters: tuple[str, ...], mark: str | None, *, allow_empty: bool = False
 ) -> list[TestCase]:
     return collect_tests_from_filters(
         [FilterItem(raw_filter) for raw_filter in raw_filters],
+        allow_empty=allow_empty,
         mark=mark,
     )
 
@@ -210,17 +215,18 @@ async def _load_async_run_fixture_payload(
     return await _await_run_fixture_payload(payload, timeout)
 
 
-def _host_main(
+def _host_main(  # noqa: PLR0913
     connection: Connection,
     raw_filters: tuple[str, ...],
     mark: str | None,
+    allow_empty: bool,  # noqa: FBT001
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
 ) -> None:
     """Collect the canonical manifest and remain alive as the fixture-host process."""
     try:
         with maybe_capture_output(capture_output):
-            test_cases = _collect_child_plan(raw_filters, mark)
+            test_cases = _collect_child_plan(raw_filters, mark, allow_empty=allow_empty)
         catalog = get_run_fixture_catalog()
         connection.send(
             _BootstrapReady(
@@ -230,7 +236,7 @@ def _host_main(
         )
     except BaseException as exc:
         with suppress(BrokenPipeError, EOFError, OSError):
-            connection.send(_BootstrapFailed(f"{type(exc).__name__}: {exc}"))
+            connection.send(_BootstrapFailed(type(exc).__name__, str(exc)))
         connection.close()
         return
 
@@ -405,7 +411,7 @@ def _run_worker(  # noqa: PLR0913
             )
         )
     except BaseException as exc:
-        connection.send(_BootstrapFailed(f"{type(exc).__name__}: {exc}"))
+        connection.send(_BootstrapFailed(type(exc).__name__, str(exc)))
         connection.close()
         return
 
@@ -473,6 +479,7 @@ async def _receive_bootstrap(
     connection: Connection,
     *,
     child_name: str,
+    collection_owner: bool = False,
     timeout: float | None,  # noqa: ASYNC109
 ) -> _BootstrapReady:
     try:
@@ -490,7 +497,16 @@ async def _receive_bootstrap(
         msg = f"{child_name} exited during bootstrap"
         raise RunInfrastructureError(msg) from exc
     if isinstance(message, _BootstrapFailed):
-        msg = f"{child_name} bootstrap failed: {message.message}"
+        if collection_owner and message.exception_type == "EmptyCollectionError":
+            raise EmptyCollectionError(message.message)
+        if collection_owner and message.exception_type == "InvalidTestDefinitionError":
+            raise InvalidTestDefinitionError(message.message)
+        if collection_owner and message.exception_type == "CollectionError":
+            raise CollectionError(message.message)
+        msg = (
+            f"{child_name} bootstrap failed: "
+            f"{message.exception_type}: {message.message}"
+        )
         raise RunInfrastructureError(msg)
     if not isinstance(message, _BootstrapReady):
         msg = f"{child_name} sent invalid bootstrap message"
@@ -670,6 +686,7 @@ def _worker_crash_result(
 async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     filter_items: list[FilterItem],
     *,
+    allow_empty: bool = False,
     capture_output: bool,
     benchmark_baseline: BenchmarkBaseline | None,
     mark: str | None,
@@ -685,7 +702,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     host_process, host_connection = _spawn_process(
         context,
         _host_main,
-        (raw_filters, mark, capture_output, timeout),
+        (raw_filters, mark, allow_empty, capture_output, timeout),
         name="snektest-fixture-host",
     )
     worker_processes: list[_Worker] = []
@@ -693,6 +710,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         canonical_bootstrap = await _receive_bootstrap(
             host_connection,
             child_name="fixture host",
+            collection_owner=True,
             timeout=timeout,
         )
         canonical_manifest = canonical_bootstrap.manifest

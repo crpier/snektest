@@ -19,20 +19,20 @@ uv add 'snektest[schema]'
 snektest expects your test code to pass the strict `ty` type checker before
 tests run — typically continuously, via your editor's language
 server. The API is designed around this: signatures are exact, and snektest
-does not re-validate at runtime what a type checker already rejects. If you
-skip type checking, misuse that a checker would flag — such as applying
-`@test` without parentheses — can fail silently at runtime.
+does not generally re-validate at runtime what a type checker already rejects.
+One destructive misuse is checked during collection: applying `@test` without
+parentheses raises a clear error instead of silently removing the test.
 
-Runtime validation is reserved for what static checkers cannot see: CLI
-input, file paths, and fixture protocol rules (for example, session fixtures
-must not accept parameters).
+Other runtime validation focuses on what static checkers cannot see: CLI input,
+file paths, parameter case identifiers, and fixture protocol rules (for example,
+session fixtures must not accept parameters).
 
 <!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
 
-# @test must be *called*: applying it bare is a type error, not a runtime one.
+# @test must be called; bare use is both a type error and a collection error.
 @test
 def test_needs_parentheses() -> None:
     pass
@@ -397,7 +397,9 @@ def test_needs_a_timing_budget() -> None:
 
 ### Parameterized Tests
 
-Run the same test with different inputs:
+Run the same test with different inputs. Every parameter list must be non-empty.
+Case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
+rendered case filters remain unambiguous.
 
 ```python
 from snektest import Param, assert_eq, test
@@ -444,6 +446,10 @@ snektest tests/test_myfeature.py::test_something
 
 # Run tests with a marker
 snektest --mark fast
+
+# Empty files, directories, filters, and marker selections fail by default.
+# Opt in only when a zero-test command is intentional.
+snektest --allow-empty --mark fast
 
 # Run in four persistent execution workers (plus one fixture host)
 snektest --workers 4

@@ -40,14 +40,14 @@ snektest example async
 
 ## Type checking is part of the contract
 
-Run the strict `ty` type checker over test code before running tests. snektest does not re-validate at runtime what a type checker already rejects, so unchecked misuse — such as applying `@test` without parentheses — can fail silently. Runtime validation is reserved for what static checkers cannot see: CLI input, file paths, and fixture protocol rules.
+Run the strict `ty` type checker over test code before running tests. snektest does not generally re-validate at runtime what a type checker already rejects. One destructive misuse is checked during collection: applying `@test` without parentheses raises a clear error instead of silently removing the test. Other runtime validation focuses on what static checkers cannot see: CLI input, file paths, parameter case identifiers, and fixture protocol rules.
 
 <!-- snektest-doc: expect-type-error=no-matching-overload@5, skip-run -->
 ```python
 from snektest import test
 
 
-# @test must be *called*: applying it bare is a type error, not a runtime one.
+# @test must be called; bare use is both a type error and a collection error.
 @test
 def test_needs_parentheses() -> None:
     pass
@@ -92,7 +92,7 @@ def test_needs_parentheses() -> None:
 - Use `mark="medium"` for tests that use local IO or threads.
 - Use `mark="slow"` for tests that use network IO, subprocesses, or expensive external resources.
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`. Function fixtures tear down before task-leak checks. A task created during fixture setup belongs to that fixture and stays alive through teardown; session-owned tasks may stay alive between tests. Snektest attributes abandoned fixture tasks to their fixture, cancels test-owned leaks, and leaves tasks from an embedding host application alone.
-- Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization.
+- Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization. Every parameter list must be non-empty. Case names must be unique and non-empty and cannot contain `, `, `[` or `]`, so their CLI filters are unambiguous.
 - Define fixtures as generator functions decorated with `@fixture`, annotated `Generator[T]` or `AsyncGenerator[T]`. Load them with `load_fixture(fixture())` — call the decorated fixture and pass the returned handle.
 - `@fixture` (default) is function-scoped. `@fixture(scope="session")` is cached once per execution process. `@fixture(scope="run")` is a zero-argument module-level fixture owned once by the command; it yields an inert stdlib-pickle descriptor of at most 1 MiB, and each worker receives an independent decoded copy.
 - Fixtures may take arguments; pass them at the call site, e.g. `load_fixture(make_user("Ada"))`. Calling a fixture twice gives two independent instances.
@@ -106,7 +106,7 @@ def test_needs_parentheses() -> None:
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 - CLI runs bound every async test to 60 seconds by default. Override the body limit with `snektest --timeout SECONDS` or disable it with `snektest --no-timeout`. It is async-only and best-effort: the timeout only fires while a test is suspended on an `await`, reporting a hung `await` as an error while the run continues; synchronous or CPU-bound work cannot be interrupted. There is no per-test timeout. Async fixture teardown and task cancellation use the configured timeout, or retain a 60-second cleanup ceiling when the body is unbounded. Cleanup attempts every established fixture, attributes failures and abandoned tasks, then propagates parent cancellation or interruption. Sync teardown still requires an outer process or CI timeout.
 - Timeout interactions: for async `@test_hypothesis`, the timeout bounds the whole property run, not each example. If it fires while an example is suspended, snektest cancels the example and relays that outcome to the Hypothesis worker so the CLI exits promptly. Synchronous or CPU-bound work in that thread remains uninterruptible, and sync property tests are not bounded. Use Hypothesis's own `deadline`/`max_examples` for per-example limits and `--no-timeout` if the complete run must remain unbounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.
-- Explicit test-name and parameter-case filters fail if the requested test or case is not found.
+- Every requested filter must select a test by default; empty directories, files, marker selections, and individual filters fail with a collection error. Pass `--allow-empty` only when a zero-test selection is intentional. Explicit missing test-name and parameter-case filters remain errors even in allow-empty mode.
 - Install `snektest[schema]` and use `@test_schema("openapi.json", base_url=..., mark="slow")` for positive OpenAPI contract tests. It collects one test per operation and checks for server errors and response-schema violations. Native Schemathesis auth providers and custom checks may be passed through `auth=` and `checks=`. Use `@test_schema_workflow` for linked stateful sequences. Decorated function bodies are declarative and are not called; `base_url` and `headers` may be fixture handles.
 - Set `generation="negative"` on `@test_schema` to generate schema-violating requests. A passing response must use an allowed, documented 4xx status; `expected_statuses` defaults to all 4xx responses. Accepted 2xx responses and all 5xx responses fail. Negative stateful workflows are not supported.
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked.

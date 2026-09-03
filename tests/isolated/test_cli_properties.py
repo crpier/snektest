@@ -28,6 +28,7 @@ _KNOWN_TOKENS = [
     "example",
     "-s",
     "--json-output",
+    "--allow-empty",
     "--benchmark-baseline",
     "--update-benchmark-baseline",
     "--pdb",
