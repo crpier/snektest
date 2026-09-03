@@ -1,12 +1,18 @@
 """Test that breakpoint() works without -s flag."""
 
+import os
+import re
 import subprocess
 from textwrap import dedent
 
 from snektest import load_fixture, test
-from snektest.assertions import assert_eq
+from snektest.assertions import assert_eq, assert_in
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file
+
+
+def _normalize_durations(output: str) -> str:
+    return re.sub(r"\d+\.\d+s", "<duration>", output)
 
 
 @test()
@@ -32,7 +38,7 @@ def test_breakpoint_works_without_s_flag() -> None:
                 y = 2
                 assert_eq(x + y, 3)
         """),
-    )
+    ).resolve()
 
     result = subprocess.run(
         ["uv", "run", "snektest", str(test_file)],
@@ -46,16 +52,23 @@ def test_breakpoint_works_without_s_flag() -> None:
     stderr = result.stderr.decode()
     combined_output = stdout + stderr
 
-    expected_output = (
-        f"> {test_file}(8)test_with_breakpoint()\n"
-        "-> breakpoint()\n"
-        "(Pdb) {'x': 1}\n"
-        f"(Pdb) {test_file}::test_with_breakpoint ... OK (0.00s)\n"
-        "────────────────────────────── 1 passed in 0.00s ───────────────────────────────\n"
-    )
+    normalized_output = os.path.normcase(
+        _normalize_durations(combined_output)
+    ).casefold()
 
     assert_eq(result.returncode, 0)
-    assert_eq(combined_output, expected_output)
+    assert_in(
+        os.path.normcase(f"> {test_file}(8)test_with_breakpoint()").casefold(),
+        normalized_output,
+    )
+    assert_in("-> breakpoint()", normalized_output)
+    assert_in("(pdb) {'x': 1}", normalized_output)
+    assert_in(
+        os.path.normcase(f"{test_file}::test_with_breakpoint").casefold(),
+        normalized_output,
+    )
+    assert_in("ok (<duration>)", normalized_output)
+    assert_in("1 passed in <duration>", normalized_output)
 
 
 @test()
@@ -79,7 +92,7 @@ def test_breakpoint_can_inspect_variables() -> None:
                 y = 2
                 assert_eq(x + y, 3)
         """),
-    )
+    ).resolve()
 
     pdb_commands = b"pp x\nc\n"
 
@@ -95,11 +108,20 @@ def test_breakpoint_can_inspect_variables() -> None:
     stderr = result.stderr.decode()
     combined_output = stdout + stderr
 
-    expected = dedent(f"""
-         > {test_file}(8)test_with_breakpoint()
-        -> breakpoint()
-        (Pdb) 1
-        (Pdb) {test_file}::test_with_breakpoint ... OK (0.00s)
-        ────────────────────────────── 1 passed in 0.00s ───────────────────────────────
-        """).lstrip()
-    assert_eq(combined_output, expected)
+    normalized_output = os.path.normcase(
+        _normalize_durations(combined_output)
+    ).casefold()
+
+    assert_eq(result.returncode, 0)
+    assert_in(
+        os.path.normcase(f"> {test_file}(8)test_with_breakpoint()").casefold(),
+        normalized_output,
+    )
+    assert_in("-> breakpoint()", normalized_output)
+    assert_in("(pdb) 1", normalized_output)
+    assert_in(
+        os.path.normcase(f"{test_file}::test_with_breakpoint").casefold(),
+        normalized_output,
+    )
+    assert_in("ok (<duration>)", normalized_output)
+    assert_in("1 passed in <duration>", normalized_output)

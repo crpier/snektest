@@ -457,6 +457,24 @@ Internal invariant failures are not exported from the top-level package.
 
 ## Running Tests
 
+### Release health
+
+Run the complete release gate before opening a pull request:
+
+```sh
+uv run --locked python scripts/release_check.py
+```
+
+GitHub Actions runs this exact command on Python 3.14 under Linux, macOS, and
+Windows with a 15-minute job timeout. It checks the lock, formatting, lint, ty,
+production dependency advisories, all tests, 90% core-package coverage, release
+artifact manifests, and independent wheel and source-archive installations.
+
+A release tag must exactly match `v` plus `snektest.__version__` and point to a
+pull request merged into `main`. Repository rules prevent updates or deletion of
+`v*` tags. After the same gate passes, the tag workflow publishes from the
+`pypi` environment through trusted publishing and emits PyPI attestations.
+
 Collection completes before execution. Directory files are ordered by normalized
 path, test cases retain source definition order, and filters retain command-line
 order. Absolute and relative paths resolve to the same module identity;

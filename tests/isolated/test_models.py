@@ -55,14 +55,20 @@ def test_filter_item_str_simple() -> None:
 def test_filter_item_str_with_function() -> None:
     """Test FilterItem string representation with function."""
     filter_item = FilterItem("tests/isolated/test_basic.py::test_func")
-    assert_eq(str(filter_item), "tests/isolated/test_basic.py::test_func")
+    assert_eq(
+        str(filter_item),
+        f"{Path('tests/isolated/test_basic.py')}::test_func",
+    )
 
 
 @test()
 def test_filter_item_str_with_params() -> None:
     """Test FilterItem string representation with params."""
     filter_item = FilterItem("tests/isolated/test_basic.py::test_func[params]")
-    assert_eq(str(filter_item), "tests/isolated/test_basic.py::test_func[params]")
+    assert_eq(
+        str(filter_item),
+        f"{Path('tests/isolated/test_basic.py')}::test_func[params]",
+    )
 
 
 @test()

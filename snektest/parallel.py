@@ -10,12 +10,11 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from multiprocessing import get_context
-from multiprocessing.connection import Connection
 from multiprocessing.context import SpawnContext
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from pickle import loads
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 from snektest.annotations import AsyncFixture, Coroutine, Fixture
 from snektest.benchmark_baseline import BenchmarkBaseline
@@ -44,6 +43,16 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import RunReporter
+
+
+class _ProcessConnection(Protocol):
+    """Operations shared by Unix `Connection` and Windows `PipeConnection`."""
+
+    def close(self) -> None: ...
+
+    def recv(self) -> object: ...
+
+    def send(self, obj: Any) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -164,7 +173,7 @@ type _ParentToWorker = (
 class _Worker:
     """Coordinator-owned connection and lifecycle state for one process."""
 
-    connection: Connection
+    connection: _ProcessConnection
     identifier: int
     process: BaseProcess
     active_ordinal: int | None = None
@@ -216,7 +225,7 @@ async def _load_async_run_fixture_payload(
 
 
 def _host_main(  # noqa: PLR0913
-    connection: Connection,
+    connection: _ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     allow_empty: bool,  # noqa: FBT001
@@ -243,7 +252,7 @@ def _host_main(  # noqa: PLR0913
     registry = FixtureRegistry()
     with use_registry(registry), asyncio.Runner() as runner:
         while True:
-            message = cast("object", connection.recv())
+            message = connection.recv()
             if isinstance(message, _Shutdown):
                 with maybe_capture_output(capture_output) as (output, warnings):
                     failures = runner.run(
@@ -303,9 +312,9 @@ def _host_main(  # noqa: PLR0913
 class _RemoteRunFixtureLoader:
     """Worker-side descriptor cache driven by coordinator publication messages."""
 
-    def __init__(self, connection: Connection) -> None:
+    def __init__(self, connection: _ProcessConnection) -> None:
         self._committed: dict[RunFixtureIdentity, object] = {}
-        self._connection: Connection = connection
+        self._connection: _ProcessConnection = connection
         self._failures: dict[RunFixtureIdentity, str] = {}
         self._staged: dict[RunFixtureIdentity, object] = {}
 
@@ -372,7 +381,7 @@ class _RemoteRunFixtureLoader:
 
 
 def _worker_main(  # noqa: PLR0913
-    connection: Connection,
+    connection: _ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     capture_output: bool,  # noqa: FBT001
@@ -393,7 +402,7 @@ def _worker_main(  # noqa: PLR0913
 
 
 def _run_worker(  # noqa: PLR0913
-    connection: Connection,
+    connection: _ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     capture_output: bool,  # noqa: FBT001
@@ -462,7 +471,7 @@ def _spawn_process(
     args: tuple[object, ...],
     *,
     name: str,
-) -> tuple[BaseProcess, Connection]:
+) -> tuple[BaseProcess, _ProcessConnection]:
     parent_connection, child_connection = context.Pipe(duplex=True)
     process = context.Process(
         target=target,
@@ -476,7 +485,7 @@ def _spawn_process(
 
 
 async def _receive_bootstrap(
-    connection: Connection,
+    connection: _ProcessConnection,
     *,
     child_name: str,
     collection_owner: bool = False,
@@ -514,7 +523,7 @@ async def _receive_bootstrap(
     return message
 
 
-async def _stop_process(process: BaseProcess, connection: Connection) -> None:
+async def _stop_process(process: BaseProcess, connection: _ProcessConnection) -> None:
     connection.close()
     if process.is_alive():
         process.terminate()
@@ -584,7 +593,7 @@ async def _start_worker(  # noqa: PLR0913
 async def _publish_run_fixture(  # noqa: C901, PLR0913
     identity: RunFixtureIdentity,
     *,
-    host_connection: Connection,
+    host_connection: _ProcessConnection,
     publication_failures: dict[RunFixtureIdentity, str],
     published_descriptors: dict[RunFixtureIdentity, bytes],
     lifecycle_outputs: list[str],

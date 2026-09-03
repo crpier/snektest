@@ -1,0 +1,1 @@
+"""Contributor automation commands."""

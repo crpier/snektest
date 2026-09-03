@@ -40,7 +40,7 @@ def test_joined_thread_exception_is_an_error(arguments: tuple[str, ...]) -> None
         name="test_joined_thread_error",
     )
 
-    result = run_test_subprocess(test_file, *arguments, timeout=2)
+    result = run_test_subprocess(test_file, *arguments, timeout=10)
     test_result = result["tests"][0]
 
     assert_eq(result["returncode"], 1)

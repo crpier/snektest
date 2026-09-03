@@ -1,40 +1,37 @@
-# Simple justfile for a few helper commands
+# Contributor commands
 
-# Run linter
+# Run the same complete release-health gate used by GitHub Actions.
+check:
+    uv run --locked python scripts/release_check.py
+
 check-lint:
-    uv run ruff check .
+    uv run --locked ruff check .
 
 check-fmt:
-    uv run ruff format --check .
+    uv run --locked ruff format --check .
 
 check-types:
-    uv run pyright .
-
-# All checks
-check: check-lint check-fmt check-types
+    uv run --locked ty check
 
 # Render console output across terminal shapes for presentation review.
 # Pass snektest filters/flags through, e.g: just render tests/isolated/test_basic.py
 render *ARGS:
-    uv run python -m testutils.render_matrix {{ARGS}}
+    uv run --locked python -m testutils.render_matrix {{ARGS}}
 
 test:
-    uv run coverage erase
-    COVERAGE_PROCESS_START=pyproject.toml uv run coverage run -m snektest tests/
+    uv run --locked snektest tests
 
 check-coverage:
-    sh -c 'out="$(uv run coverage combine 2>&1)" || { echo "$out" >&2; echo "$out" | rg -q "No data to combine" && exit 0; exit 1; }'
-    uv run coverage report
+    uv run --locked coverage report
 
 coverage-html:
-    sh -c 'out="$(uv run coverage combine 2>&1)" || { echo "$out" >&2; echo "$out" | rg -q "No data to combine" && exit 0; exit 1; }'
-    uv run coverage html
+    uv run --locked coverage html
 
 coverage-open:
     sh -c 'if command -v open >/dev/null 2>&1; then open htmlcov/index.html; elif command -v xdg-open >/dev/null 2>&1; then xdg-open htmlcov/index.html; else echo "No opener found (need open or xdg-open)" >&2; exit 1; fi'
 
 coverage-report: coverage-html coverage-open
 
-test-report: test coverage-report
+test-report: check coverage-report
 
-test-check-coverage: test check-coverage
+test-check-coverage: check
