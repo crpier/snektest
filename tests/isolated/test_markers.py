@@ -198,6 +198,9 @@ def test_json_output_includes_markers() -> None:
     summary = TestRunSummary(
         total_tests=1,
         passed=1,
+        skipped=0,
+        expected_failures=0,
+        unexpected_passes=0,
         failed=0,
         errors=0,
         fixture_teardown_failed=0,

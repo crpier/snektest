@@ -29,14 +29,17 @@ from snektest.models import (
     EmptyCollectionError,
     ErrorResult,
     ExceptionDiagnostic,
+    ExpectedFailureResult,
     FailedResult,
     FilterItem,
     InvalidTestDefinitionError,
     PassedResult,
     RunInfrastructureError,
     RunTeardownDiagnostics,
+    SkippedResult,
     TeardownFailure,
     TestResult,
+    UnexpectedPassResult,
     UnreachableError,
 )
 from snektest.parallel import run_tests_parallel
@@ -53,6 +56,12 @@ def _json_result_status(result: TestResult) -> str:
     match result.result:
         case PassedResult():
             return "passed"
+        case SkippedResult():
+            return "skipped"
+        case ExpectedFailureResult():
+            return "expected_failure"
+        case UnexpectedPassResult():
+            return "unexpected_pass"
         case FailedResult():
             return "failed"
         case ErrorResult():
@@ -97,7 +106,7 @@ def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
     raise error
 
 
-def _json_test_entry(result: TestResult) -> dict[str, object]:
+def _json_test_entry(result: TestResult) -> dict[str, object]:  # noqa: C901
     entry: dict[str, object] = {
         "name": str(result.name),
         "duration": result.duration,
@@ -111,6 +120,12 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
             entry["exception"] = _json_exception(exception)
         case ErrorResult(exception=exception):
             entry["exception"] = _json_exception(exception)
+        case (
+            SkippedResult(reason=reason)
+            | ExpectedFailureResult(reason=reason)
+            | UnexpectedPassResult(reason=reason)
+        ):
+            entry["reason"] = reason
         case PassedResult(measurements=measurements):
             if measurements:
                 entry["memory_measurements"] = [
@@ -183,6 +198,9 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
 def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
     output: dict[str, object] = {
         "passed": summary.passed,
+        "skipped": summary.skipped,
+        "expected_failures": summary.expected_failures,
+        "unexpected_passes": summary.unexpected_passes,
         "failed": summary.failed,
         "errors": summary.errors,
         "fixture_teardown_failed": summary.fixture_teardown_failed,
@@ -249,6 +267,9 @@ class TestRunSummary:
 
     total_tests: int
     passed: int
+    skipped: int
+    expected_failures: int
+    unexpected_passes: int
     failed: int
     errors: int
     fixture_teardown_failed: int
@@ -659,6 +680,7 @@ def exit_code_from_summary(summary: TestRunSummary) -> int:
     has_failures = (
         summary.failed > 0
         or summary.errors > 0
+        or summary.unexpected_passes > 0
         or summary.fixture_teardown_failed > 0
         or summary.run_teardown_failed > 0
         or summary.session_teardown_failed > 0
@@ -744,8 +766,15 @@ async def run_tests_programmatic(  # noqa: PLR0913
         passed=sum(1 for r in test_results if isinstance(r.result, PassedResult)),
         failed=sum(1 for r in test_results if isinstance(r.result, FailedResult)),
         errors=sum(1 for r in test_results if isinstance(r.result, ErrorResult)),
+        skipped=sum(1 for r in test_results if isinstance(r.result, SkippedResult)),
+        expected_failures=sum(
+            1 for r in test_results if isinstance(r.result, ExpectedFailureResult)
+        ),
+        unexpected_passes=sum(
+            1 for r in test_results if isinstance(r.result, UnexpectedPassResult)
+        ),
         fixture_teardown_failed=sum(
-            1 for r in test_results if r.fixture_teardown_failures
+            1 for result in test_results if result.fixture_teardown_failures
         ),
         run_teardown_failed=len(run_teardown_failures),
         session_teardown_failed=len(session_teardown_failures),

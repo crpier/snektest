@@ -164,6 +164,18 @@ Same-name selected cases do not overlap; blocked ordinals are skipped so unrelat
 cases can run. Mutexes are case-sensitive and do not provide cross-command or OS
 locking.
 
+### Intentional outcomes
+
+`skip(reason)` and `xfail(reason)` stop a sync or async test dynamically. Reasons
+must be non-empty, already-trimmed strings. `@test(xfail="reason")` marks a known
+Snektest assertion failure as expected; unrelated exceptions remain errors. A
+passing statically expected failure is XPASS and makes the command exit 1. SKIP
+and XFAIL alone exit 0. All are first-class `TestResult` variants with matching
+programmatic counts and JSON statuses. Function fixtures established before a
+dynamic outcome still tear down. Teardown and background failures override the
+successful exit behavior, and abandoned async tasks turn the outcome into a
+failure.
+
 ### Process Workers
 
 `-n COUNT` / `--workers COUNT` accepts a positive integer or `auto`; omission is

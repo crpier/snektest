@@ -83,8 +83,10 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 Scope,
                 SnektestError,
                 fixture,
+                skip,
                 test,
                 test_hypothesis,
+                xfail,
             )
 
             @fixture(scope=Scope.SESSION)
@@ -97,6 +99,14 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             )
             def parameter_types(first: int, second: str) -> None:
                 pass
+
+            @test(xfail="known defect")
+            def expected_outcome() -> None:
+                xfail("known defect")
+
+            @test()
+            def conditional_outcome() -> None:
+                skip("optional dependency unavailable")
 
             @test_hypothesis(
                 st.integers(),
@@ -137,6 +147,8 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(payload["scope"], "session")
     assert_eq(payload["error"], "FixtureError")
     assert_true("SnektestError" in payload["all"])
+    assert_true("skip" in payload["all"])
+    assert_true("xfail" in payload["all"])
     assert_false("UnreachableError" in payload["all"])
 
     type_checker = Path(sys.executable).with_name("ty")

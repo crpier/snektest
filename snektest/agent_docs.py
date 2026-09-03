@@ -120,6 +120,33 @@ def test_needs_parentheses() -> None:
 - Set `generation="negative"` on `@test_schema` to generate schema-violating requests. A passing response must use an allowed, documented 4xx status; `expected_statuses` defaults to all 4xx responses. Accepted 2xx responses and all 5xx responses fail. Negative stateful workflows are not supported.
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked.
 
+## Skips and known defects
+
+Use `skip(reason)` when the current environment cannot run a test. Use
+`xfail(reason)` for a known defect discovered during the test. For a known
+assertion defect covering the whole test, use `@test(xfail="reason")`. Snektest
+reports that assertion as XFAIL. If it passes, XPASS fails the command so stale
+expected-failure declarations cannot hide fixes. Unexpected exceptions remain
+errors. Reasons must be non-empty and already trimmed. Function fixtures still
+tear down after either dynamic outcome, and teardown failures fail the command.
+
+```python
+import os
+
+from snektest import assert_eq, skip, test
+
+
+@test(mark="fast")
+def test_optional_payment_service() -> None:
+    if os.environ.get("PAYMENTS_URL") is None:
+        skip("PAYMENTS_URL is not configured")
+
+
+@test(mark="fast", xfail="comparison normalization is not fixed yet")
+def test_known_comparison_defect() -> None:
+    assert_eq("snektest", "SNEKTEST")
+```
+
 ## Memory budgets
 
 Assert peak allocation and leak-free growth with `assert_memory`:
@@ -261,6 +288,7 @@ snektest --example fixtures
 snektest --example async
 snektest --example benchmark
 snektest --example memory
+snektest --example outcomes
 snektest --example parametrize
 snektest --example schema
 ```
@@ -272,6 +300,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
     "memory": "memory.py",
+    "outcomes": "outcomes.py",
     "parametrize": "parametrize.py",
     "schema": "schema.py",
 }

@@ -45,6 +45,22 @@ class BadRequestError(SnektestError):
     """Raised when test configuration or programmatic input is invalid."""
 
 
+class _OutcomeSignal(BaseException):
+    """Carry an intentional result through code that catches ordinary exceptions."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+class _ExpectedFailureSignal(_OutcomeSignal):
+    """Stop a test at an explicitly acknowledged known defect."""
+
+
+class _SkipSignal(_OutcomeSignal):
+    """Stop a test because its runtime environment is unavailable."""
+
+
 class TestTimeoutError(SnektestError):
     """Raised when an async test exceeds its configured timeout.
 
@@ -260,6 +276,7 @@ class TestCase:
     function: TestFunction
     markers: tuple[str, ...]
     name: TestName
+    expected_failure_reason: str | None = None
     mutex: str | None = None
     ordinal: int = 0
     param_values: tuple[object, ...] = ()
@@ -393,6 +410,34 @@ class ExceptionDiagnostic:
 
 
 @dataclass(frozen=True)
+class SkippedResult:
+    """A test that stopped because its runtime environment was unavailable."""
+
+    reason: str
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExpectedFailureResult:
+    """A test stopped at an explicitly acknowledged known defect."""
+
+    reason: str
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
+    exception: ExceptionDiagnostic | None = None
+
+
+@dataclass(frozen=True)
+class UnexpectedPassResult:
+    """A statically expected failure whose test body passed."""
+
+    reason: str
+    benchmarks: tuple[BenchmarkMeasurement, ...] = ()
+    benchmark_comparisons: tuple[BenchmarkComparison, ...] = ()
+
+
+@dataclass(frozen=True)
 class FailedResult:
     exception: ExceptionDiagnostic
     benchmarks: tuple[BenchmarkMeasurement, ...] = ()
@@ -441,7 +486,14 @@ class TestResult:
     fixture_teardown_output: str | None
     markers: tuple[str, ...]
     name: TestName
-    result: PassedResult | FailedResult | ErrorResult
+    result: (
+        PassedResult
+        | SkippedResult
+        | ExpectedFailureResult
+        | UnexpectedPassResult
+        | FailedResult
+        | ErrorResult
+    )
     warnings: tuple[str, ...]
     ordinal: int = 0
     background_failures: tuple[BackgroundFailure, ...] = ()

@@ -59,6 +59,7 @@ class _ProcessConnection(Protocol):
 class CaseManifest:
     """Structural case identity compared across independently importing processes."""
 
+    expected_failure_reason: str | None
     file_path: str
     func_name: str
     markers: tuple[str, ...]
@@ -183,6 +184,7 @@ class _Worker:
 def _manifest(test_cases: Sequence[TestCase]) -> tuple[CaseManifest, ...]:
     return tuple(
         CaseManifest(
+            expected_failure_reason=test_case.expected_failure_reason,
             file_path=str(test_case.name.file_path),
             func_name=test_case.name.func_name,
             markers=test_case.markers,
