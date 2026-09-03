@@ -2,6 +2,7 @@ from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Any, Literal, overload
 
+from snektest._version import __version__ as __version__
 from snektest.annotations import (
     AsyncFixture,
     Coroutine,
@@ -68,6 +69,7 @@ __all__ = [
     "Scope",
     "SnektestError",
     "TestTimeoutError",
+    "__version__",
     "assert_benchmark",
     "assert_eq",
     "assert_false",

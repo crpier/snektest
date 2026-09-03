@@ -1,4 +1,4 @@
-"""Basic tests retain source order after every selected module finishes import."""
+"""Basic tests retain source order; inspect installations with `snektest --version`."""
 
 from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
 

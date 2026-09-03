@@ -19,6 +19,8 @@ from snektest import (
     test,
 )
 
+_DEVELOPMENT_VERSION = "0.17.0.dev0"
+
 _PUBLIC_ERRORS = {
     "AssertionFailure",
     "BadRequestError",
@@ -43,6 +45,12 @@ def _stub_exports() -> list[str]:
             return cast("list[str]", ast.literal_eval(statement.value))
     msg = "snektest/__init__.pyi does not declare __all__"
     raise RuntimeError(msg)
+
+
+@test(mark="fast")
+def test_package_exposes_development_version() -> None:
+    assert_eq(snektest.__version__, _DEVELOPMENT_VERSION)
+    assert_true("__version__" in snektest.__all__)
 
 
 @test(mark="fast")

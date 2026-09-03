@@ -1,5 +1,6 @@
 """Supported top-level interface for authoring and integrating snektest tests."""
 
+from snektest._version import __version__ as __version__
 from snektest.annotations import (
     AsyncFixture,
     Fixture,
@@ -69,6 +70,7 @@ __all__ = [
     "Scope",
     "SnektestError",
     "TestTimeoutError",
+    "__version__",
     "assert_benchmark",
     "assert_eq",
     "assert_false",

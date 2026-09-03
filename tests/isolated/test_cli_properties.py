@@ -20,6 +20,7 @@ from snektest.decorators import test_hypothesis
 _KNOWN_TOKENS = [
     "-h",
     "--help",
+    "--version",
     "--agent-docs",
     "--llms",
     "--examples",
