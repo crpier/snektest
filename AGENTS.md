@@ -57,6 +57,18 @@ uv run ruff format .
 ### Package Management
 This project uses `uv` for dependency management. The project requires Python >=3.14.
 
+### Distribution Metadata
+
+`snektest/_version.py` is the authoritative release version; the package exports
+it as `snektest.__version__`, and the CLI prints it with `--version`. Development
+builds use a PEP 440 development version and must never reuse a published
+identity. Hatch's sdist target is an explicit allowlist. Both wheel and sdist
+must include the package, typing marker, bundled examples, README, and MIT
+license metadata, while excluding contributor-only and workstation files.
+Artifact tests inspect both manifests and independently install and smoke-test
+each archive. User-facing changes belong in `CHANGELOG.md`; private security
+reports follow `SECURITY.md`.
+
 ## Architecture
 
 ### Test Collection & Execution Flow

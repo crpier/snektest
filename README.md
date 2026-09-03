@@ -4,9 +4,14 @@ A type-safe, async-native Python testing framework.
 
 ## Installation
 
+Snektest requires Python 3.14 or newer.
+
 ```bash
 uv add snektest
 ```
+
+Inspect the installed version with `snektest --version` or
+`snektest.__version__`.
 
 OpenAPI contract testing is optional:
 
@@ -74,6 +79,12 @@ Run one marker group when you want focused feedback:
 ```bash
 snektest --mark fast
 ```
+
+## Project information
+
+Snektest is distributed under the [MIT License](LICENSE). See
+[CHANGELOG.md](CHANGELOG.md) for release notes. Report vulnerabilities privately
+using the instructions in [SECURITY.md](SECURITY.md).
 
 ## Features
 

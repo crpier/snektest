@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
+from snektest._version import __version__
 from snektest.agent_docs import (
     get_agent_docs,
     get_example_source,
@@ -262,7 +263,9 @@ class TestRunSummary:
     benchmark_baseline: BenchmarkBaselineRun | None = None
 
 
-type CliAction = Literal["agent_docs", "help", "list_examples", "show_example"]
+type CliAction = Literal[
+    "agent_docs", "help", "list_examples", "show_example", "version"
+]
 type WorkerCount = int | Literal["auto"]
 
 _DEFAULT_TIMEOUT_SECONDS = 60.0
@@ -309,6 +312,7 @@ Filters:
 
 Options:
   -h, --help        Show this help message
+  --version         Show the installed snektest version
   -s                Disable stdout/stderr capture
   --agent-docs      Print AI-agent usage guide
   --llms            Alias for --agent-docs
@@ -367,6 +371,7 @@ _ACTION_ARGS: dict[str, CliAction] = {
     "--examples": "list_examples",
     "--help": "help",
     "--llms": "agent_docs",
+    "--version": "version",
     "-h": "help",
     "examples": "list_examples",
 }
@@ -445,6 +450,8 @@ def _print_cli_action(options: CliOptions) -> int:
         output = HELP_TEXT
     elif options.action == "agent_docs":
         output = get_agent_docs()
+    elif options.action == "version":
+        output = f"snektest {__version__}\n"
     elif options.action == "list_examples":
         output = get_examples_listing()
     elif options.action == "show_example":
@@ -488,7 +495,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     workers: WorkerCount | None = None
     workers_option_seen = False
     filters: list[str] = []
-    duplicate_action = ParseError("Only one help/docs/examples command is supported")
+    duplicate_action = ParseError("Only one informational command is supported")
 
     index = 0
     while index < len(argv):
@@ -565,7 +572,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         or update_benchmark_baseline is not None
     ):
         return ParseError(
-            "Cannot combine help/docs/examples commands with test filters or baseline options"
+            "Cannot combine informational commands with test filters or baseline options"
         )
     if pdb_on_failure and workers is not None:
         return ParseError(

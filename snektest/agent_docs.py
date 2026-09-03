@@ -6,7 +6,7 @@ from snektest.models import BadRequestError
 
 AGENT_DOCS = """# snektest agent guide
 
-Snektest is a Python testing framework with first-class async and typing support.
+Snektest is a Python 3.14+ testing framework with first-class async and typing support.
 
 ## Quick start
 
@@ -31,6 +31,7 @@ Useful commands:
 
 ```bash
 snektest --help
+snektest --version
 snektest --agent-docs
 snektest --examples
 snektest --example async

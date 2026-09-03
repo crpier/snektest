@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from snektest import (
+    __version__,
     assert_eq,
     assert_in,
     assert_is_none,
@@ -218,6 +219,14 @@ def test_parse_cli_args_rejects_baseline_mode_conflict() -> None:
 
 
 @test()
+def test_parse_cli_args_version_action() -> None:
+    result = assert_isinstance(parse_cli_args(["--version"]), CliOptions)
+
+    assert_eq(result.action, "version")
+    assert_eq(result.filters, ())
+
+
+@test()
 def test_parse_cli_args_agent_docs_action() -> None:
     options = parse_cli_args(["--agent-docs"])
     options = assert_isinstance(options, CliOptions)
@@ -240,7 +249,7 @@ def test_parse_cli_args_example_command_action() -> None:
 def test_parse_cli_args_duplicate_action_returns_error() -> None:
     result = parse_cli_args(["--help", "--examples"])
     result = assert_isinstance(result, ParseError)
-    assert_in("Only one help/docs/examples", result.message)
+    assert_in("Only one informational command", result.message)
 
 
 @test()
@@ -263,6 +272,16 @@ async def test_run_script_returns_parse_cli_args_exit_code() -> None:
 
 
 @test()
+async def test_run_script_prints_version() -> None:
+    buffer = StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = await run_script(["--version"])
+
+    assert_eq(result, 0)
+    assert_eq(buffer.getvalue(), f"snektest {__version__}\n")
+
+
+@test()
 async def test_run_script_prints_agent_docs() -> None:
     buffer = StringIO()
     with contextlib.redirect_stdout(buffer):
@@ -280,6 +299,7 @@ async def test_run_script_prints_help_with_agent_docs_option() -> None:
 
     assert_eq(result, 0)
     assert_in("--agent-docs", buffer.getvalue())
+    assert_in("--version", buffer.getvalue())
 
 
 @test()
