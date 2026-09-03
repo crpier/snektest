@@ -159,7 +159,7 @@ def test_testname_str_no_params() -> None:
     name = TestName(
         file_path=Path("tests/test_foo.py"), func_name="test_bar", params_part=""
     )
-    assert_eq(str(name), "tests/test_foo.py::test_bar")
+    assert_eq(str(name), f"{Path('tests/test_foo.py')}::test_bar")
 
 
 @test()
@@ -170,7 +170,7 @@ def test_testname_str_with_params() -> None:
         func_name="test_bar",
         params_part="x=1, y=2",
     )
-    assert_eq(str(name), "tests/test_foo.py::test_bar[x=1, y=2]")
+    assert_eq(str(name), f"{Path('tests/test_foo.py')}::test_bar[x=1, y=2]")
 
 
 @test()

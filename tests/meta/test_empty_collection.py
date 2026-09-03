@@ -17,7 +17,7 @@ def _run_selection(path: str, *args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
-        timeout=1.5,
+        timeout=10,
     )
 
 

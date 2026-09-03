@@ -377,7 +377,7 @@ def test_missing_baseline_is_a_failure() -> None:
             entries={},
             machine=_machine(),
             path=root / "benchmarks.json",
-            project_root=root,
+            project_root=root.resolve(),
         )
 
         with assert_raises(AssertionFailure) as failure:

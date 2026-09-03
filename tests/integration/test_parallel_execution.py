@@ -49,19 +49,21 @@ def test_run_fixture_is_owned_once_by_host_and_copied_to_workers() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
         lifecycle_file = directory / "lifecycle.jsonl"
-        worker_file = directory / "workers.jsonl"
+        worker_dir = directory / "workers"
+        worker_dir.mkdir()
         test_file = directory / "test_run_fixture.py"
         _ = test_file.write_text(
             f"""
 import json
 import os
+import time
 from collections.abc import Generator
 from pathlib import Path
 
 from snektest import assert_ne, fixture, load_fixture, test
 
 LIFECYCLE = Path({str(lifecycle_file)!r})
-WORKERS = Path({str(worker_file)!r})
+WORKERS = Path({str(worker_dir)!r})
 
 @fixture(scope="run")
 def shared_descriptor() -> Generator[dict[str, int]]:
@@ -74,9 +76,14 @@ def shared_descriptor() -> Generator[dict[str, int]]:
 
 def record_worker() -> None:
     descriptor = load_fixture(shared_descriptor())
-    assert_ne(os.getpid(), descriptor["host_pid"])
-    with WORKERS.open("a") as output:
-        _ = output.write(json.dumps({{"worker_pid": os.getpid(), **descriptor}}) + "\\n")
+    worker_pid = os.getpid()
+    assert_ne(worker_pid, descriptor["host_pid"])
+    _ = (WORKERS / f"{{worker_pid}}.json").write_text(
+        json.dumps({{"worker_pid": worker_pid, **descriptor}})
+    )
+    deadline = time.monotonic() + 5
+    while len(list(WORKERS.glob("*.json"))) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
 
 @test()
 def test_one() -> None:
@@ -92,7 +99,9 @@ def test_two() -> None:
         lifecycle = [
             json.loads(line) for line in lifecycle_file.read_text().splitlines()
         ]
-        workers = [json.loads(line) for line in worker_file.read_text().splitlines()]
+        workers = [
+            json.loads(worker.read_text()) for worker in worker_dir.glob("*.json")
+        ]
 
     assert_eq(result["returncode"], 0)
     assert_eq([event["event"] for event in lifecycle], ["setup", "teardown"])
@@ -271,7 +280,7 @@ def test_unrelated() -> None:
             "--workers",
             "2",
             "--timeout",
-            "0.5",
+            "2",
             timeout=10,
         )
 
@@ -285,7 +294,8 @@ def test_unrelated() -> None:
 def test_mutex_prevents_overlap_without_blocking_unrelated_case() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
-        events_file = directory / "events.jsonl"
+        events_dir = directory / "events"
+        events_dir.mkdir()
         test_file = directory / "test_mutex.py"
         _ = test_file.write_text(
             f"""
@@ -295,16 +305,15 @@ from pathlib import Path
 
 from snektest import test
 
-EVENTS = Path({str(events_file)!r})
-
-def record(event: str, name: str) -> None:
-    with EVENTS.open("a") as output:
-        _ = output.write(json.dumps({{"event": event, "name": name, "at": time.monotonic()}}) + "\\n")
+EVENTS = Path({str(events_dir)!r})
 
 def work(name: str) -> None:
-    record("start", name)
+    started = time.monotonic()
     time.sleep(0.1)
-    record("end", name)
+    ended = time.monotonic()
+    _ = (EVENTS / f"{{name}}.json").write_text(
+        json.dumps({{"name": name, "start": started, "end": ended}})
+    )
 
 @test(mutex="shared")
 def test_first() -> None:
@@ -321,18 +330,14 @@ def test_unrelated() -> None:
         )
 
         result = run_test_subprocess(test_file, "--workers", "2", timeout=10)
-        events = [json.loads(line) for line in events_file.read_text().splitlines()]
+        events = {
+            event.stem: json.loads(event.read_text())
+            for event in events_dir.glob("*.json")
+        }
 
-    times = {(entry["name"], entry["event"]): entry["at"] for entry in events}
     assert_eq(result["returncode"], 0)
-    assert_eq(
-        times[("unrelated", "start")] < times[("first", "end")],
-        True,
-    )
-    assert_eq(
-        times[("second", "start")] < times[("first", "end")],
-        False,
-    )
+    assert_eq(events["unrelated"]["start"] < events["first"]["end"], True)
+    assert_eq(events["second"]["start"] < events["first"]["end"], False)
 
 
 @test(mark="slow")

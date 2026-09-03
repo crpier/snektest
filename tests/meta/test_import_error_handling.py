@@ -30,7 +30,7 @@ def test_missing_explicit_test_name_exits_unsuccessfully() -> None:
         check=False,
         capture_output=True,
         text=True,
-        timeout=0.5,
+        timeout=5,
     )
 
     assert_eq(result.returncode, 2)
@@ -68,7 +68,7 @@ def test_import_error_does_not_hang() -> None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=0.5,
+            timeout=5,
         )
         assert_ne(result.returncode, 0)
         assert_in("Collection error:", result.stdout)

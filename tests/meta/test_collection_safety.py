@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, cast
@@ -62,7 +63,7 @@ def test_import_output_and_warnings_do_not_corrupt_json(
         check=False,
         capture_output=True,
         text=True,
-        timeout=1.5,
+        timeout=10,
     )
     summary = cast("dict[str, Any]", json.loads(result.stdout))
 
@@ -78,39 +79,39 @@ async def test_package_relative_imports_work_for_absolute_and_relative_filters()
     None
 ):
     """Equivalent path spellings collect the same package module successfully."""
-    tmp_dir = load_fixture(tmp_dir_fixture())
-    package_dir = tmp_dir / "relative_package"
-    package_dir.mkdir()
-    _ = (package_dir / "__init__.py").write_text("")
-    _ = (package_dir / "helper.py").write_text("VALUE = 7\n")
-    test_file = create_test_file(
-        package_dir,
-        dedent("""
-            from snektest import assert_eq, test
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+        package_dir = Path(tmp) / "relative_package"
+        package_dir.mkdir()
+        _ = (package_dir / "__init__.py").write_text("")
+        _ = (package_dir / "helper.py").write_text("VALUE = 7\n")
+        test_file = create_test_file(
+            package_dir,
+            dedent("""
+                from snektest import assert_eq, test
 
-            from .helper import VALUE
+                from .helper import VALUE
 
-            @test()
-            def test_relative_import() -> None:
-                assert_eq(VALUE, 7)
-        """),
-        name="test_relative_import",
-    )
-    relative_file = os.path.relpath(test_file, start=Path.cwd())
+                @test()
+                def test_relative_import() -> None:
+                    assert_eq(VALUE, 7)
+            """),
+            name="test_relative_import",
+        )
+        relative_file = os.path.relpath(test_file, start=Path.cwd())
 
-    try:
-        absolute_run = await run_tests_programmatic([FilterItem(str(test_file))])
-        relative_run = await run_tests_programmatic([FilterItem(relative_file)])
-    except CollectionError as error:
-        fail(f"Package collection failed: {error}")
-        return
+        try:
+            absolute_run = await run_tests_programmatic([FilterItem(str(test_file))])
+            relative_run = await run_tests_programmatic([FilterItem(relative_file)])
+        except CollectionError as error:
+            fail(f"Package collection failed: {error}")
+            return
 
-    assert_eq(absolute_run.passed, 1)
-    assert_eq(relative_run.passed, 1)
-    assert_eq(
-        absolute_run.test_results[0].name.resolved_file_path,
-        relative_run.test_results[0].name.resolved_file_path,
-    )
+        assert_eq(absolute_run.passed, 1)
+        assert_eq(relative_run.passed, 1)
+        assert_eq(
+            absolute_run.test_results[0].name.resolved_file_path,
+            relative_run.test_results[0].name.resolved_file_path,
+        )
 
 
 @test(mark="medium")

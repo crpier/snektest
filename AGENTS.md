@@ -6,6 +6,18 @@ snektest is a Python testing framework with first class support for async and st
 
 ## Development Commands
 
+### Complete release gate
+
+```bash
+uv run --locked python scripts/release_check.py
+```
+
+This is the one release-health command locally and in GitHub Actions. It checks
+the lock, Ruff formatting and lint, ty, production dependency advisories, the
+complete canonical `tests/` suite under coverage, the 90% core-package threshold,
+and independently built and installed wheel and source archives. CI runs it on
+Python 3.14 under Linux, macOS, and Windows with a 15-minute outer timeout.
+
 ### Guidelines for writing tests
 - Do not use monkeypatching or mocking.
 - Never use bare `assert` in tests; use the `assert_*` helpers from
@@ -66,8 +78,11 @@ identity. Hatch's sdist target is an explicit allowlist. Both wheel and sdist
 must include the package, typing marker, bundled examples, README, and MIT
 license metadata, while excluding contributor-only and workstation files.
 Artifact tests inspect both manifests and independently install and smoke-test
-each archive. User-facing changes belong in `CHANGELOG.md`; private security
-reports follow `SECURITY.md`.
+each archive. Versioned `v*` tags are immutable, must point to a pull request
+merged into `main`, and must exactly match the package version. The release
+workflow reruns the matrix gate before PyPI trusted publishing with attestations.
+User-facing changes belong in `CHANGELOG.md`; private security reports follow
+`SECURITY.md`.
 
 ## Architecture
 

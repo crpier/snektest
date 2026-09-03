@@ -26,7 +26,7 @@ def create_test_file(
 
 
 def run_test_subprocess(
-    test_file: Path, *extra_args: str, timeout: float = 0.5
+    test_file: Path, *extra_args: str, timeout: float = 5
 ) -> dict[str, Any]:
     """Run snektest subprocess on test file and return structured results.
 
