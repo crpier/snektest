@@ -156,6 +156,30 @@ def test_parse_cli_args_timeout_rejects_non_positive() -> None:
 
 
 @test()
+def test_parse_cli_args_timeout_rejects_non_finite_values() -> None:
+    for raw_timeout in ("nan", "inf", "+inf", "1e309"):
+        result = parse_cli_args(["--timeout", raw_timeout])
+        result = assert_isinstance(result, ParseError)
+        assert_in("finite", result.message)
+
+
+@test()
+def test_parse_cli_args_timeout_boundaries() -> None:
+    smallest = assert_isinstance(parse_cli_args(["--timeout", "5e-324"]), CliOptions)
+    largest = assert_isinstance(
+        parse_cli_args(["--timeout", "1.7976931348623157e308"]), CliOptions
+    )
+
+    assert_eq(smallest.timeout, 5e-324)
+    assert_eq(largest.timeout, 1.7976931348623157e308)
+    for raw_timeout in ("1e-999", "-1", "-inf"):
+        _ = assert_isinstance(
+            parse_cli_args(["--timeout", raw_timeout]),
+            ParseError,
+        )
+
+
+@test()
 def test_parse_cli_args_timeout_rejects_repeats() -> None:
     result = parse_cli_args(["--timeout", "1", "--timeout", "2"])
     result = assert_isinstance(result, ParseError)

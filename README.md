@@ -13,6 +13,23 @@ uv add snektest
 Inspect the installed version with `snektest --version` or
 `snektest.__version__`.
 
+### Compatibility
+
+The release gate defines supported environments. `requires-python = ">=3.14"`
+allows installation on newer Python versions, but the tested support guarantee
+is narrower:
+
+| Runtime | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| CPython 3.14 (GIL-enabled) | Supported | Supported | Supported |
+| CPython 3.14 (free-threaded) | Not supported | Not supported | Not supported |
+| CPython 3.15+ | Not yet verified | Not yet verified | Not yet verified |
+| Other Python implementations | Not supported | Not supported | Not supported |
+
+Every supported cell runs the same release-health command on GitHub's current
+Ubuntu, macOS, and Windows images. Free-threaded CPython remains unsupported
+until the complete suite and dependency graph pass on that build.
+
 OpenAPI contract testing is optional:
 
 ```bash
@@ -561,7 +578,22 @@ The CLI applies a 60-second timeout to every async test by default. Use
 `--timeout SECONDS` to override it or `--no-timeout` to disable the test-body
 limit. The timeout is best-effort: it only fires while a test is suspended on an
 `await`, so a hung `await` is reported as an error and the run continues, but a
-test stuck in synchronous or CPU-bound work cannot be interrupted.
+test stuck in synchronous or CPU-bound work cannot be interrupted. Timeout
+values must be finite and positive.
+
+| Layer | Guarantee |
+| --- | --- |
+| Async test body | `--timeout` bounds the complete body while it is suspended on an `await`. The default is 60 seconds. |
+| Async cleanup | Each async fixture teardown and task-cancellation attempt uses `--timeout`, or 60 seconds when the body limit is disabled. |
+| Collection and imports | Local mode has no limit. Explicit worker mode bounds child bootstrap with `--timeout`, but this is not a per-import guarantee. |
+| Sync and CPU-bound work | No Snektest timeout can interrupt it, including in explicit worker mode. |
+| Async Hypothesis | The limit covers the complete property run. It cannot stop synchronous work already running in the Hypothesis thread. |
+| Outer command | Snektest has no hard command deadline. This project's release jobs provide a 15-minute outer limit. Set one in your own CI. |
+
+A hard limit for imports or synchronous bodies needs process-per-case isolation
+and separately isolated collection. `--workers` uses persistent processes and
+does not provide that guarantee. Keep an external supervisor around the complete
+command.
 
 Cleanup has a separate guarantee. Snektest tears down every established fixture
 in reverse setup order, even after test failure, interruption, or parent

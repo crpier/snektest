@@ -143,8 +143,15 @@ def _assert_wheel_manifest_and_metadata(
     project_urls = metadata.get_all("Project-URL")
     assert_in("Repository, https://github.com/crpier/snektest", project_urls)
     assert_in("Issues, https://github.com/crpier/snektest/issues", project_urls)
-    assert_in("Programming Language :: Python :: 3.14", metadata.get_all("Classifier"))
-    assert_in("Operating System :: OS Independent", metadata.get_all("Classifier"))
+    classifiers = metadata.get_all("Classifier")
+    for classifier in (
+        "Operating System :: MacOS",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: Implementation :: CPython",
+    ):
+        assert_in(classifier, classifiers)
     assert_in("# snektest", metadata.get_payload())
 
 
