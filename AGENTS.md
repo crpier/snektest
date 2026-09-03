@@ -72,10 +72,11 @@ This project uses `uv` for dependency management. The project requires Python >=
 Fixtures are generator functions decorated with `@fixture`, annotated
 `Generator[T]` or `AsyncGenerator[T]`. Calling a decorated fixture returns a
 handle (`Fixture[T]` / `AsyncFixture[T]`, defined in `annotations.py`); pass it to
-`load_fixture()`. The handle carries the fixture's `scope`, a `key` (the
-decorated function), and a `make` callable, so scope is read directly off the
-decorator — no frame/annotation inspection. The handle is also a (async) context
-manager, so fixtures double as setup helpers in standalone scripts.
+`load_fixture()`. The handle carries its canonical `Scope` enum value as `scope`,
+a `key` (the decorated function), and a `make` callable, so scope is read
+directly off the decorator — no frame/annotation inspection. The handle is also
+a sync or async context manager, so fixtures double as setup helpers in
+standalone scripts.
 
 All fixture state and teardown is owned by a `FixtureRegistry` (`fixtures.py`),
 created fresh per run and reached ambiently through a `ContextVar` (set by
@@ -199,7 +200,9 @@ Interactions:
 ### Parameterization
 
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
-each non-empty list built from `Param(value=..., name=...)`. Case names are
+each non-empty list built from `Param(value=..., name=...)`. Static checking
+preserves parameter types through two lists; three or more use the variadic
+`Any` fallback. Case names are
 non-empty, unique, and exclude `, `, `[` and `]` so CLI filters are unambiguous.
 `Param.to_dict()` creates all combinations using `itertools.product`; each
 combination becomes a separate test execution and cardinality is the product of
@@ -262,6 +265,20 @@ workflows remain positive-only.
 Console summary lines intentionally keep exception details compact: only the first
 exception message line is shown and long lines may be ellipsized. Use the full
 failure details or `--json-output` for exact diagnostics.
+
+### Public Interface and Errors
+
+The runtime and `snektest/__init__.pyi` expose the same deliberate top-level
+interface. `Scope` is the canonical runtime/static fixture-scope representation;
+accepted string literals normalize to it. `SnektestError` is the conventional
+`Exception`-based root for exported assertion, request, collection, fixture,
+schema-generation, and timeout errors. `AssertionFailure` also subclasses
+`AssertionError`. `UnreachableError` remains internal `BaseException` control
+flow so ordinary test-error handlers do not misclassify framework invariants.
+`@test` statically preserves up to two parameter axes and `@test_hypothesis` up
+to five strategies; larger
+arities use documented variadic `Any` fallbacks. Distribution tests validate the
+built wheel rather than only the checkout.
 
 ### Assertions
 

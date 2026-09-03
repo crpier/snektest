@@ -14,14 +14,12 @@ from collections.abc import Generator
 from hypothesis import settings
 from hypothesis import strategies as st
 
-from snektest import Fixture, assert_eq
+from snektest import Fixture, Scope, assert_eq
 from snektest.decorators import test_hypothesis
 from snektest.fixtures import FixtureRegistry
 
 
-def _recording_fixture(
-    label: int, events: list[tuple[str, int]]
-) -> Fixture[int]:
+def _recording_fixture(label: int, events: list[tuple[str, int]]) -> Fixture[int]:
     """A function fixture that records its own setup and teardown."""
 
     def gen() -> Generator[int]:
@@ -29,7 +27,7 @@ def _recording_fixture(
         yield label
         events.append(("teardown", label))
 
-    return Fixture(make=gen, scope="function", key=object(), name=f"f{label}")
+    return Fixture(make=gen, scope=Scope.FUNCTION, key=object(), name=f"f{label}")
 
 
 def _nested_fixture(
@@ -46,7 +44,7 @@ def _nested_fixture(
         yield level
         events.append(("teardown", level))
 
-    return Fixture(make=gen, scope="function", key=object(), name=f"f{level}")
+    return Fixture(make=gen, scope=Scope.FUNCTION, key=object(), name=f"f{level}")
 
 
 @settings(deadline=None)

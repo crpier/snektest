@@ -4,9 +4,10 @@ import contextlib
 from collections.abc import AsyncGenerator, Callable, Generator
 from collections.abc import Coroutine as _Coroutine
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
-from typing import Annotated, Any, Literal, NewType, override
+from typing import Annotated, Any, NewType, override
 
 from pydantic import (
     GetCoreSchemaHandler,
@@ -21,7 +22,17 @@ from pydantic_core.core_schema import (
 )
 
 type Coroutine[T] = _Coroutine[None, None, T]
-type FixtureScope = Literal["function", "run", "session"]
+
+
+class Scope(StrEnum):
+    """Supported fixture lifetimes, used by decorators and fixture handles."""
+
+    FUNCTION = "function"
+    RUN = "run"
+    SESSION = "session"
+
+
+type FixtureScope = Scope
 
 
 class Fixture[T]:

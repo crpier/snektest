@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator, Generator
 
-from snektest import assert_eq, fixture, load_fixture, test
+from snektest import Scope, assert_eq, fixture, load_fixture, test
 
 
 @fixture
@@ -13,7 +13,7 @@ def user_fixture() -> Generator[dict[str, str]]:
     user.clear()
 
 
-@fixture(scope="session")
+@fixture(scope=Scope.SESSION)
 async def config_fixture() -> AsyncGenerator[dict[str, str]]:
     """Create shared configuration once for the whole test session."""
     config: dict[str, str] = {"environment": "test"}
@@ -21,7 +21,7 @@ async def config_fixture() -> AsyncGenerator[dict[str, str]]:
     config.clear()
 
 
-@fixture(scope="run")
+@fixture(scope=Scope.RUN)
 def service_descriptor() -> Generator[tuple[str, int]]:
     """Publish inert connection details from one command-owned resource."""
     yield ("127.0.0.1", 5432)

@@ -6,6 +6,7 @@ from snektest.annotations import (
     AsyncFixture,
     Coroutine,
     Fixture,
+    Scope,
 )
 from snektest.assertions import (
     assert_eq,
@@ -33,26 +34,40 @@ from snektest.benchmark import assert_benchmark
 from snektest.decorators import Marker, SearchStrategy
 from snektest.decorators import fixture as fixture
 from snektest.decorators import load_fixture as load_fixture
-from snektest.models import Param, UnreachableError
-from snektest.models import Scope as Scope
+from snektest.models import (
+    AssertionFailure,
+    BadRequestError,
+    CollectionError,
+    FixtureError,
+    Param,
+    SnektestError,
+    TestTimeoutError,
+)
 from snektest.schema import (
     SchemaAuthProvider,
     SchemaCheck,
     SchemaFilter,
+    SchemaGenerationError,
     SchemaOperationSelector,
 )
 
 __all__ = [
+    "AssertionFailure",
     "AsyncFixture",
+    "BadRequestError",
+    "CollectionError",
     "Fixture",
+    "FixtureError",
     "Marker",
     "Param",
     "SchemaAuthProvider",
     "SchemaCheck",
     "SchemaFilter",
+    "SchemaGenerationError",
     "SchemaOperationSelector",
     "Scope",
-    "UnreachableError",
+    "SnektestError",
+    "TestTimeoutError",
     "assert_benchmark",
     "assert_eq",
     "assert_false",

@@ -144,8 +144,8 @@ async def test_async_hypothesis_cancellation_exits_promptly() -> None:
 
 
 @test()
-async def test_async_hypothesis_base_exception_exits_promptly() -> None:
-    """Framework errors outside `Exception` still release the worker."""
+async def test_async_hypothesis_framework_error_exits_promptly() -> None:
+    """Catchable framework errors still release the Hypothesis worker."""
     tmp_dir = load_fixture(tmp_dir_fixture())
 
     test_file = create_test_file(
@@ -155,8 +155,7 @@ async def test_async_hypothesis_base_exception_exits_promptly() -> None:
             from hypothesis import Phase, settings
             from hypothesis import strategies as st
 
-            from snektest import test_hypothesis
-            from snektest.models import BadRequestError
+            from snektest import BadRequestError, test_hypothesis
 
 
             @settings(max_examples=1, phases=[Phase.generate], database=None, deadline=None)
@@ -165,7 +164,7 @@ async def test_async_hypothesis_base_exception_exits_promptly() -> None:
                 raise BadRequestError("bad property request")
             """
         ),
-        name="test_hypothesis_async_base_exception",
+        name="test_hypothesis_async_framework_error",
     )
 
     result = run_test_subprocess(test_file, timeout=1)

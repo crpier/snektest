@@ -92,7 +92,9 @@ two independent instances. Session and run fixtures must not accept parameters.
 Use a function fixture for parameter-dependent setup, or have a zero-argument
 cached fixture return a factory/cache.
 
-Set up and tear down test dependencies with session-scoped fixtures:
+Set up and tear down test dependencies with session-scoped fixtures. The
+`scope=` argument accepts the documented string literals or matching `Scope`
+enum members; fixture handles always expose `Scope` at runtime.
 
 ```python
 from collections.abc import AsyncGenerator
@@ -429,7 +431,18 @@ def test_concatenation(greeting: str, target: str) -> None:
 ### Static Type Checking
 
 Snektest's public decorators and helpers are typed so test parameters, fixtures,
-and Hypothesis strategies can be checked by `ty`.
+and Hypothesis strategies can be checked by `ty`. `@test` checks parameter types
+for up to two parameter lists; three or more use the variadic `Any` fallback.
+`@test_hypothesis` checks up to five strategies; six or more use its variadic
+`Any` fallback.
+
+### Public Errors
+
+Catch user-facing framework failures with `SnektestError`. Its exported
+subclasses are `AssertionFailure`, `BadRequestError`, `CollectionError`,
+`FixtureError`, `SchemaGenerationError`, and `TestTimeoutError`. All are also
+ordinary `Exception` subclasses. `AssertionFailure` remains an `AssertionError`.
+Internal invariant failures are not exported from the top-level package.
 
 ## Running Tests
 
@@ -662,7 +675,8 @@ async def test_list_operations(numbers: list[int]) -> None:
 
 ### Type Safety
 
-The decorator provides full type safety - strategy types are checked against function parameters:
+For up to five strategies, strategy types are checked against function parameters.
+Calls with six or more strategies use the documented variadic `Any` fallback:
 
 <!-- snektest-doc: expect-type-error=invalid-argument-type@10, skip-run -->
 ```python

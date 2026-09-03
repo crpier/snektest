@@ -23,7 +23,7 @@ _run_fixture_events: list[str] = []
 _run_fixture_originals: list[dict[str, str]] = []
 
 
-@fixture(scope="run")
+@fixture(scope=Scope.RUN)
 def _run_descriptor() -> Generator[dict[str, str]]:
     _run_fixture_events.append("setup")
     descriptor = {"status": "ready"}
@@ -75,6 +75,7 @@ def test_public_session_scope_enum_uses_session_lifecycle() -> None:
     def thing() -> Generator[object]:
         yield object()
 
+    assert_is(thing().scope, Scope.SESSION)
     with use_registry(FixtureRegistry()):
         first = load_fixture(thing())
         second = load_fixture(thing())
@@ -105,6 +106,7 @@ def test_public_function_scope_enum_uses_function_lifecycle() -> None:
     def thing() -> Generator[object]:
         yield object()
 
+    assert_is(thing().scope, Scope.FUNCTION)
     with use_registry(FixtureRegistry()):
         first = load_fixture(thing())
         second = load_fixture(thing())
@@ -186,7 +188,7 @@ def test_run_fixture_rejects_local_and_parameterized_definitions() -> None:
 def test_public_run_scope_enum_creates_run_fixture() -> None:
     handle = _run_descriptor()
 
-    assert_eq(handle.scope, Scope.RUN.value)
+    assert_is(handle.scope, Scope.RUN)
 
 
 @test()

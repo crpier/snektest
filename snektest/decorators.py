@@ -15,9 +15,9 @@ from typing import Any, Literal, Protocol, TypeVar, cast, overload
 
 from hypothesis import given
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope
+from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope, Scope
 from snektest.fixtures import current_registry, load_run_fixture
-from snektest.models import BadRequestError, Param, Scope
+from snektest.models import BadRequestError, Param
 from snektest.utils import mark_test_function
 
 _given = cast("Any", given)
@@ -156,7 +156,7 @@ def _run_async_example(
 ) -> None:
     """Run one async example while preserving all outcomes across the thread.
 
-    Snektest errors and task cancellation may inherit directly from
+    Internal control flow and task cancellation may inherit directly from
     `BaseException`. Every outcome must complete `done`; otherwise the Hypothesis
     worker blocks during interpreter executor shutdown.
     """
@@ -320,15 +320,14 @@ class _RunDecorator(Protocol):
 
 
 def _normalize_fixture_scope(scope: object) -> FixtureScope:
-    """Store public enum members and literals as one stable string contract."""
+    """Normalize supported literals to the public runtime scope enum."""
     if isinstance(scope, Scope):
-        return scope.value
-    if scope == "function":
-        return "function"
-    if scope == "session":
-        return "session"
-    if scope == "run":
-        return "run"
+        return scope
+    if isinstance(scope, str):
+        try:
+            return Scope(scope)
+        except ValueError:
+            pass
     msg = "Fixture scope must be 'function', 'session', or 'run'"
     raise TypeError(msg)
 
@@ -352,7 +351,7 @@ def fixture(
     | Callable[..., AsyncGenerator[Any]]
     | None = None,
     *,
-    scope: FixtureScope | Scope = "function",
+    scope: Scope | Literal["function", "run", "session"] = Scope.FUNCTION,
 ) -> Any:
     """Mark a generator function as a fixture.
 

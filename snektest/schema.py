@@ -20,7 +20,7 @@ from snektest.decorators import (
     _run_hypothesis,  # pyright: ignore[reportPrivateUsage]
     load_fixture,
 )
-from snektest.models import AssertionFailure, BadRequestError, Param
+from snektest.models import AssertionFailure, BadRequestError, Param, SnektestError
 from snektest.utils import mark_test_function
 
 
@@ -42,7 +42,7 @@ _MIN_CLIENT_ERROR_STATUS = 400
 _MAX_CLIENT_ERROR_STATUS = 500
 
 
-class SchemaGenerationError(Exception):
+class SchemaGenerationError(SnektestError):
     """Raised when a selected operation cannot produce the requested cases."""
 
 

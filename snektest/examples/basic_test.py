@@ -1,6 +1,6 @@
 """Basic tests retain source order after every selected module finishes import."""
 
-from snektest import assert_eq, assert_in, test
+from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
 
 
 @test(mark="fast")
@@ -13,3 +13,10 @@ def test_addition() -> None:
 def test_string_membership() -> None:
     """Use assertion helpers instead of bare assert statements."""
     assert_in("snek", "snektest")
+
+
+@test(mark="fast")
+def test_public_error_base() -> None:
+    """Catch user-facing framework failures under one conventional base."""
+    with assert_raises(SnektestError):
+        fail("expected failure")
