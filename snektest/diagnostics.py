@@ -264,7 +264,7 @@ def _snapshot_exception(
 def snapshot_exception(
     exception_type: type[BaseException],
     exception: BaseException,
-    traceback: TracebackType,
+    traceback: TracebackType | None,
 ) -> ExceptionDiagnostic:
     """Snapshot one exception and register its traceback for local debugging."""
     diagnostic = _snapshot_exception(
@@ -274,7 +274,7 @@ def snapshot_exception(
         depth=0,
         seen=set(),
     )
-    if (store := _live_diagnostic_store.get()) is not None:
+    if traceback is not None and (store := _live_diagnostic_store.get()) is not None:
         store.tracebacks[id(diagnostic)] = traceback
     return diagnostic
 

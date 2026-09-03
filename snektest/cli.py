@@ -61,6 +61,23 @@ def _json_exception(exception: ExceptionDiagnostic) -> dict[str, str]:
     return {"type": exception.type_name, "message": exception.message}
 
 
+def _json_background_exception(
+    exception: ExceptionDiagnostic,
+) -> dict[str, object]:
+    return {
+        **_json_exception(exception),
+        "traceback": [
+            {
+                "file": frame.filename,
+                "function": frame.function_name,
+                "line": frame.lineno,
+                "source": frame.source_line,
+            }
+            for frame in exception.frames
+        ],
+    }
+
+
 def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
     """Keep baseline configuration errors machine-readable in JSON mode."""
     if json_output:
@@ -141,6 +158,15 @@ def _json_test_entry(result: TestResult) -> dict[str, object]:
                 }
             benchmark_entries.append(benchmark_entry)
         entry["benchmark_measurements"] = benchmark_entries
+    if result.background_failures:
+        entry["background_failures"] = [
+            {
+                "origin": failure.origin,
+                "label": failure.label,
+                "exception": _json_background_exception(failure.exception),
+            }
+            for failure in result.background_failures
+        ]
     if result.fixture_teardown_failures:
         entry["fixture_teardown_failures"] = [
             {

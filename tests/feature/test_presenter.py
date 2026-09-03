@@ -9,6 +9,7 @@ from snektest import assert_eq, assert_in, assert_is_not_none, assert_not_in, te
 from snektest.diagnostics import snapshot_exception
 from snektest.models import (
     AssertionFailure,
+    BackgroundFailure,
     DiagnosticFrame,
     ErrorResult,
     ExceptionDiagnostic,
@@ -68,6 +69,36 @@ def test_print_failures_includes_captured_and_fixture_teardown_output() -> None:
     assert_in("Captured output:", text)
     assert_in("Captured output from fixture teardowns:", text)
     assert_in("Output from session fixture teardowns", text)
+
+
+@test()
+def test_print_failures_includes_supplemental_background_failure() -> None:
+    console = Console(record=True)
+    primary = _diagnostic_from_exception(AssertionFailure("body failed"))
+    background = _diagnostic_from_exception(RuntimeError("thread failed"))
+    result = TestResult(
+        name=TestName(file_path=Path("x.py"), func_name="t", params_part=""),
+        duration=0.0,
+        result=FailedResult(exception=primary),
+        markers=(),
+        captured_output="",
+        fixture_teardown_failures=(),
+        fixture_teardown_output=None,
+        warnings=(),
+        background_failures=(
+            BackgroundFailure(
+                exception=background,
+                label="worker",
+                origin="thread",
+            ),
+        ),
+    )
+
+    print_failures(console, [result])
+    output = console.export_text()
+
+    assert_in("Background thread failure (worker)", output)
+    assert_in("thread failed", output)
 
 
 @test()

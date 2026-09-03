@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.text import Text
 
 from snektest.models import (
+    BackgroundFailure,
     ErrorResult,
     FailedResult,
     TeardownFailure,
@@ -90,6 +91,17 @@ def _print_fixture_teardown_heading(
     )
 
 
+def _print_background_failure(console: Console, failure: BackgroundFailure) -> None:
+    console.print()
+    origin = failure.origin.replace("_", " ")
+    console.print(
+        f"Background {origin} failure ({failure.label}):",
+        style="bold dark_orange",
+        markup=False,
+    )
+    render_traceback(console, failure.exception)
+
+
 def _print_result_details(
     console: Console,
     *,
@@ -106,6 +118,10 @@ def _print_result_details(
         render_assertion_failure(console, exception.assertion)
     else:
         render_traceback(console, exception)
+
+    for background_failure in result.background_failures:
+        if background_failure.exception != exception:
+            _print_background_failure(console, background_failure)
 
     _print_optional_output(
         console,
