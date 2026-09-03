@@ -505,14 +505,14 @@ runs its function-fixture teardown.
 Interactions to know about:
 
 - **`@test_hypothesis`.** For an async property test, the whole Hypothesis run
-  (every example) executes inside one `await asyncio.to_thread(...)`, so
-  the timeout bounds the *entire* property run, not each example. Worse, when it
-  fires the worker thread running Hypothesis keeps going in the background — a
-  thread can't be cancelled — so a runaway property test is reported as timed out
-  but still consumes CPU until it finishes on its own. Sync property tests never
-  yield to the loop and so are not bounded at all. For per-example limits, use
-  Hypothesis's own `deadline`/`max_examples`; use `--no-timeout` if the complete
-  property run legitimately needs to remain unbounded.
+  (every example) executes inside one `await asyncio.to_thread(...)`, so the
+  timeout bounds the *entire* property run, not each example. When it fires while
+  an example is suspended, snektest cancels that example and relays the outcome
+  to the Hypothesis worker so the CLI can exit promptly. It still cannot interrupt
+  synchronous or CPU-bound work, including work running in the Hypothesis thread.
+  Sync property tests are not bounded. For per-example limits, use Hypothesis's
+  own `deadline`/`max_examples`; use `--no-timeout` if the complete property run
+  legitimately needs to remain unbounded.
 - **`--pdb`.** A timed-out test surfaces as a normal error, so `--pdb` will open a
   post-mortem on it. By the time the timeout fires the test's own `await` frame has
   already been unwound by cancellation, so the debugger lands on snektest's

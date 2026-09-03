@@ -149,6 +149,12 @@ def _run_async_example(
     strategy_values: tuple[Any, ...],
     param_values: tuple[Any, ...],
 ) -> None:
+    """Run one async example while preserving all outcomes across the thread.
+
+    Snektest errors and task cancellation may inherit directly from
+    `BaseException`. Every outcome must complete `done`; otherwise the Hypothesis
+    worker blocks during interpreter executor shutdown.
+    """
     done: Future[None] = Future()
 
     def schedule() -> None:
@@ -158,14 +164,14 @@ def _run_async_example(
                 test_func(*strategy_values, *param_values),
             )
             task: asyncio.Task[None] = loop.create_task(res)
-        except Exception as exc:
+        except BaseException as exc:
             done.set_exception(exc)
             return
 
         def on_done(task: asyncio.Task[None]) -> None:
             try:
                 task.result()
-            except Exception as exc:
+            except BaseException as exc:
                 done.set_exception(exc)
             else:
                 done.set_result(None)
