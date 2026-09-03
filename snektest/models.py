@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 from itertools import product
 from pathlib import Path
 from typing import Any, Literal, override
@@ -15,7 +14,12 @@ DEFAULT_CLEANUP_TIMEOUT_SECONDS = 60.0
 """Maximum async cleanup time when no shorter run timeout is configured."""
 
 
-class CollectionError(BaseException): ...
+class SnektestError(Exception):
+    """Base class for catchable snektest framework errors."""
+
+
+class CollectionError(SnektestError):
+    """Raised when requested tests cannot form a valid collection plan."""
 
 
 class EmptyCollectionError(CollectionError):
@@ -26,21 +30,22 @@ class InvalidTestDefinitionError(CollectionError):
     """Raised when test metadata cannot produce a complete collection plan."""
 
 
-class ArgsError(BaseException): ...
+class ArgsError(SnektestError): ...
 
 
-class UnreachableError(BaseException): ...
+class UnreachableError(BaseException):
+    """Internal invariant failure that must bypass ordinary error classification."""
 
 
-class RunInfrastructureError(BaseException):
+class RunInfrastructureError(SnektestError):
     """A child-process failure that prevents the selected run from completing."""
 
 
-class BadRequestError(BaseException):
-    """When user didn't write test code correctly"""
+class BadRequestError(SnektestError):
+    """Raised when test configuration or programmatic input is invalid."""
 
 
-class TestTimeoutError(Exception):
+class TestTimeoutError(SnektestError):
     """Raised when an async test exceeds its configured timeout.
 
     A normal `Exception` so it flows through the same error-reporting path as any
@@ -52,11 +57,11 @@ class TestTimeoutError(Exception):
         super().__init__(f"exceeded the configured timeout of {timeout:g}s")
 
 
-class FixtureError(Exception):
+class FixtureError(SnektestError):
     """When a fixture is defined or used incorrectly."""
 
 
-class FixtureTaskLeakError(Exception):
+class FixtureTaskLeakError(SnektestError):
     """Raised when fixture teardown leaves owned tasks pending."""
 
     def __init__(self, fixture_name: str, task_count: int) -> None:
@@ -68,7 +73,7 @@ class FixtureTaskLeakError(Exception):
         )
 
 
-class FixtureTeardownTimeoutError(Exception):
+class FixtureTeardownTimeoutError(SnektestError):
     """Raised when an async fixture exceeds its cleanup ceiling."""
 
     def __init__(self, fixture_name: str, timeout: float) -> None:
@@ -79,7 +84,9 @@ class FixtureTeardownTimeoutError(Exception):
         )
 
 
-class AssertionFailure(AssertionError):  # noqa: N818
+class AssertionFailure(AssertionError, SnektestError):  # noqa: N818
+    """Raised when a snektest assertion helper rejects an observed value."""
+
     def __init__(
         self,
         message: str,
@@ -92,11 +99,6 @@ class AssertionFailure(AssertionError):  # noqa: N818
         self.actual = actual
         self.expected = expected
         self.operator = operator
-
-
-SnektestError = (
-    CollectionError | ArgsError | UnreachableError | AssertionFailure | FixtureError
-)
 
 
 class FilterItem:
@@ -314,14 +316,6 @@ class Param[T]:
                 raise BadRequestError(msg)
             result[case_name] = combination
         return result
-
-
-class Scope(StrEnum):
-    """Named fixture scopes accepted by `@fixture` alongside string literals."""
-
-    FUNCTION = "function"
-    RUN = "run"
-    SESSION = "session"
 
 
 @dataclass(frozen=True)

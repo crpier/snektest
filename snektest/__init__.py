@@ -1,6 +1,9 @@
+"""Supported top-level interface for authoring and integrating snektest tests."""
+
 from snektest.annotations import (
     AsyncFixture,
     Fixture,
+    Scope,
 )
 from snektest.assertions import (
     assert_eq,
@@ -32,29 +35,40 @@ from snektest.decorators import (
     test,
     test_hypothesis,
 )
+from snektest.models import AssertionFailure as AssertionFailure
+from snektest.models import BadRequestError as BadRequestError
+from snektest.models import CollectionError as CollectionError
+from snektest.models import FixtureError as FixtureError
 from snektest.models import Param as Param
-from snektest.models import Scope as Scope
-from snektest.models import UnreachableError as UnreachableError
+from snektest.models import SnektestError as SnektestError
+from snektest.models import TestTimeoutError as TestTimeoutError
 from snektest.schema import (
     SchemaAuthProvider,
     SchemaCheck,
     SchemaFilter,
+    SchemaGenerationError,
     SchemaOperationSelector,
     test_schema,
     test_schema_workflow,
 )
 
 __all__ = [
+    "AssertionFailure",
     "AsyncFixture",
+    "BadRequestError",
+    "CollectionError",
     "Fixture",
+    "FixtureError",
     "Marker",
     "Param",
     "SchemaAuthProvider",
     "SchemaCheck",
     "SchemaFilter",
+    "SchemaGenerationError",
     "SchemaOperationSelector",
     "Scope",
-    "UnreachableError",
+    "SnektestError",
+    "TestTimeoutError",
     "assert_benchmark",
     "assert_eq",
     "assert_false",

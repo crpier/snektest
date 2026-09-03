@@ -198,6 +198,9 @@ async def execute_test(  # noqa: C901, PLR0912, PLR0915
                     benchmarks=tuple(benchmark_capture.measurements),
                     benchmark_comparisons=tuple(benchmark_capture.comparisons),
                 )
+        except BadRequestError as error:
+            duration = time.monotonic() - test_start
+            bad_request = error
         except Exception:
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()
@@ -213,9 +216,6 @@ async def execute_test(  # noqa: C901, PLR0912, PLR0915
                 benchmarks=tuple(benchmark_capture.measurements),
                 benchmark_comparisons=tuple(benchmark_capture.comparisons),
             )
-        except BadRequestError as error:
-            duration = time.monotonic() - test_start
-            bad_request = error
         except BaseException as error:
             duration = time.monotonic() - test_start
             interruption = error
