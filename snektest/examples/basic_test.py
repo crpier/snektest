@@ -1,4 +1,4 @@
-"""Basic tests retain source order; inspect installations with `snektest --version`."""
+"""Basic tests for `--collect-only`, `--fail-fast`, and `--durations` workflows."""
 
 from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
 

@@ -137,6 +137,16 @@ def build_junit_xml(run_result: RunResult) -> str:
         "property",
         {"name": "snektest.framework_version", "value": __version__},
     )
+    SubElement(
+        properties,
+        "property",
+        {"name": "snektest.selected_tests", "value": str(run_result.selected_tests)},
+    )
+    SubElement(
+        properties,
+        "property",
+        {"name": "snektest.stopped_early", "value": str(run_result.stopped_early)},
+    )
     for test_result in run_result.test_results:
         _append_test_case(suite, test_result)
     for teardown_failure in run_result.session_teardown_failures:

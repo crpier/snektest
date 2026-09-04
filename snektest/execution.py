@@ -561,6 +561,7 @@ async def run_tests(  # noqa: PLR0913
     capture_output: bool = True,
     collection_output: str = "",
     collection_warnings: tuple[str, ...] = (),
+    fail_fast: bool = False,
     pdb_on_failure: bool = False,
     timeout: float | None = None,  # noqa: ASYNC109
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
@@ -601,6 +602,7 @@ async def run_tests(  # noqa: PLR0913
                     resolver=resolver,
                 ):
                     pdb_triggered = True
+                if pdb_triggered or (fail_fast and test_result.is_actionable_failure):
                     break
         finally:
             (
@@ -640,6 +642,7 @@ async def run_tests(  # noqa: PLR0913
                 session_teardown_output=session_output,
                 session_teardown_warnings=session_warnings,
                 test_results=test_results,
+                selected_tests=len(test_cases),
                 total_duration=time.monotonic() - total_duration,
             )
             reporter.run_finished(completed_run)

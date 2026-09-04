@@ -732,6 +732,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     allow_empty: bool = False,
     capture_output: bool,
     benchmark_baseline: BenchmarkBaseline | None,
+    fail_fast: bool = False,
     mark: str | None,
     reporter: RunReporter,
     timeout: float | None,  # noqa: ASYNC109
@@ -789,7 +790,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         next_report_ordinal = 0
         next_worker_identifier = requested_workers
         replacements_needed = 0
-        run_ahead_limit = requested_workers * 2
+        run_ahead_limit = 1 if fail_fast else requested_workers * 2
         run_fixture_requests: list[RunFixtureIdentity] = []
 
         while pending or receive_tasks or run_fixture_requests:
@@ -927,6 +928,8 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 reporter.test_finished(test_result)
                 reported_results.append(result_for_retention(reporter, test_result))
                 next_report_ordinal += 1
+                if fail_fast and test_result.is_actionable_failure:
+                    pending.clear()
 
         session_failures: list[TeardownFailure] = []
         session_outputs: list[str] = []
@@ -973,6 +976,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             session_teardown_output=session_output,
             session_teardown_warnings=tuple(session_warnings),
             test_results=reported_results,
+            selected_tests=len(canonical_manifest),
             total_duration=time.monotonic() - started_at,
         )
         reporter.run_finished(completed_run)

@@ -23,6 +23,7 @@ _KNOWN_TOKENS = [
     "-h",
     "--help",
     "--version",
+    "--output-schema-versions",
     "--agent-docs",
     "--llms",
     "--examples",
@@ -30,13 +31,21 @@ _KNOWN_TOKENS = [
     "--example",
     "example",
     "-s",
+    "--capture-output",
+    "--collect-only",
+    "-x",
+    "--fail-fast",
+    "--durations",
     "--json-output",
+    "--no-json-output",
     "--junit-output",
+    "--no-junit-output",
     "--allow-empty",
     "--benchmark-baseline",
     "--update-benchmark-baseline",
     "--pdb",
     "--mark",
+    "--no-mark",
     "-n",
     "--workers",
     "--no-timeout",
@@ -90,6 +99,7 @@ def test_successful_parse_satisfies_invariants(argv: list[str]) -> None:
         assert_true(len(result.filters) >= 1)
 
     assert_true(result.mark is None or result.mark in VALID_MARKER_VALUES)
+    assert_true(result.durations is None or result.durations > 0)
     assert_true(
         result.timeout is None or (isfinite(result.timeout) and result.timeout > 0)
     )

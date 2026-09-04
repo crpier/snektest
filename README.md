@@ -39,9 +39,17 @@ uv add 'snektest[schema]'
 ## Type checking is part of the contract
 
 snektest expects your test code to pass the strict `ty` type checker before
-tests run — typically continuously, via your editor's language
-server. The API is designed around this: signatures are exact, and snektest
-does not generally re-validate at runtime what a type checker already rejects.
+tests run, typically continuously through your editor. Install it as a
+development dependency and run it through `uv`:
+
+```sh
+uv add --dev ty
+uv run ty check
+```
+
+Contributors can install every locked development dependency with
+`uv sync --locked --group dev`. Snektest does not generally re-validate at runtime what
+a type checker already rejects.
 One destructive misuse is checked during collection: applying `@test` without
 parentheses raises a clear error instead of silently removing the test.
 
@@ -102,6 +110,29 @@ snektest --mark fast
 Snektest is distributed under the [MIT License](LICENSE). See
 [CHANGELOG.md](CHANGELOG.md) for release notes. Report vulnerabilities privately
 using the instructions in [SECURITY.md](SECURITY.md).
+
+## Migrating from 0.16 to 0.17
+
+Version 0.17 made the runtime and typed interfaces match. Import public errors,
+`Scope`, decorators, assertions, and fixtures from `snektest`, not implementation
+modules. Exported framework errors now derive from `SnektestError`; `Scope` is the
+single runtime and static fixture-scope type. Internal invariant failures are no
+longer public.
+
+SKIP, XFAIL, and XPASS are distinct results. Use `skip(reason)`, `xfail(reason)`,
+or `@test(xfail="reason")`. SKIP and XFAIL exit successfully. XPASS is strict and
+exits 1. Static xfail converts only Snektest assertion failures, so unrelated
+exceptions remain errors. Programmatic `TestResult.result` values may now be
+`SkippedResult`, `ExpectedFailureResult`, or `UnexpectedPassResult`, and JSON
+uses `skipped`, `expected_failure`, and `unexpected_pass`.
+
+`run_tests_programmatic` now returns `RunResult`, the normalized result used by
+all reporters. JSON output is schema version 1 and always occupies stdout as one
+document, including argument and collection errors. Consumers must read
+`schema_version`, `kind`, `exit_code`, canonical status counts, and the `tests`
+array instead of relying on the old unversioned summary object. JUnit output is
+available through `--junit-output PATH`. Function fixture teardown counts now
+count each failed teardown rather than each affected test.
 
 ## Features
 
@@ -564,6 +595,15 @@ snektest tests/test_myfeature.py
 snektest tests/test_myfeature.py::test_something
 # If an explicit test name or parameter case is not found, snektest exits with an error.
 
+# List deterministic selectors without executing test bodies
+snektest --collect-only
+
+# Stop after the first failure, error, XPASS, or function teardown failure
+snektest --fail-fast
+
+# Show the ten slowest completed tests and direct rerun selectors
+snektest --durations 10
+
 # Run tests with a marker
 snektest --mark fast
 
@@ -589,6 +629,9 @@ snektest -s
 # Print one versioned JSON document
 snektest --json-output
 
+# Print structured-output schema versions supported by this installation
+snektest --output-schema-versions
+
 # Keep test output uncaptured inside the JSON document
 snektest -s --json-output
 
@@ -610,6 +653,26 @@ snektest --pdb
 coverage run -m snektest
 ```
 
+### Project defaults
+
+The nearest `pyproject.toml` may define daily defaults. Paths are relative to the
+project file.
+
+```toml
+[tool.snektest]
+test_paths = ["tests"]
+timeout = 30 # Use false to disable the async test-body timeout.
+mark = "fast"
+capture_output = true
+json_output = false
+junit_output = "reports/snektest.xml"
+```
+
+Explicit test filters replace `test_paths`. `--timeout`, `--no-timeout`,
+`--mark`, `--no-mark`, `-s`, `--capture-output`, `--json-output`,
+`--no-json-output`, `--junit-output`, and `--no-junit-output` override matching
+project values. Unknown keys and invalid values are configuration errors.
+
 Recursive directory discovery excludes files ignored by Git, including generated
 test-shaped files under ignored output directories. An explicitly named test file
 still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
@@ -618,11 +681,16 @@ Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.
 
+`--collect-only` imports and lists the canonical test and parameter-case
+selectors without calling test bodies. Source and filter order remain stable.
+With `--json-output`, it emits a versioned `collection` document with selectors,
+markers, import diagnostics, and raw uncaptured output.
+
 `--json-output` writes exactly one document to stdout for successful runs, test
 failures, argument errors, collection errors, and interruptions. Schema version
-`1` declares `schema_version`, `framework_version`, `kind`, `exit_code`, total
-count and duration, status counts, collection diagnostics, aggregate warnings,
-and per-test results. Each test includes its duration, markers, captured output,
+`1` declares `schema_version`, `framework_version`, `kind`, `exit_code`, selected
+and executed counts, early-stop state, total duration, status counts, collection
+diagnostics, aggregate warnings, and per-test results. Each test includes its duration, markers, captured output,
 warnings, measurements, background failures, and complete bounded exception
 traceback where applicable. Function, session, and run teardown records include
 fixture names, output, warnings, and exceptions. With `-s`, Python output, raw
@@ -633,6 +701,13 @@ descriptor writes, and inherited child-process stdout move to
 map to skipped cases, assertion failures and XPASS map to failures, and unexpected
 exceptions map to errors. Every fixture teardown failure gets a separate error
 case so JUnit counts use the same unit as JSON and console output.
+
+`-x` / `--fail-fast` stops after the first failed assertion, unexpected error,
+XPASS, or function fixture teardown failure. SKIP and XFAIL do not stop it. To
+preserve that exact ordering with explicit workers, Snektest dispatches one case
+at a time. The summary states how many selected tests ran. `--durations N` lists
+up to N completed tests from slowest to fastest; each line includes the exact
+selector accepted by the CLI.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
@@ -727,8 +802,9 @@ the selected case count, plus one canonical collector/run-fixture host;
 a time on its own event loop and owns its session fixtures. Results are presented
 in canonical manifest order even when workers finish out of order. Active and
 completed-but-unreported cases are capped at twice the worker count, so a slow
-early case cannot build an unbounded result backlog. Repeated filters remain
-repeated invocations with distinct ordinals.
+early case cannot build an unbounded result backlog. Fail-fast mode lowers that
+cap to one, which prevents later test bodies from starting. Repeated filters
+remain repeated invocations with distinct ordinals.
 
 Console runs release captured output from clean passing tests after printing
 them. JSON and JUnit runs retain it in their documents. `run_tests_programmatic`

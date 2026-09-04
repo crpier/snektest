@@ -212,6 +212,28 @@ def _build_status_text(*, counts: RunResult) -> tuple[str, str]:
     return status_text, f"bold {status_color}"
 
 
+def print_slowest_tests(
+    console: Console,
+    run_result: RunResult,
+    *,
+    count: int,
+) -> None:
+    """Render completed tests from slowest to fastest with reusable selectors."""
+    slowest_tests = sorted(
+        run_result.test_results,
+        key=lambda test_result: (-test_result.duration, test_result.ordinal),
+    )[:count]
+    if not slowest_tests:
+        return
+    console.rule("SLOWEST TESTS", style="blue")
+    for test_result in slowest_tests:
+        console.print(
+            f"{test_result.duration:.2f}s selector: {test_result.name}",
+            markup=False,
+        )
+    console.print()
+
+
 def print_summary(console: Console, run_result: RunResult) -> None:
     """Render counts already normalized by the completed run."""
     _print_warnings(console, run_result)
@@ -225,6 +247,13 @@ def print_summary(console: Console, run_result: RunResult) -> None:
         _print_session_teardown_failures(console, run_result.session_teardown_failures)
         _print_run_teardown_failures(console, run_result.run_teardown_failures)
         console.print()
+
+    if run_result.stopped_early:
+        console.print(
+            f"Stopped early: {run_result.total_tests} of "
+            f"{run_result.selected_tests} tests ran",
+            markup=False,
+        )
 
     status_text, status_style = _build_status_text(counts=run_result)
     console.rule(status_text, style=status_style)

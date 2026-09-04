@@ -5,6 +5,7 @@ from __future__ import annotations
 from snektest._version import __version__
 from snektest.models import (
     BenchmarkBaselineRun,
+    CollectionDiagnostics,
     ErrorResult,
     ExceptionDiagnostic,
     ExpectedFailureResult,
@@ -12,11 +13,15 @@ from snektest.models import (
     PassedResult,
     RunResult,
     SkippedResult,
+    TestCase,
     TestResult,
     UnexpectedPassResult,
 )
 
-SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSIONS = (1,)
+"""Structured-output contracts accepted by this installation."""
+
+SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSIONS[-1]
 """Current structured-output contract version."""
 
 
@@ -171,6 +176,32 @@ def build_json_error(
     }
 
 
+def build_json_collection(
+    test_cases: list[TestCase],
+    diagnostics: CollectionDiagnostics,
+    *,
+    uncaptured_output: str = "",
+) -> dict[str, object]:
+    """Build the versioned document for a completed collection-only command."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "framework_version": __version__,
+        "kind": "collection",
+        "exit_code": 0,
+        "total_tests": len(test_cases),
+        "uncaptured_output": uncaptured_output,
+        "collection_output": diagnostics.output,
+        "collection_warnings": list(diagnostics.warnings),
+        "tests": [
+            {
+                "name": str(test_case.name),
+                "markers": list(test_case.markers),
+            }
+            for test_case in test_cases
+        ],
+    }
+
+
 def build_json_summary(
     run_result: RunResult,
     *,
@@ -183,6 +214,8 @@ def build_json_summary(
         "kind": "test_run",
         "exit_code": run_result.exit_code,
         "total_tests": run_result.total_tests,
+        "selected_tests": run_result.selected_tests,
+        "stopped_early": run_result.stopped_early,
         "total_duration": run_result.total_duration,
         "uncaptured_output": uncaptured_output,
         "collection_output": run_result.collection_output,
@@ -239,4 +272,10 @@ def build_json_summary(
     return output
 
 
-__all__ = ["SCHEMA_VERSION", "build_json_error", "build_json_summary"]
+__all__ = [
+    "SCHEMA_VERSION",
+    "SUPPORTED_SCHEMA_VERSIONS",
+    "build_json_collection",
+    "build_json_error",
+    "build_json_summary",
+]
