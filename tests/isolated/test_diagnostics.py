@@ -151,7 +151,7 @@ async def test_normal_run_releases_failed_test_locals_before_the_next_case() -> 
         ),
     ]
 
-    _results, _session_failures, _run_failures = await run_tests(test_cases)
+    _ = await run_tests(test_cases)
 
     assert_eq(released_before_next_case, [True])
 

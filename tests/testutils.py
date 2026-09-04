@@ -45,8 +45,6 @@ def run_test_subprocess(test_file: Path) -> dict[str, Any]:
         timeout=0.5,
     )
 
-    lines = result.stdout.strip().split("\n")
-    json_line = lines[-1]
-    results = json.loads(json_line)
+    results = json.loads(result.stdout)
     results["returncode"] = result.returncode
     return results

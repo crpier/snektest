@@ -272,7 +272,7 @@ def test_skipped_body_keeps_each_fixture_teardown_failure() -> None:
     assert_eq(completed.returncode, 1, msg=completed.stdout + completed.stderr)
     summary = cast("dict[str, Any]", json.loads(completed.stdout))
     assert_eq(summary["skipped"], 1)
-    assert_eq(summary["fixture_teardown_failed"], 1)
+    assert_eq(summary["fixture_teardown_failed"], 2)
     assert_eq(len(summary["tests"][0]["fixture_teardown_failures"]), 2)
 
     console_completed = subprocess.run(
@@ -283,7 +283,7 @@ def test_skipped_body_keeps_each_fixture_teardown_failure() -> None:
         timeout=10,
     )
     assert_eq(console_completed.returncode, 1)
-    assert_in("1 fixture teardown failed", console_completed.stdout)
+    assert_in("2 fixture teardown failed", console_completed.stdout)
 
 
 @test(mark="slow")

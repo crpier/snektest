@@ -129,7 +129,7 @@ def test_json_retains_output_warnings_and_all_function_teardown_failures() -> No
     result = run_test_subprocess(test_file)
     test_result = result["tests"][0]
 
-    assert_eq(result["fixture_teardown_failed"], 1)
+    assert_eq(result["fixture_teardown_failed"], 2)
     assert_eq(
         [
             failure["fixture_name"]

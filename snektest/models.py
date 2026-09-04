@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import product
 from math import prod
 from pathlib import Path
-from typing import Any, Literal, override
+from typing import TYPE_CHECKING, Any, Literal, override
+
+if TYPE_CHECKING:
+    from snektest.benchmark_baseline import MachineFingerprint
 
 from snektest.annotations import Coroutine
 
@@ -24,6 +27,12 @@ class SnektestError(Exception):
 
 class CollectionError(SnektestError):
     """Raised when requested tests cannot form a valid collection plan."""
+
+    def __init__(self, message: str) -> None:
+        self.collection_diagnostic: ExceptionDiagnostic | None = None
+        self.collection_output = ""
+        self.collection_warnings: tuple[str, ...] = ()
+        super().__init__(message)
 
 
 class EmptyCollectionError(CollectionError):
@@ -464,6 +473,14 @@ class ErrorResult:
 
 
 @dataclass
+class CollectionDiagnostics:
+    """Output and warnings captured while building the canonical test plan."""
+
+    output: str = ""
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass
 class RunTeardownDiagnostics:
     """Output and warnings collected after test-case execution finishes."""
 
@@ -490,6 +507,16 @@ class BackgroundFailure:
     origin: Literal["thread", "thread_leak", "unraisable"]
 
 
+type TestStatus = Literal[
+    "passed",
+    "skipped",
+    "expected_failure",
+    "unexpected_pass",
+    "failed",
+    "error",
+]
+
+
 @dataclass(frozen=True)
 class TestResult:
     captured_output: str
@@ -509,3 +536,126 @@ class TestResult:
     warnings: tuple[str, ...]
     ordinal: int = 0
     background_failures: tuple[BackgroundFailure, ...] = ()
+
+    @property
+    def status(self) -> TestStatus:
+        """Return the canonical status shared by every reporting adapter."""
+        match self.result:
+            case PassedResult():
+                return "passed"
+            case SkippedResult():
+                return "skipped"
+            case ExpectedFailureResult():
+                return "expected_failure"
+            case UnexpectedPassResult():
+                return "unexpected_pass"
+            case FailedResult():
+                return "failed"
+            case ErrorResult():
+                return "error"
+
+
+@dataclass(frozen=True)
+class BenchmarkBaselineRun:
+    """Machine-readable metadata for one compare or update CLI mode."""
+
+    mode: Literal["compare", "update"]
+    path: str
+    machine: MachineFingerprint | None = None
+    updated_entries: int = 0
+    written: bool = False
+
+
+@dataclass
+class RunResult:
+    """One normalized completed run consumed by every reporting adapter."""
+
+    total_tests: int
+    passed: int
+    skipped: int
+    expected_failures: int
+    unexpected_passes: int
+    failed: int
+    errors: int
+    fixture_teardown_failed: int
+    session_teardown_failed: int
+    test_results: list[TestResult]
+    session_teardown_failures: list[TeardownFailure]
+    collection_output: str = ""
+    collection_warnings: tuple[str, ...] = ()
+    run_teardown_failed: int = 0
+    run_teardown_failures: list[TeardownFailure] = field(default_factory=list)
+    run_teardown_output: str | None = None
+    run_teardown_warnings: tuple[str, ...] = ()
+    session_teardown_output: str | None = None
+    session_teardown_warnings: tuple[str, ...] = ()
+    benchmark_baseline: BenchmarkBaselineRun | None = None
+    total_duration: float = 0.0
+
+    @classmethod
+    def from_execution(  # noqa: PLR0913
+        cls,
+        *,
+        run_teardown_failures: list[TeardownFailure],
+        run_teardown_output: str | None,
+        run_teardown_warnings: tuple[str, ...],
+        session_teardown_failures: list[TeardownFailure],
+        session_teardown_output: str | None,
+        session_teardown_warnings: tuple[str, ...],
+        test_results: list[TestResult],
+        total_duration: float,
+        collection_output: str = "",
+        collection_warnings: tuple[str, ...] = (),
+    ) -> RunResult:
+        """Normalize execution details and calculate status counts once."""
+        return cls(
+            total_tests=len(test_results),
+            passed=sum(1 for result in test_results if result.status == "passed"),
+            skipped=sum(1 for result in test_results if result.status == "skipped"),
+            expected_failures=sum(
+                1 for result in test_results if result.status == "expected_failure"
+            ),
+            unexpected_passes=sum(
+                1 for result in test_results if result.status == "unexpected_pass"
+            ),
+            failed=sum(1 for result in test_results if result.status == "failed"),
+            errors=sum(1 for result in test_results if result.status == "error"),
+            fixture_teardown_failed=sum(
+                len(result.fixture_teardown_failures) for result in test_results
+            ),
+            collection_output=collection_output,
+            collection_warnings=collection_warnings,
+            run_teardown_failed=len(run_teardown_failures),
+            session_teardown_failed=len(session_teardown_failures),
+            run_teardown_failures=run_teardown_failures,
+            run_teardown_output=run_teardown_output,
+            run_teardown_warnings=run_teardown_warnings,
+            session_teardown_failures=session_teardown_failures,
+            session_teardown_output=session_teardown_output,
+            session_teardown_warnings=session_teardown_warnings,
+            test_results=test_results,
+            total_duration=total_duration,
+        )
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Return warnings from collection, tests, and fixture teardown in order."""
+        return (
+            *self.collection_warnings,
+            *(warning for result in self.test_results for warning in result.warnings),
+            *self.session_teardown_warnings,
+            *self.run_teardown_warnings,
+        )
+
+    @property
+    def exit_code(self) -> int:
+        """Return the command status implied by outcomes and teardown failures."""
+        has_failures = (
+            self.failed > 0
+            or self.errors > 0
+            or self.unexpected_passes > 0
+            or self.fixture_teardown_failed > 0
+            or self.run_teardown_failed > 0
+            or self.session_teardown_failed > 0
+        )
+        return 1 if has_failures else 0

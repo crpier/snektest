@@ -63,7 +63,7 @@ async def _run_plan(
     def base_resolver(path: Path) -> Path:
         return path.resolve()
 
-    _results, _session_failures, _run_failures = await run_tests(
+    _ = await run_tests(
         entries,
         pdb_on_failure=pdb_on_failure,
         post_mortem=post_mortem or base_post_mortem,
@@ -93,12 +93,15 @@ async def test_run_tests_consumes_completed_plan_in_order() -> None:
         ),
     ]
 
-    results, session_failures, run_failures = await run_tests(test_cases)
+    completed_run = await run_tests(test_cases)
 
     assert_eq(execution_order, ["first", "second"])
-    assert_eq([result.name.func_name for result in results], execution_order)
-    assert_eq(session_failures, [])
-    assert_eq(run_failures, [])
+    assert_eq(
+        [result.name.func_name for result in completed_run.test_results],
+        execution_order,
+    )
+    assert_eq(completed_run.session_teardown_failures, [])
+    assert_eq(completed_run.run_teardown_failures, [])
 
 
 @test()
@@ -277,13 +280,13 @@ async def test_run_tests_continues_after_cancelled_test() -> None:
         ),
     ]
 
-    results, session_failures, run_failures = await run_tests(test_cases)
+    completed_run = await run_tests(test_cases)
 
-    assert_eq(len(results), 2)
-    _ = assert_isinstance(results[0].result, FailedResult)
-    _ = assert_isinstance(results[1].result, PassedResult)
-    assert_eq(len(session_failures), 0)
-    assert_eq(len(run_failures), 0)
+    assert_eq(len(completed_run.test_results), 2)
+    _ = assert_isinstance(completed_run.test_results[0].result, FailedResult)
+    _ = assert_isinstance(completed_run.test_results[1].result, PassedResult)
+    assert_eq(len(completed_run.session_teardown_failures), 0)
+    assert_eq(len(completed_run.run_teardown_failures), 0)
 
 
 @test()

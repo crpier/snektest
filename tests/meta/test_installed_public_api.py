@@ -92,6 +92,15 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 test_hypothesis,
                 xfail,
             )
+            from snektest.cli import run_tests_programmatic
+            from snektest.junit import build_junit_xml
+            from snektest.models import FilterItem, RunResult
+
+            async def structured_result(path: str) -> str:
+                completed_run: RunResult = await run_tests_programmatic(
+                    [FilterItem(path)]
+                )
+                return build_junit_xml(completed_run)
 
             @fixture(scope=Scope.SESSION)
             def value() -> Generator[int]:

@@ -56,9 +56,7 @@ def run_test_subprocess(
         timeout=timeout,
     )
 
-    lines = result.stdout.strip().split("\n")
-    json_line = lines[-1]
-    results = json.loads(json_line)
+    results = json.loads(result.stdout)
     results["returncode"] = result.returncode
     results["stderr"] = result.stderr
     results["stdout"] = result.stdout

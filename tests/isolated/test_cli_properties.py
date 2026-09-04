@@ -31,6 +31,7 @@ _KNOWN_TOKENS = [
     "example",
     "-s",
     "--json-output",
+    "--junit-output",
     "--allow-empty",
     "--benchmark-baseline",
     "--update-benchmark-baseline",

@@ -348,9 +348,9 @@ failure is reported and makes the command fail. Console output, JSON output, and
 | Unexpected exception | `error` | `errors` | 1 |
 
 Fixture teardown does not replace the test outcome. Function teardown increments
-`fixture_teardown_failed` once for each affected test, while retaining every
-failure in that test's `fixture_teardown_failures`. Session and run teardown
-failures have separate counts. Any teardown failure makes the command exit 1.
+`fixture_teardown_failed` once for each failed teardown, with every record in the
+test's `fixture_teardown_failures`. Session and run teardown failures have
+separate counts. Any teardown failure makes the command exit 1.
 Mixed runs exit 1 if any row or teardown condition says 1.
 
 ### Performance Benchmarks
@@ -550,8 +550,8 @@ order. Absolute and relative paths resolve to the same module identity;
 package-relative imports work. A module imports once when overlapping filters
 select it in one run and imports fresh in a later run. Decorated functions
 imported from another module are not collected as local tests. With output
-capture enabled, import output and warnings are kept out of test results and
-cannot corrupt JSON stdout.
+capture enabled, JSON records import output and warnings separately from test
+output. They cannot prefix or otherwise corrupt the JSON document.
 
 ```sh
 # Run all tests
@@ -586,8 +586,14 @@ snektest --no-timeout
 # Disable stdout/stderr capture
 snektest -s
 
-# Print machine-readable JSON summary
+# Print one versioned JSON document
 snektest --json-output
+
+# Keep test output uncaptured inside the JSON document
+snektest -s --json-output
+
+# Write a JUnit XML report while retaining normal console output
+snektest --junit-output reports/snektest.xml
 
 # Print AI-agent usage guide
 snektest --agent-docs
@@ -610,15 +616,28 @@ still runs. Outside a Git worktree, snektest checks every matching `test_*.py` f
 
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
-tracebacks are printed earlier in the output. Use `--json-output` for a pure
-machine-readable summary with per-test exception messages, supplemental
-background failures, teardown failures, teardown output, and warnings.
+tracebacks are printed earlier in the output.
+
+`--json-output` writes exactly one document to stdout for successful runs, test
+failures, argument errors, collection errors, and interruptions. Schema version
+`1` declares `schema_version`, `framework_version`, `kind`, `exit_code`, total
+count and duration, status counts, collection diagnostics, aggregate warnings,
+and per-test results. Each test includes its duration, markers, captured output,
+warnings, measurements, background failures, and complete bounded exception
+traceback where applicable. Function, session, and run teardown records include
+fixture names, output, warnings, and exceptions. With `-s`, Python output, raw
+descriptor writes, and inherited child-process stdout move to
+`uncaptured_output`; invalid UTF-8 bytes use the replacement character.
+
+`--junit-output PATH` writes the same normalized run as JUnit XML. SKIP and XFAIL
+map to skipped cases, assertion failures and XPASS map to failures, and unexpected
+exceptions map to errors. Every fixture teardown failure gets a separate error
+case so JUnit counts use the same unit as JSON and console output.
 
 When `--pdb` is set, snektest enters a post-mortem debugger on the first test
 failure or fixture error (setup/teardown), and stops executing further tests.
-`--pdb` cannot be combined with explicit worker mode; rerun without `--workers`
-to debug locally. `-s --json-output` is also rejected so JSON stdout remains one
-document.
+`--pdb` cannot be combined with explicit worker mode or `--json-output`; rerun
+without those options to debug locally.
 
 Pass `mutex="name"` to `@test()` or `@test_hypothesis()` when selected cases use
 the same command-local resource. Mutex names are exact, non-empty, trimmed, and
@@ -711,10 +730,10 @@ completed-but-unreported cases are capped at twice the worker count, so a slow
 early case cannot build an unbounded result backlog. Repeated filters remain
 repeated invocations with distinct ordinals.
 
-Console and JSON runs release captured output from clean passing tests after the
-reporter consumes each result. Failure output remains available for diagnostics.
-`run_tests_programmatic` retains passing output by default for callers that use
-the returned results. Exception results contain bounded immutable snapshots;
+Console runs release captured output from clean passing tests after printing
+them. JSON and JUnit runs retain it in their documents. `run_tests_programmatic`
+returns the same normalized `RunResult` passed to reporting adapters and retains
+passing output by default. Exception results contain bounded immutable snapshots;
 normal runs clear ended traceback frames promptly, while `--pdb` keeps live
 frames only until it stops on the first failure. See
 [large-suite memory policy](docs/large-suite-memory.md) for budgets and measured

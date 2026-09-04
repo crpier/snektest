@@ -11,6 +11,7 @@ Notable user-facing changes are recorded here.
 - Added one cross-platform release gate and trusted, attested PyPI publishing.
 - Rejected non-finite timeouts and documented the verified runtime and hard-timeout boundaries.
 - Added reasoned SKIP, XFAIL, and strict XPASS outcomes across console, JSON, and programmatic runs.
+- Added a versioned, machine-safe JSON contract, normalized run results, and JUnit XML output.
 - Capped each parameterized test at 10,000 Cartesian cases, removed the serial callback queue, bounded worker run-ahead, released unused passing output and traceback locals, and added large-suite memory budgets. (#38)
 - Stabilized the Windows release gate by allowing nested CLI processes enough startup time under coverage. (#59)
 

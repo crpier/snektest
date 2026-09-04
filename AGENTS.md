@@ -89,7 +89,7 @@ User-facing changes belong in `CHANGELOG.md`; private security reports follow
 ### Test Collection & Execution Flow
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
-2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings never enter test results or structured stdout. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
+2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
 3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop.
 4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order. Active and completed-but-unreported cases are capped at twice the worker count, which bounds the result backlog behind an early slow case.
 5. **Test Execution** (`execute_test`): Capture stdout/stderr, execute one sync or async test, teardown function fixtures, and return a process-neutral `TestResult`.
@@ -182,7 +182,7 @@ failure.
 local sequential mode. `auto` resolves to
 `min(os.process_cpu_count() or 1, selected_count)`. The count covers execution
 workers only; process mode also has one fixture host, and `--workers 1` still
-uses children. `--pdb` with workers and `-s --json-output` are usage errors.
+uses children. `--pdb` with workers or `--json-output` is a usage error. `-s --json-output` is supported; uncaptured process output is quarantined inside the JSON document.
 
 ### Async Hygiene
 
@@ -331,16 +331,31 @@ workflows remain positive-only.
 ### Large-suite memory
 
 The serial runner retains one compact result per case but does not duplicate the
-collected plan into a queue. Console and JSON reporters release captured output
-from clean passes after each progress result; programmatic runs retain it by
-default. Failure output remains available. Normal runs clear locals from ended
+collected plan into a queue. Console reporters release captured output from
+clean passes after each progress result; JSON, JUnit, and programmatic runs
+retain it for completed-run adapters. Failure output remains available. Normal
+runs clear locals from ended
 traceback frames after creating bounded immutable diagnostics. `--pdb` alone
 keeps live tracebacks and stops on the first failure. Process dispatch permits at
 most twice the worker count in active or completed-but-unreported cases. Measured
 budgets and the reproducible benchmark command live in
 `docs/large-suite-memory.md`.
 
-### Summary Output
+### Structured output
+
+`RunResult` is the normalized completion consumed by console, JSON, and JUnit
+adapters and returned by `run_tests_programmatic`. It owns status and teardown
+counts, total duration, collection diagnostics, test results, and session/run
+teardown diagnostics. Function teardown counts use individual failures, not
+affected tests.
+
+`--json-output` writes one schema-version-1 document to stdout for runs and CLI
+errors. It retains framework version, exit code, every status, output, warnings,
+markers, measurements, and bounded exception tracebacks. A command-level file
+descriptor guard quarantines uncaptured stdout/stderr, child output, and direct
+descriptor writes as `uncaptured_output`; malformed UTF-8 uses replacement
+characters. `--junit-output PATH` maps the same `RunResult` to JUnit XML and emits
+one synthetic error case per fixture teardown failure.
 
 Console summary lines intentionally keep exception details compact: only the first
 exception message line is shown and long lines may be ellipsized. Use the full

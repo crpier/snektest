@@ -8,7 +8,8 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from io import StringIO
 from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.process import BaseProcess
@@ -20,6 +21,7 @@ from snektest.annotations import AsyncFixture, Coroutine, Fixture
 from snektest.benchmark_baseline import BenchmarkBaseline
 from snektest.collection import collect_tests_from_filters
 from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
+from snektest.diagnostics import snapshot_exception
 from snektest.execution import execute_test, teardown_session_fixtures
 from snektest.fixtures import (
     FixtureRegistry,
@@ -35,6 +37,7 @@ from snektest.models import (
     FixtureError,
     InvalidTestDefinitionError,
     RunInfrastructureError,
+    RunResult,
     RunTeardownDiagnostics,
     TeardownFailure,
     TestCase,
@@ -72,12 +75,17 @@ class CaseManifest:
 class _BootstrapReady:
     manifest: tuple[CaseManifest, ...]
     run_fixture_catalog: tuple[RunFixtureIdentity, ...]
+    collection_output: str = ""
+    collection_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class _BootstrapFailed:
     exception_type: str
     message: str
+    diagnostic: ExceptionDiagnostic | None = None
+    collection_output: str = ""
+    collection_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -235,19 +243,31 @@ def _host_main(  # noqa: PLR0913
     timeout: float | None,
 ) -> None:
     """Collect the canonical manifest and remain alive as the fixture-host process."""
+    output = StringIO()
+    warnings: list[str] = []
     try:
-        with maybe_capture_output(capture_output):
+        with maybe_capture_output(capture_output) as (output, warnings):
             test_cases = _collect_child_plan(raw_filters, mark, allow_empty=allow_empty)
         catalog = get_run_fixture_catalog()
         connection.send(
             _BootstrapReady(
                 manifest=_manifest(test_cases),
                 run_fixture_catalog=tuple(sorted(catalog)),
+                collection_output=output.getvalue(),
+                collection_warnings=tuple(warnings),
             )
         )
     except BaseException as exc:
         with suppress(BrokenPipeError, EOFError, OSError):
-            connection.send(_BootstrapFailed(type(exc).__name__, str(exc)))
+            connection.send(
+                _BootstrapFailed(
+                    type(exc).__name__,
+                    str(exc),
+                    diagnostic=snapshot_exception(type(exc), exc, exc.__traceback__),
+                    collection_output=output.getvalue(),
+                    collection_warnings=tuple(warnings),
+                )
+            )
         connection.close()
         return
 
@@ -508,12 +528,20 @@ async def _receive_bootstrap(
         msg = f"{child_name} exited during bootstrap"
         raise RunInfrastructureError(msg) from exc
     if isinstance(message, _BootstrapFailed):
+        collection_error: CollectionError | None = None
         if collection_owner and message.exception_type == "EmptyCollectionError":
-            raise EmptyCollectionError(message.message)
-        if collection_owner and message.exception_type == "InvalidTestDefinitionError":
-            raise InvalidTestDefinitionError(message.message)
-        if collection_owner and message.exception_type == "CollectionError":
-            raise CollectionError(message.message)
+            collection_error = EmptyCollectionError(message.message)
+        elif (
+            collection_owner and message.exception_type == "InvalidTestDefinitionError"
+        ):
+            collection_error = InvalidTestDefinitionError(message.message)
+        elif collection_owner and message.exception_type == "CollectionError":
+            collection_error = CollectionError(message.message)
+        if collection_error is not None:
+            collection_error.collection_diagnostic = message.diagnostic
+            collection_error.collection_output = message.collection_output
+            collection_error.collection_warnings = message.collection_warnings
+            raise collection_error
         msg = (
             f"{child_name} bootstrap failed: "
             f"{message.exception_type}: {message.message}"
@@ -564,7 +592,11 @@ async def _start_worker(  # noqa: PLR0913
     except BaseException:
         await _stop_process(process, connection)
         raise
-    if worker_bootstrap != canonical_bootstrap:
+    if (
+        worker_bootstrap.manifest != canonical_bootstrap.manifest
+        or worker_bootstrap.run_fixture_catalog
+        != canonical_bootstrap.run_fixture_catalog
+    ):
         await _stop_process(process, connection)
         msg = f"worker {identifier + 1} collected a different test manifest"
         raise RunInfrastructureError(msg)
@@ -705,7 +737,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     timeout: float | None,  # noqa: ASYNC109
     workers: int | Literal["auto"],
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
-) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
+) -> RunResult:
     """Run a canonical plan across persistent spawn workers."""
     started_at = time.monotonic()
     context = get_context("spawn")
@@ -929,33 +961,22 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.run_warnings = run_warnings
             teardown_diagnostics.session_output = session_output
             teardown_diagnostics.session_warnings = tuple(session_warnings)
-        if reported_results and (session_warnings or run_warnings):
-            final_result = reported_results[-1]
-            reported_results[-1] = replace(
-                final_result,
-                warnings=(
-                    *final_result.warnings,
-                    *session_warnings,
-                    *run_warnings,
-                ),
-            )
-        reporter.run_finished(
+        completed_run = RunResult.from_execution(
+            collection_output=canonical_bootstrap.collection_output,
+            collection_warnings=canonical_bootstrap.collection_warnings,
             run_teardown_failures=run_failures,
             run_teardown_output=(
-                "".join(
-                    [
-                        *run_lifecycle_outputs,
-                        run_output or "",
-                    ]
-                )
-                or None
+                "".join([*run_lifecycle_outputs, run_output or ""]) or None
             ),
-            test_results=reported_results,
+            run_teardown_warnings=run_warnings,
             session_teardown_failures=session_failures,
             session_teardown_output=session_output,
+            session_teardown_warnings=tuple(session_warnings),
+            test_results=reported_results,
             total_duration=time.monotonic() - started_at,
         )
-        return reported_results, session_failures, run_failures
+        reporter.run_finished(completed_run)
+        return completed_run
     finally:
         for worker in worker_processes:
             if worker.process.is_alive():
