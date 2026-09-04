@@ -100,9 +100,10 @@ class DescriptorOutputCapture:
         sys.stderr.flush()
         self._saved_stdout = os.dup(1)
         self._saved_stderr = os.dup(2)
-        self._output_file = TemporaryFile(mode="w+b")
-        os.dup2(self._output_file.fileno(), 1)
-        os.dup2(self._output_file.fileno(), 2)
+        output_file = cast("BinaryIO", TemporaryFile(mode="w+b"))
+        self._output_file = output_file
+        os.dup2(output_file.fileno(), 1)
+        os.dup2(output_file.fileno(), 2)
         return self
 
     def __exit__(self, *exc_info: object) -> None:

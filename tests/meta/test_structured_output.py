@@ -269,7 +269,7 @@ def test_json_collection_error_retains_user_traceback(
     assert_eq(
         document["error"]["cause"]["traceback"][-1],
         {
-            "file": str(test_file),
+            "file": str(test_file.resolve()),
             "function": "<module>",
             "line": 8,
             "source": 'raise RuntimeError("broken import")',
