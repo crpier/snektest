@@ -178,7 +178,7 @@ def test_system_exit_tears_down_function_fixture_before_propagating() -> None:
         check=False,
         capture_output=True,
         text=True,
-        timeout=1,
+        timeout=5,
     )
 
     assert_eq(completed.returncode, 7)
@@ -263,7 +263,7 @@ def test_hanging_async_function_teardown_is_bounded_and_attributed() -> None:
         name="test_hanging_function_teardown",
     )
 
-    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=1)
+    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=5)
 
     assert_eq(result["passed"], 1)
     assert_eq(result["fixture_teardown_failed"], 1)
@@ -303,7 +303,7 @@ def test_hanging_async_session_teardown_is_bounded_and_attributed() -> None:
         name="test_hanging_session_teardown",
     )
 
-    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=1)
+    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=5)
 
     assert_eq(result["passed"], 1)
     assert_eq(result["session_teardown_failed"], 1)

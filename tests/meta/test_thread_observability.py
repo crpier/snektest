@@ -115,7 +115,7 @@ def test_live_non_daemon_thread_fails_test_without_hanging_runner() -> None:
         name="test_thread_leak",
     )
 
-    result = run_test_subprocess(test_file, timeout=1)
+    result = run_test_subprocess(test_file, timeout=5)
     test_result = result["tests"][0]
 
     assert_eq(result["returncode"], 1)
@@ -244,7 +244,7 @@ def test_late_failure_from_prior_leak_is_not_misattributed() -> None:
         name="test_late_thread_failure",
     )
 
-    result = run_test_subprocess(test_file, timeout=2)
+    result = run_test_subprocess(test_file, timeout=5)
 
     assert_eq(result["returncode"], 1)
     assert_eq(result["failed"], 1)

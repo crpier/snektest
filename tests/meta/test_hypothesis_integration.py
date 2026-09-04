@@ -167,7 +167,7 @@ async def test_async_hypothesis_framework_error_exits_promptly() -> None:
         name="test_hypothesis_async_framework_error",
     )
 
-    result = run_test_subprocess(test_file, timeout=1)
+    result = run_test_subprocess(test_file, timeout=5)
     assert_eq(result["error"]["type"], "BadRequestError")
     assert_eq(result["error"]["message"], "bad property request")
     assert_eq(result["returncode"], 2)

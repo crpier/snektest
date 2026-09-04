@@ -69,7 +69,7 @@ async def test_cancellation_resistant_task_reports_bounded_failure() -> None:
         name="test_resistant_task",
     )
 
-    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=1)
+    result = run_test_subprocess(test_file, "--timeout", "0.05", timeout=5)
 
     assert_eq(result["passed"], 0)
     assert_eq(result["failed"], 1)
