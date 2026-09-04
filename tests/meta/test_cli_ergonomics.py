@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -362,6 +363,8 @@ def test_durations_lists_the_slowest_direct_selector() -> None:
         name="test_durations",
     )
 
+    environment = dict(os.environ)
+    environment["COLUMNS"] = "40"
     completed = subprocess.run(
         [
             sys.executable,
@@ -373,6 +376,7 @@ def test_durations_lists_the_slowest_direct_selector() -> None:
         ],
         check=False,
         capture_output=True,
+        env=environment,
         text=True,
         timeout=5,
     )

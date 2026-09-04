@@ -229,7 +229,9 @@ def print_slowest_tests(
     for test_result in slowest_tests:
         console.print(
             f"{test_result.duration:.2f}s selector: {test_result.name}",
+            highlight=False,
             markup=False,
+            soft_wrap=True,
         )
     console.print()
 
