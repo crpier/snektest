@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,10 +12,9 @@ from pydantic import TypeAdapter
 from snektest import assert_eq, assert_in, assert_raises, test
 from snektest.annotations import PyFilePath
 from snektest.collection import (
-    TestsQueue,
+    collect_tests_from_file,
     collect_tests_from_filters,
     generate_file_list,
-    load_tests_from_file,
 )
 from snektest.models import CollectionError, FilterItem
 
@@ -169,7 +167,7 @@ def test_one() -> None:
 
 
 @test()
-async def test_load_tests_from_file_reimports_in_a_new_session() -> None:
+def test_collect_tests_from_file_reimports_in_a_new_session() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         test_file = tmp_dir / "test_collection_generated.py"
@@ -193,25 +191,19 @@ def test_one() -> None:
             "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
         )
         filter_item = FilterItem(str(test_file))
-        loop = asyncio.get_running_loop()
 
-        queue: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(file_path, filter_item, queue, loop, mark=None)
-        _ = await asyncio.wait_for(queue.get(), timeout=1)
+        first = collect_tests_from_file(file_path, filter_item)
+        second = collect_tests_from_file(file_path, filter_item)
 
-        queue2: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(file_path, filter_item, queue2, loop, mark=None)
-        _ = await asyncio.wait_for(queue2.get(), timeout=1)
-
+        assert_eq(len(first.cases), 1)
+        assert_eq(len(second.cases), 1)
         assert_eq(event_file.read_text().splitlines(), ["imported", "imported"])
 
 
 @test()
-async def test_load_tests_from_file_filters_function_and_params() -> None:
+def test_collect_tests_from_file_filters_function_and_params() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-
-        test_file = tmp_dir / "test_collection_generated_params.py"
+        test_file = Path(tmp) / "test_collection_generated_params.py"
         _ = test_file.write_text(
             """
 from snektest import test
@@ -230,63 +222,36 @@ def test_other() -> None:
         file_path = cast(
             "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
         )
-        loop = asyncio.get_running_loop()
-
-        queue: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(
+        selected = collect_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_other"),
-            queue,
-            loop,
-            mark=None,
         )
-        test_case = await asyncio.wait_for(queue.get(), timeout=1)
-        assert_eq(test_case.name.func_name, "test_other")
-
-        queue2: TestsQueue = TestsQueue()
-        _ = load_tests_from_file(
+        parametrized = collect_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_param[one]"),
-            queue2,
-            loop,
-            mark=None,
         )
-        parametrized_case = await asyncio.wait_for(queue2.get(), timeout=1)
-        assert_eq(parametrized_case.name.params_part, "one")
-        assert_eq(parametrized_case.param_values, (1,))
-
-        queue2 = TestsQueue()
-        _ = load_tests_from_file(
+        unmatched = collect_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_param[does not match]"),
-            queue2,
-            loop,
-            mark=None,
         )
-        queue2.shutdown()
-        with assert_raises(asyncio.QueueShutDown):
-            _ = await queue2.get()
+
+        assert_eq(selected.cases[0].name.func_name, "test_other")
+        assert_eq(parametrized.cases[0].name.params_part, "one")
+        assert_eq(parametrized.cases[0].param_values, (1,))
+        assert_eq(unmatched.cases, ())
 
 
 @test()
-def test_load_tests_from_file_spec_loader_failure_raises_collection_error() -> None:
+def test_collect_tests_from_file_spec_loader_failure_raises_collection_error() -> None:
     def fake_spec(_name: object, _path: object) -> None:
         return None
 
     with assert_raises(CollectionError):
-        queue: TestsQueue = TestsQueue()
-        loop = asyncio.new_event_loop()
-        try:
-            _ = load_tests_from_file(
-                cast(
-                    "PyFilePath",
-                    TypeAdapter(PyFilePath).validate_python(Path(__file__)),
-                ),
-                FilterItem(str(Path(__file__))),
-                queue,
-                loop,
-                mark=None,
-                spec_loader=fake_spec,
-            )
-        finally:
-            loop.close()
+        _ = collect_tests_from_file(
+            cast(
+                "PyFilePath",
+                TypeAdapter(PyFilePath).validate_python(Path(__file__)),
+            ),
+            FilterItem(str(Path(__file__))),
+            spec_loader=fake_spec,
+        )

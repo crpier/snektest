@@ -25,7 +25,7 @@ from snektest.diagnostics import (
     snapshot_exception,
     use_live_diagnostic_store,
 )
-from snektest.execution import execute_test
+from snektest.execution import execute_test, run_tests
 from snektest.fixtures import FixtureRegistry, use_registry
 from snektest.models import (
     AssertionDiagnostic,
@@ -110,6 +110,50 @@ def test_exception_group_snapshot_has_bounded_breadth() -> None:
     diagnostic = _snapshot(grouped)
 
     assert_eq(len(diagnostic.exceptions), 100)
+
+
+@test()
+async def test_normal_run_releases_failed_test_locals_before_the_next_case() -> None:
+    """Immutable diagnostics do not keep prior failure frames alive without PDB."""
+
+    class Payload: ...
+
+    references: list[ReferenceType[Payload]] = []
+    released_before_next_case: list[bool] = []
+
+    def failing_test() -> None:
+        payload = Payload()
+        references.append(ref(payload))
+        raise RuntimeError
+
+    def observe_previous_failure() -> None:
+        _ = collect()
+        released_before_next_case.append(references[0]() is None)
+
+    test_cases = [
+        TestCase(
+            function=failing_test,
+            markers=(),
+            name=TestName(
+                file_path=Path(__file__),
+                func_name="failing_test",
+                params_part="",
+            ),
+        ),
+        TestCase(
+            function=observe_previous_failure,
+            markers=(),
+            name=TestName(
+                file_path=Path(__file__),
+                func_name="observe_previous_failure",
+                params_part="",
+            ),
+        ),
+    ]
+
+    _results, _session_failures, _run_failures = await run_tests(test_cases)
+
+    assert_eq(released_before_next_case, [True])
 
 
 @test()

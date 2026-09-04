@@ -90,8 +90,8 @@ User-facing changes belong in `CHANGELOG.md`; private security reports follow
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
 2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings never enter test results or structured stdout. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
-3. **Local Execution**: With workers omitted, publish the complete plan to `run_tests`, which executes sequentially in process on one event loop.
-4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order.
+3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop.
+4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order. Active and completed-but-unreported cases are capped at twice the worker count, which bounds the result backlog behind an early slow case.
 5. **Test Execution** (`execute_test`): Capture stdout/stderr, execute one sync or async test, teardown function fixtures, and return a process-neutral `TestResult`.
 
 ### Fixture System
@@ -273,7 +273,8 @@ preserves parameter types through two lists; three or more use the variadic
 non-empty, unique, and exclude `, `, `[` and `]` so CLI filters are unambiguous.
 `Param.to_dict()` creates all combinations using `itertools.product`; each
 combination becomes a separate test execution and cardinality is the product of
-axis sizes.
+axis sizes. One decorated test may produce at most 10,000 cases. Larger products
+raise `BadRequestError` before expansion. The limit is per test, not per suite.
 
 ### OpenAPI Contract Testing
 
@@ -326,6 +327,18 @@ failures. Negative case names are prefixed with `negative`. Hypothesis
 `Unsatisfiable` from an operation with no negatable request constraints is
 translated to `SchemaGenerationError` with filtering guidance. Stateful
 workflows remain positive-only.
+
+### Large-suite memory
+
+The serial runner retains one compact result per case but does not duplicate the
+collected plan into a queue. Console and JSON reporters release captured output
+from clean passes after each progress result; programmatic runs retain it by
+default. Failure output remains available. Normal runs clear locals from ended
+traceback frames after creating bounded immutable diagnostics. `--pdb` alone
+keeps live tracebacks and stops on the first failure. Process dispatch permits at
+most twice the worker count in active or completed-but-unreported cases. Measured
+budgets and the reproducible benchmark command live in
+`docs/large-suite-memory.md`.
 
 ### Summary Output
 

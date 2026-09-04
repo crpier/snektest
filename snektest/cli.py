@@ -1,7 +1,6 @@
 import asyncio
 import json
 import sys
-import threading
 import traceback
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from snektest.benchmark_baseline import (
     MachineFingerprint,
     discover_project_root,
 )
-from snektest.collection import TestsQueue, load_tests_from_filters
+from snektest.collection import collect_test_plan
 from snektest.execution import run_tests
 from snektest.models import (
     ArgsError,
@@ -623,7 +622,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     )
 
 
-async def _run_tests_with_producer_thread(  # noqa: PLR0913
+async def _run_tests_with_collected_plan(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
     allow_empty: bool,
@@ -635,45 +634,22 @@ async def _run_tests_with_producer_thread(  # noqa: PLR0913
     benchmark_baseline: BenchmarkBaseline | None = None,
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
 ) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
-    queue = TestsQueue()
-    collection_exception: list[BaseException] = []
-
-    producer_thread = threading.Thread(
-        target=load_tests_from_filters,
-        kwargs={
-            "filter_items": filter_items,
-            "queue": queue,
-            "loop": asyncio.get_running_loop(),
-            "allow_empty": allow_empty,
-            "capture_output": capture_output,
-            "mark": mark,
-            "exception_holder": collection_exception,
-        },
+    test_cases = await asyncio.to_thread(
+        collect_test_plan,
+        filter_items,
+        allow_empty=allow_empty,
+        capture_output=capture_output,
+        mark=mark,
     )
-
-    producer_thread.start()
-
-    try:
-        (
-            test_results,
-            session_teardown_failures,
-            run_teardown_failures,
-        ) = await run_tests(
-            queue=queue,
-            capture_output=capture_output,
-            pdb_on_failure=pdb_on_failure,
-            timeout=timeout,
-            collection_failed=lambda: bool(collection_exception),
-            reporter=reporter,
-            benchmark_baseline=benchmark_baseline,
-            teardown_diagnostics=teardown_diagnostics,
-        )
-    finally:
-        producer_thread.join()
-        if collection_exception:
-            raise collection_exception[0]
-
-    return test_results, session_teardown_failures, run_teardown_failures
+    return await run_tests(
+        test_cases,
+        capture_output=capture_output,
+        pdb_on_failure=pdb_on_failure,
+        timeout=timeout,
+        reporter=reporter,
+        benchmark_baseline=benchmark_baseline,
+        teardown_diagnostics=teardown_diagnostics,
+    )
 
 
 def exit_code_from_summary(summary: TestRunSummary) -> int:
@@ -730,7 +706,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             test_results,
             session_teardown_failures,
             run_teardown_failures,
-        ) = await _run_tests_with_producer_thread(
+        ) = await _run_tests_with_collected_plan(
             filter_items,
             allow_empty=allow_empty,
             capture_output=capture_output,
@@ -826,7 +802,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
     runner = run_tests_programmatic_fn or run_tests_programmatic
     deferred_reporter: DeferredRunReporter | None = None
     if options.json_output:
-        reporter: RunReporter = NullRunReporter()
+        reporter: RunReporter = NullRunReporter(retain_passed_output=False)
     elif (
         options.update_benchmark_baseline is not None
         or options.benchmark_baseline is not None

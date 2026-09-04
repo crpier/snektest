@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from snektest import assert_eq, assert_in, test
+from snektest import assert_eq, assert_in, assert_le, test
 from testutils.helpers import run_test_subprocess
 
 
@@ -42,6 +42,45 @@ def test_fast() -> None:
         [entry["name"].rsplit("::", 1)[-1] for entry in result["tests"]],
         ["test_slow", "test_fast"],
     )
+
+
+@test(mark="slow")
+def test_workers_bound_completed_cases_behind_a_slow_first_case() -> None:
+    """Ordered reporting limits completed results waiting behind an early case."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        test_file = directory / "test_bounded_run_ahead.py"
+        _ = test_file.write_text(
+            f"""
+import time
+from pathlib import Path
+
+from snektest import Param, test
+
+OUTPUT = Path({str(directory)!r})
+FAST_CASES = [Param(value=index, name=str(index)) for index in range(12)]
+
+@test()
+def test_slow_first() -> None:
+    time.sleep(0.5)
+    _ = (OUTPUT / "slow-finished").write_text(str(time.monotonic()))
+
+@test(FAST_CASES)
+def test_fast(index: int) -> None:
+    _ = (OUTPUT / f"fast-{{index}}").write_text(str(time.monotonic()))
+""".lstrip()
+        )
+
+        result = run_test_subprocess(test_file, "--workers", "2", timeout=10)
+        slow_finished_at = float((directory / "slow-finished").read_text())
+        completed_behind_slow_case = sum(
+            float(path.read_text()) < slow_finished_at
+            for path in directory.glob("fast-*")
+        )
+
+    assert_eq(result["returncode"], 0)
+    assert_le(completed_behind_slow_case, 3)
 
 
 @test(mark="slow")

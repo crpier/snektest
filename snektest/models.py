@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import product
+from math import prod
 from pathlib import Path
 from typing import Any, Literal, override
 
@@ -12,6 +13,9 @@ from snektest.annotations import Coroutine
 
 DEFAULT_CLEANUP_TIMEOUT_SECONDS = 60.0
 """Maximum async cleanup time when no shorter run timeout is configured."""
+
+_MAX_PARAMETER_CASES = 10_000
+"""Largest Cartesian product accepted for one parameterized test."""
 
 
 class SnektestError(Exception):
@@ -292,7 +296,7 @@ class Param[T]:
     name: str
 
     @staticmethod
-    def to_dict(
+    def to_dict(  # noqa: C901
         params: tuple[list[Param[Any]], ...],
     ) -> dict[str, tuple[Param[Any], ...]]:
         """Create a dictionary that contains all possible params combinations.
@@ -301,6 +305,14 @@ class Param[T]:
         """
         if not params:
             return {"": ()}
+
+        case_count = prod(len(axis) for axis in params)
+        if case_count > _MAX_PARAMETER_CASES:
+            msg = (
+                f"Parameterized test expands to {case_count} cases; "
+                f"maximum is {_MAX_PARAMETER_CASES}"
+            )
+            raise BadRequestError(msg)
 
         for axis_index, axis in enumerate(params, start=1):
             if not axis:

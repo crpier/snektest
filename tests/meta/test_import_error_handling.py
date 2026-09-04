@@ -40,12 +40,7 @@ def test_missing_explicit_test_name_exits_unsuccessfully() -> None:
 
 @test()
 def test_import_error_does_not_hang() -> None:
-    """Test that import errors don't cause the test runner to hang.
-
-    When a test file fails to import (e.g., raises an exception at module level),
-    the producer thread should handle the error gracefully and shut down the queue,
-    rather than hanging forever.
-    """
+    """An import error aborts collection without starting execution or hanging."""
     tmp_dir = load_fixture(tmp_dir_fixture())
 
     test_file = create_test_file(

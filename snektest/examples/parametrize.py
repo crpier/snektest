@@ -1,4 +1,4 @@
-"""Parameterized tests use non-empty lists and unique, filter-safe case names."""
+"""Parameter lists form Cartesian products capped at 10,000 cases per test."""
 
 from snektest import Param, assert_eq, test
 
@@ -22,6 +22,6 @@ def test_string_length(value: str) -> None:
     mark="fast",
 )
 def test_cartesian_product(greeting: str, target: str) -> None:
-    """Multiple parameter lists are combined as a cartesian product."""
+    """Multiple parameter lists are combined as a Cartesian product."""
     combined = greeting + target
     assert_eq(combined[: len(greeting)], greeting)
