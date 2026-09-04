@@ -32,6 +32,7 @@ class CollectionError(SnektestError):
         self.collection_diagnostic: ExceptionDiagnostic | None = None
         self.collection_output = ""
         self.collection_warnings: tuple[str, ...] = ()
+        self.uncaptured_output = ""
         super().__init__(message)
 
 
@@ -538,6 +539,13 @@ class TestResult:
     background_failures: tuple[BackgroundFailure, ...] = ()
 
     @property
+    def is_actionable_failure(self) -> bool:
+        """Return whether fail-fast should stop after this completed result."""
+        return self.status in {"failed", "error", "unexpected_pass"} or bool(
+            self.fixture_teardown_failures
+        )
+
+    @property
     def status(self) -> TestStatus:
         """Return the canonical status shared by every reporting adapter."""
         match self.result:
@@ -590,7 +598,13 @@ class RunResult:
     session_teardown_output: str | None = None
     session_teardown_warnings: tuple[str, ...] = ()
     benchmark_baseline: BenchmarkBaselineRun | None = None
+    selected_tests: int = 0
+    stopped_early: bool = False
     total_duration: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.selected_tests == 0 and self.total_tests > 0:
+            self.selected_tests = self.total_tests
 
     @classmethod
     def from_execution(  # noqa: PLR0913
@@ -604,6 +618,7 @@ class RunResult:
         session_teardown_warnings: tuple[str, ...],
         test_results: list[TestResult],
         total_duration: float,
+        selected_tests: int | None = None,
         collection_output: str = "",
         collection_warnings: tuple[str, ...] = (),
     ) -> RunResult:
@@ -634,6 +649,12 @@ class RunResult:
             session_teardown_output=session_teardown_output,
             session_teardown_warnings=session_teardown_warnings,
             test_results=test_results,
+            selected_tests=(
+                len(test_results) if selected_tests is None else selected_tests
+            ),
+            stopped_early=(
+                selected_tests is not None and len(test_results) < selected_tests
+            ),
             total_duration=total_duration,
         )
 

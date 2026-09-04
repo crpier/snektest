@@ -41,6 +41,15 @@ uv run snektest tests/test_myfeature.py::test_something[case-name]
 
 # Run one marker group
 uv run snektest --mark fast
+
+# List selectors without running bodies
+uv run snektest --collect-only
+
+# Stop on the first actionable failure
+uv run snektest --fail-fast
+
+# Print the ten slowest completed selectors
+uv run snektest --durations 10
 ```
 
 Every filter must select at least one test by default. `--allow-empty` permits
@@ -67,7 +76,7 @@ uv run ruff format .
 ```
 
 ### Package Management
-This project uses `uv` for dependency management. The project requires Python >=3.14. The verified support matrix is GIL-enabled CPython 3.14 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are unsupported; newer CPython versions are not yet verified.
+This project uses `uv` for dependency management. Install all locked development dependencies with `uv sync --locked --group dev`; this includes the required strict `ty` checker. The project requires Python >=3.14. The verified support matrix is GIL-enabled CPython 3.14 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are unsupported; newer CPython versions are not yet verified.
 
 ### Distribution Metadata
 
@@ -90,8 +99,8 @@ User-facing changes belong in `CHANGELOG.md`; private security reports follow
 
 1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
 2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
-3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop.
-4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order. Active and completed-but-unreported cases are capped at twice the worker count, which bounds the result backlog behind an early slow case.
+3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop. Fail-fast stops after a failure, error, XPASS, or function teardown failure; SKIP and XFAIL continue.
+4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent host owns canonical collection and run fixtures; N persistent execution workers independently recollect and validate the manifest, each owning an event loop and session registry. The coordinator schedules mutex-compatible ordinals and reports in manifest order. Active and completed-but-unreported cases are capped at twice the worker count, which bounds the result backlog behind an early slow case. Fail-fast lowers dispatch to one active case so a later body cannot start.
 5. **Test Execution** (`execute_test`): Capture stdout/stderr, execute one sync or async test, teardown function fixtures, and return a process-neutral `TestResult`.
 
 ### Fixture System
@@ -334,11 +343,11 @@ The serial runner retains one compact result per case but does not duplicate the
 collected plan into a queue. Console reporters release captured output from
 clean passes after each progress result; JSON, JUnit, and programmatic runs
 retain it for completed-run adapters. Failure output remains available. Normal
-runs clear locals from ended
-traceback frames after creating bounded immutable diagnostics. `--pdb` alone
-keeps live tracebacks and stops on the first failure. Process dispatch permits at
-most twice the worker count in active or completed-but-unreported cases. Measured
-budgets and the reproducible benchmark command live in
+runs clear locals from ended traceback frames after creating bounded immutable
+diagnostics. `--pdb` alone keeps live tracebacks and stops on the first failure.
+Process dispatch permits at most twice the worker count in active or
+completed-but-unreported cases, or one case in fail-fast mode. Measured budgets
+and the reproducible benchmark command live in
 `docs/large-suite-memory.md`.
 
 ### Structured output
@@ -356,6 +365,19 @@ descriptor guard quarantines uncaptured stdout/stderr, child output, and direct
 descriptor writes as `uncaptured_output`; malformed UTF-8 uses replacement
 characters. `--junit-output PATH` maps the same `RunResult` to JUnit XML and emits
 one synthetic error case per fixture teardown failure.
+
+`--collect-only` lists canonical selectors without executing bodies and emits a
+versioned `collection` document with `--json-output`. `-x` / `--fail-fast` stops
+on actionable outcomes without opening PDB. `--durations N` orders completed
+results by duration and prints exact rerun selectors. `RunResult.selected_tests`
+and `stopped_early` distinguish the selected plan from cases that ran.
+
+`configuration.py` finds the nearest `pyproject.toml` and validates
+`[tool.snektest]`. It accepts `test_paths`, `timeout`, `mark`, `capture_output`,
+`json_output`, and `junit_output`; unknown keys fail. Relative paths use the
+project directory. CLI filters and flags, including inverse output and marker
+flags, override configured values. `--output-schema-versions` lists supported
+JSON schema versions.
 
 Console summary lines intentionally keep exception details compact: only the first
 exception message line is shown and long lines may be ellipsized. Use the full
@@ -478,6 +500,13 @@ attached to failed and error outcomes.
 The project uses ty with every available rule set to `error`, plus strict equality
 semantics and strict generic narrowing. No rules are disabled. When adding code,
 expect to fully annotate it and run `uv run ty check`.
+
+## Migration contract
+
+The 0.16 to 0.17 notes must cover the canonical `SnektestError` hierarchy and
+`Scope`, SKIP/XFAIL/XPASS semantics, normalized `RunResult`, JSON schema version
+1, JUnit output, and per-fixture teardown counts. Keep the README and embedded
+agent guide synchronized when this contract changes.
 
 ## Documentation Surfaces
 

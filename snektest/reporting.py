@@ -4,7 +4,12 @@ from dataclasses import replace
 from typing import Protocol
 
 from snektest.models import PassedResult, RunResult, TestResult
-from snektest.presenter import print_failures, print_summary, print_test_result
+from snektest.presenter import (
+    print_failures,
+    print_slowest_tests,
+    print_summary,
+    print_test_result,
+)
 
 
 class RunReporter(Protocol):
@@ -46,7 +51,13 @@ def result_for_retention(
 class ConsoleRunReporter:
     """Reporter adapter that renders the human-readable console output."""
 
-    def __init__(self, *, retain_passed_output: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        durations: int | None = None,
+        retain_passed_output: bool = False,
+    ) -> None:
+        self._durations: int | None = durations
         self.retain_passed_output: bool = retain_passed_output
 
     def test_finished(self, test_result: TestResult) -> None:
@@ -72,6 +83,8 @@ class ConsoleRunReporter:
                 run_result.session_teardown_output if show_session_output else None
             ),
         )
+        if self._durations is not None:
+            print_slowest_tests(run_result, count=self._durations)
         print_summary(run_result)
 
 

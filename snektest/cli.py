@@ -17,6 +17,7 @@ from snektest.agent_docs import (
 )
 from snektest.benchmark_baseline import BenchmarkBaseline, discover_project_root
 from snektest.collection import collect_test_plan
+from snektest.configuration import ProjectConfig, load_project_config
 from snektest.diagnostics import snapshot_exception
 from snektest.execution import run_tests
 from snektest.junit import build_junit_xml
@@ -41,10 +42,12 @@ from snektest.reporting import (
     RunReporter,
 )
 from snektest.structured import (
-    build_json_error as _json_error_document,
+    SUPPORTED_SCHEMA_VERSIONS,
+    build_json_collection,
+    build_json_summary,
 )
 from snektest.structured import (
-    build_json_summary,
+    build_json_error as _json_error_document,
 )
 
 
@@ -73,7 +76,12 @@ TestRunSummary = RunResult
 
 
 type CliAction = Literal[
-    "agent_docs", "help", "list_examples", "show_example", "version"
+    "agent_docs",
+    "help",
+    "list_examples",
+    "output_schema_versions",
+    "show_example",
+    "version",
 ]
 type WorkerCount = int | Literal["auto"]
 
@@ -86,7 +94,10 @@ class CliOptions:
     allow_empty: bool = False
     benchmark_baseline: str | None = None
     capture_output: bool = True
+    collect_only: bool = False
+    durations: int | None = None
     example_name: str | None = None
+    fail_fast: bool = False
     filters: tuple[str, ...] = ()
     json_output: bool = False
     junit_output: str | None = None
@@ -123,23 +134,32 @@ Filters:
 Options:
   -h, --help        Show this help message
   --version         Show the installed snektest version
+  --output-schema-versions
+                    Show supported JSON output schema versions
   -s                Disable stdout/stderr capture
+  --capture-output  Capture stdout/stderr, overriding a project default
   --agent-docs      Print AI-agent usage guide
   --llms            Alias for --agent-docs
   --examples        List bundled examples
   --example NAME    Print a bundled example
   --json-output     Print one versioned JSON document to stdout
+  --no-json-output  Use console output, overriding a project default
   --junit-output PATH
                     Write a JUnit XML report
+  --no-junit-output Disable a configured JUnit report
+  --collect-only    List selected test identifiers without running test bodies
   --allow-empty     Exit successfully when no tests are selected
   --benchmark-baseline PATH
                     Compare opted-in benchmarks with a machine-bound baseline
   --update-benchmark-baseline PATH
                     Atomically update opted-in benchmarks after a passing run
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
+  --no-mark         Run every marker, overriding a project default
   -n, --workers N   Run in N worker processes, or use auto
   --timeout SECONDS Set a finite positive async-test timeout (default: 60)
   --no-timeout      Disable async-test body timeout; cleanup remains bounded
+  -x, --fail-fast   Stop after the first actionable failure
+  --durations N     Show the N slowest completed tests and their selectors
   --pdb             Drop into post-mortem debugger on first failure
 
 Example commands:
@@ -183,6 +203,7 @@ _ACTION_ARGS: dict[str, CliAction] = {
     "--examples": "list_examples",
     "--help": "help",
     "--llms": "agent_docs",
+    "--output-schema-versions": "output_schema_versions",
     "--version": "version",
     "-h": "help",
     "examples": "list_examples",
@@ -190,14 +211,14 @@ _ACTION_ARGS: dict[str, CliAction] = {
 
 
 def _parse_mark_flag(
-    argv: list[str], index: int, current_mark: str | None
+    argv: list[str], index: int, *, mark_option_seen: bool
 ) -> tuple[str, int] | ParseError:
     """Parse `--mark` and its value, rejecting repeats and unknown markers.
 
     Returns the marker with the index its value was consumed from, or a
     ParseError. Lives apart from the main loop so the dispatch stays flat.
     """
-    if current_mark is not None:
+    if mark_option_seen:
         return ParseError("Only one --mark value is supported")
     consumed = _consume_flag_value(argv, index, "--mark")
     if isinstance(consumed, ParseError):
@@ -233,6 +254,29 @@ def _parse_timeout_flag(
     return timeout, value_index
 
 
+def _parse_durations_flag(
+    argv: list[str], index: int, *, durations_option_seen: bool
+) -> tuple[int, int] | ParseError:
+    """Parse one positive count for the slowest-test report."""
+    if durations_option_seen:
+        return ParseError("Only one --durations option is supported")
+    consumed = _consume_flag_value(argv, index, "--durations")
+    if isinstance(consumed, ParseError):
+        return consumed
+    raw_value, value_index = consumed
+    try:
+        count = int(raw_value)
+    except ValueError:
+        return ParseError(
+            f"Invalid --durations value: `{raw_value}`. Expected a positive integer."
+        )
+    if count <= 0:
+        return ParseError(
+            f"Invalid --durations value: `{raw_value}`. Must be a positive integer."
+        )
+    return count, value_index
+
+
 def _parse_workers_flag(
     argv: list[str], index: int, *, workers_option_seen: bool
 ) -> tuple[WorkerCount, int] | ParseError:
@@ -266,6 +310,9 @@ def _print_cli_action(options: CliOptions) -> int:
         output = get_agent_docs()
     elif options.action == "version":
         output = f"snektest {__version__}\n"
+    elif options.action == "output_schema_versions":
+        versions = ", ".join(str(version) for version in SUPPORTED_SCHEMA_VERSIONS)
+        output = f"JSON output schema versions: {versions}\n"
     elif options.action == "list_examples":
         output = get_examples_listing()
     elif options.action == "show_example":
@@ -283,6 +330,8 @@ def _print_cli_action(options: CliOptions) -> int:
 
 def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     argv: list[str],
+    *,
+    project_config: ProjectConfig | None = None,
 ) -> CliOptions | ParseError:
     """Parse argv into CliOptions, or a ParseError on invalid usage.
 
@@ -298,19 +347,33 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     action: CliAction | None = None
     allow_empty = False
     benchmark_baseline: str | None = None
-    capture_output = True
+    capture_output = project_config.capture_output if project_config else True
+    collect_only = False
     example_name: str | None = None
-    json_output = False
-    junit_output: str | None = None
-    mark: str | None = None
+    fail_fast = False
+    json_output = project_config.json_output if project_config else False
+    json_option_seen = False
+    junit_output = project_config.junit_output if project_config else None
+    junit_option_seen = False
+    mark = project_config.mark if project_config else None
+    mark_option_seen = False
     pdb_on_failure = False
-    timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
+    configured_timeout = project_config.timeout if project_config else None
+    timeout: float | None = (
+        None
+        if configured_timeout is False
+        else configured_timeout
+        if configured_timeout is not None
+        else _DEFAULT_TIMEOUT_SECONDS
+    )
     timeout_option_seen = False
     update_benchmark_baseline: str | None = None
     workers: WorkerCount | None = None
     workers_option_seen = False
     filters: list[str] = []
     duplicate_action = ParseError("Only one informational command is supported")
+    durations: int | None = None
+    durations_option_seen = False
 
     index = 0
     while index < len(argv):
@@ -328,15 +391,31 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 example_name, index = consumed
         elif arg == "-s":
             capture_output = False
+        elif arg == "--capture-output":
+            capture_output = True
         elif arg == "--json-output":
             json_output = True
+            json_option_seen = True
+        elif arg == "--no-json-output":
+            json_output = False
+            json_option_seen = True
+        elif arg == "--collect-only":
+            collect_only = True
         elif arg == "--junit-output":
-            if junit_output is not None:
+            if junit_option_seen:
                 return ParseError("Only one --junit-output value is supported")
             consumed = _consume_flag_value(argv, index, arg)
             if isinstance(consumed, ParseError):
                 return consumed
             junit_output, index = consumed
+            junit_option_seen = True
+        elif arg == "--no-junit-output":
+            if junit_option_seen:
+                return ParseError(
+                    "Only one --junit-output or --no-junit-output option is supported"
+                )
+            junit_output = None
+            junit_option_seen = True
         elif arg == "--allow-empty":
             allow_empty = True
         elif arg in {"--benchmark-baseline", "--update-benchmark-baseline"}:
@@ -354,11 +433,29 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 update_benchmark_baseline = baseline_path
         elif arg == "--pdb":
             pdb_on_failure = True
+        elif arg == "--durations":
+            parsed_durations = _parse_durations_flag(
+                argv, index, durations_option_seen=durations_option_seen
+            )
+            if isinstance(parsed_durations, ParseError):
+                return parsed_durations
+            durations, index = parsed_durations
+            durations_option_seen = True
+        elif arg in {"-x", "--fail-fast"}:
+            fail_fast = True
         elif arg == "--mark":
-            parsed_mark = _parse_mark_flag(argv, index, mark)
+            parsed_mark = _parse_mark_flag(
+                argv, index, mark_option_seen=mark_option_seen
+            )
             if isinstance(parsed_mark, ParseError):
                 return parsed_mark
             mark, index = parsed_mark
+            mark_option_seen = True
+        elif arg == "--no-mark":
+            if mark_option_seen:
+                return ParseError("Only one --mark or --no-mark option is supported")
+            mark = None
+            mark_option_seen = True
         elif arg == "--timeout":
             parsed_timeout = _parse_timeout_flag(
                 argv, index, timeout_option_seen=timeout_option_seen
@@ -388,12 +485,12 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             filters.append(arg)
         index += 1
 
-    if action is not None and json_output:
+    if action is not None and json_option_seen and json_output:
         return ParseError("Cannot combine informational commands with --json-output")
     if action is not None and (
         filters
         or benchmark_baseline is not None
-        or junit_output is not None
+        or junit_option_seen
         or update_benchmark_baseline is not None
     ):
         return ParseError(
@@ -406,14 +503,19 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             "Cannot combine --pdb with --workers; rerun without --workers to debug locally"
         )
     if action is None and not filters:
-        filters.append(".")
+        filters.extend(project_config.test_paths if project_config else ())
+        if not filters:
+            filters.append(".")
 
     return CliOptions(
         action=action,
         allow_empty=allow_empty,
         benchmark_baseline=benchmark_baseline,
         capture_output=capture_output,
+        collect_only=collect_only,
+        durations=durations,
         example_name=example_name,
+        fail_fast=fail_fast,
         filters=tuple(filters),
         json_output=json_output,
         junit_output=junit_output,
@@ -430,6 +532,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
     *,
     allow_empty: bool,
     capture_output: bool,
+    fail_fast: bool,
     pdb_on_failure: bool,
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
@@ -455,6 +558,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
         capture_output=capture_output,
         collection_output=collection_diagnostics.output,
         collection_warnings=collection_diagnostics.warnings,
+        fail_fast=fail_fast,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
         reporter=reporter,
@@ -471,6 +575,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     *,
     allow_empty: bool = False,
     capture_output: bool = True,
+    fail_fast: bool = False,
     pdb_on_failure: bool = False,
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
@@ -507,6 +612,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             filter_items,
             allow_empty=allow_empty,
             capture_output=capture_output,
+            fail_fast=fail_fast,
             pdb_on_failure=pdb_on_failure,
             mark=mark,
             timeout=timeout,
@@ -520,6 +626,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         filter_items,
         allow_empty=allow_empty,
         capture_output=capture_output,
+        fail_fast=fail_fast,
         mark=mark,
         reporter=selected_reporter,
         timeout=timeout,
@@ -536,8 +643,19 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
 ) -> int:
     """Parse arguments and run tests."""
     arguments = sys.argv[1:] if argv is None else argv
+    action_options = parse_cli_args(arguments)
+    if isinstance(action_options, CliOptions) and action_options.action is not None:
+        return _print_cli_action(action_options)
+
     json_requested = "--json-output" in arguments
-    parsed = parse_cli_args(arguments)
+    project_config = await asyncio.to_thread(
+        load_project_config,
+        start=Path.cwd(),
+    )
+    json_requested = json_requested or (
+        project_config.json_output and "--no-json-output" not in arguments
+    )
+    parsed = parse_cli_args(arguments, project_config=project_config)
     if isinstance(parsed, ParseError):
         if json_requested:
             print(
@@ -580,6 +698,60 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
             print_error(str(error))
         return 2
 
+    if options.collect_only:
+        collection_diagnostics = CollectionDiagnostics()
+        descriptor_capture = DescriptorOutputCapture() if options.json_output else None
+        capture_context = descriptor_capture or nullcontext()
+        try:
+            with capture_context:
+                test_cases = await asyncio.to_thread(
+                    collect_test_plan,
+                    filter_items,
+                    allow_empty=options.allow_empty,
+                    capture_output=options.capture_output,
+                    diagnostics=collection_diagnostics,
+                    mark=options.mark,
+                )
+        except CollectionError as error:
+            error.collection_output = collection_diagnostics.output
+            error.collection_warnings = collection_diagnostics.warnings
+            if descriptor_capture is not None:
+                error.uncaptured_output = descriptor_capture.release()
+            if not options.json_output:
+                raise
+            document = _json_error_document(
+                category="collection",
+                exception=(
+                    error.collection_diagnostic
+                    or snapshot_exception(type(error), error, error.__traceback__)
+                ),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+            document["collection_output"] = error.collection_output
+            document["collection_warnings"] = list(error.collection_warnings)
+            document["uncaptured_output"] = error.uncaptured_output
+            print(json.dumps(document))
+            return 2
+        uncaptured_output = descriptor_capture.release() if descriptor_capture else ""
+        if options.json_output:
+            print(
+                json.dumps(
+                    build_json_collection(
+                        test_cases,
+                        collection_diagnostics,
+                        uncaptured_output=uncaptured_output,
+                    )
+                )
+            )
+        else:
+            for test_case in test_cases:
+                print(test_case.name)
+            test_word = "test" if len(test_cases) == 1 else "tests"
+            print(f"{len(test_cases)} {test_word} collected")
+        return 0
+
     project_root = discover_project_root()
     benchmark_baseline: BenchmarkBaseline | None = None
     if options.benchmark_baseline is not None:
@@ -600,11 +772,14 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         options.update_benchmark_baseline is not None
         or options.benchmark_baseline is not None
     ):
-        deferred_reporter = DeferredRunReporter(ConsoleRunReporter())
+        deferred_reporter = DeferredRunReporter(
+            ConsoleRunReporter(durations=options.durations)
+        )
         reporter = deferred_reporter
     else:
         reporter = ConsoleRunReporter(
-            retain_passed_output=options.junit_output is not None
+            durations=options.durations,
+            retain_passed_output=options.junit_output is not None,
         )
     descriptor_capture = DescriptorOutputCapture() if options.json_output else None
     capture_context = descriptor_capture or nullcontext()
@@ -619,6 +794,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     filter_items,
                     allow_empty=options.allow_empty,
                     capture_output=options.capture_output,
+                    fail_fast=options.fail_fast,
                     pdb_on_failure=options.pdb_on_failure,
                     mark=options.mark,
                     timeout=options.timeout,
@@ -769,6 +945,16 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
             )
         except OSError as error:
             message = f"Could not write JUnit output `{options.junit_output}`: {error}"
+            if options.json_output:
+                document = _json_error_document(
+                    category="configuration",
+                    exit_code=2,
+                    message=message,
+                    type_name="BadRequestError",
+                )
+                document["uncaptured_output"] = uncaptured_output
+                print(json.dumps(document))
+                return 2
             raise BadRequestError(message) from error
 
     if deferred_reporter is not None:
@@ -824,6 +1010,7 @@ def main_inner(  # noqa: C901, PLR0911, PLR0912
             if isinstance(error, CollectionError):
                 document["collection_output"] = error.collection_output
                 document["collection_warnings"] = list(error.collection_warnings)
+                document["uncaptured_output"] = error.uncaptured_output
             print(json.dumps(document))
         return exit_code
 

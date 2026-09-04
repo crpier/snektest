@@ -20,18 +20,27 @@ def test_addition() -> None:
     assert_eq(1 + 1, 2)
 ```
 
-Run tests with:
+Install Snektest and the required strict type checker, then run both checks:
 
 ```bash
-snektest
-python -m snektest
+uv add snektest
+uv add --dev ty
+uv run ty check
+uv run snektest
 ```
+
+Repository contributors install every locked development dependency with
+`uv sync --locked --group dev`.
 
 Useful commands:
 
 ```bash
 snektest --help
 snektest --version
+snektest --output-schema-versions
+snektest --collect-only
+snektest --fail-fast
+snektest --durations 10
 snektest --agent-docs
 snektest --examples
 snektest --example async
@@ -53,6 +62,19 @@ from snektest import test
 def test_needs_parentheses() -> None:
     pass
 ```
+
+## Migrating from 0.16 to 0.17
+
+Import public errors, `Scope`, decorators, assertions, and fixtures from the
+`snektest` package. Exported errors now share `SnektestError`, `Scope` is the
+canonical scope type, and internal invariant errors are no longer public.
+SKIP and XFAIL now exit successfully, while strict XPASS exits 1. Static xfail
+converts only Snektest assertion failures. Programmatic results add
+`SkippedResult`, `ExpectedFailureResult`, and `UnexpectedPassResult`, with JSON
+statuses `skipped`, `expected_failure`, and `unexpected_pass`. Programmatic
+runs now return `RunResult`. JSON consumers must handle the version-1 envelope and canonical
+status names; JUnit is available through `--junit-output`. Function teardown
+counts now count each failed fixture teardown.
 
 ## Core patterns
 
@@ -108,11 +130,13 @@ def test_needs_parentheses() -> None:
 - A fixture may depend on another by calling `load_fixture()` in its body. Function may depend on function, session, or run; session on session or run; run on run only. An async fixture may depend on sync or async fixtures; a sync fixture cannot await an async dependency. A depending fixture is torn down before the fixtures it loaded.
 - Put all `load_fixture(...)` calls at the beginning of the test, before actions or assertions.
 - Avoid conditional or mid-test fixture loading unless delayed loading is the behavior under test.
-- Collection and every selected module import finish before execution. Directory files are ordered by normalized path, cases retain source definition order, and filters retain command-line order. Absolute and relative paths share one canonical module identity, package-relative imports work, and imported decorated functions are not collected as local tests. Overlapping filters import a module once in one run; a later run imports it fresh. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Local execution consumes the completed plan directly without a callback queue. `-n COUNT` / `--workers COUNT` uses persistent spawn workers plus one collector/run-fixture host; `auto` selects the lesser of process CPUs and selected cases. Each worker owns one event loop and its session fixtures. Results stay in manifest order, with active and completed-but-unreported cases capped at twice the worker count.
+- Collection and every selected module import finish before execution. Directory files are ordered by normalized path, cases retain source definition order, and filters retain command-line order. Absolute and relative paths share one canonical module identity, package-relative imports work, and imported decorated functions are not collected as local tests. Overlapping filters import a module once in one run; a later run imports it fresh. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Local execution consumes the completed plan directly without a callback queue. `-n COUNT` / `--workers COUNT` uses persistent spawn workers plus one collector/run-fixture host; `auto` selects the lesser of process CPUs and selected cases. Each worker owns one event loop and its session fixtures. Results stay in manifest order, with active and completed-but-unreported cases capped at twice the worker count outside fail-fast mode.
 - `mutex="name"` on `@test` and `@test_hypothesis` prevents overlap for the same exact, non-empty, trimmed, case-sensitive command-local name. It is not an OS lock. Explicit workers cannot be combined with `--pdb`; `--json-output` cannot be combined with `--pdb`.
 - Catch exported framework failures with `SnektestError`. `AssertionFailure`, `BadRequestError`, `CollectionError`, `FixtureError`, `SchemaGenerationError`, and `TestTimeoutError` share this ordinary `Exception` base; `AssertionFailure` also remains an `AssertionError`. Internal invariant errors are not exported.
 - Console runs discard captured output from clean passing tests after reporting each result. JSON, JUnit, and `run_tests_programmatic` retain passing output. `RunResult` is the one normalized completion consumed by every adapter. Normal runs retain bounded exception snapshots and clear ended traceback frames; `--pdb` keeps live frames until the first failure stops execution.
-- `--json-output` writes one schema-version-1 document for completed runs and CLI errors. It includes framework version, exit code, duration, counts, collection diagnostics, warnings, test output and markers, measurements, complete bounded exception tracebacks, and function/session/run teardown details. `-s --json-output` places uncaptured stdout/stderr, inherited child output, and descriptor writes in `uncaptured_output`. `--junit-output PATH` writes the same run as JUnit XML; each fixture teardown failure is a separate error case.
+- `--collect-only` lists deterministic test and parameter-case selectors without running bodies. `--fail-fast` stops on failure, error, XPASS, or function teardown failure; SKIP and XFAIL continue. Explicit-worker fail-fast dispatches one case at a time. `--durations N` prints the N slowest completed tests with direct selectors.
+- `--json-output` writes one schema-version-1 document for completed runs and CLI errors. It includes framework version, exit code, duration, counts, collection diagnostics, warnings, test output and markers, measurements, complete bounded exception tracebacks, and function/session/run teardown details. `-s --json-output` places uncaptured stdout/stderr, inherited child output, and descriptor writes in `uncaptured_output`. Collect-only uses a versioned `collection` document. `--junit-output PATH` writes a normalized run as JUnit XML; each fixture teardown failure is a separate error case. `--output-schema-versions` lists supported JSON versions.
+- The nearest `pyproject.toml` may set `[tool.snektest]` defaults for `test_paths`, `timeout` (a positive number or `false`), `mark`, `capture_output`, `json_output`, and `junit_output`. Explicit filters replace configured paths. Matching CLI flags, including `--no-mark`, `--capture-output`, `--no-json-output`, and `--no-junit-output`, take precedence.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 - CLI runs bound every async test to 60 seconds by default. `snektest --timeout SECONDS` accepts only finite positive values; `snektest --no-timeout` disables the body limit. It is async-only and best-effort: it fires only while the test is suspended on an `await`. Async fixture teardown and task cancellation use the configured timeout, or a separate 60-second cleanup ceiling when the body is unbounded. Local collection and imports have no limit; explicit worker mode bounds child bootstrap but does not promise a per-import deadline. Sync bodies, CPU-bound work, raw threads, and sync teardown cannot be interrupted, even with workers. Hard limits need process-per-case isolation and separately isolated collection, which Snektest does not provide. Put an outer process or CI timeout around every command.

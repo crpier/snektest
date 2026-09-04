@@ -95,6 +95,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             from snektest.cli import run_tests_programmatic
             from snektest.junit import build_junit_xml
             from snektest.models import FilterItem, RunResult
+            from snektest.structured import SUPPORTED_SCHEMA_VERSIONS
 
             async def structured_result(path: str) -> str:
                 completed_run: RunResult = await run_tests_programmatic(
@@ -143,6 +144,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 "all": snektest.__all__,
                 "error": public_error.__name__,
                 "scope": scope.value,
+                "schemas": SUPPORTED_SCHEMA_VERSIONS,
             }))
         """),
     )
@@ -159,10 +161,50 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     payload = json.loads(executed.stdout)
     assert_eq(payload["scope"], "session")
     assert_eq(payload["error"], "FixtureError")
+    assert_eq(payload["schemas"], [1])
     assert_true("SnektestError" in payload["all"])
     assert_true("skip" in payload["all"])
     assert_true("xfail" in payload["all"])
     assert_false("UnreachableError" in payload["all"])
+
+    installed_project = tmp_dir / "installed-project"
+    installed_tests = installed_project / "checks"
+    installed_tests.mkdir(parents=True)
+    _ = (installed_project / "pyproject.toml").write_text(
+        '[tool.snektest]\ntest_paths = ["checks"]\n',
+        encoding="utf-8",
+    )
+    installed_test = installed_tests / "test_installed_collection.py"
+    installed_test.write_text(
+        dedent("""
+            from snektest import test
+
+            @test()
+            def test_installed_case() -> None:
+                raise RuntimeError("collect-only executed the body")
+        """),
+        encoding="utf-8",
+    )
+    collect_only = _run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; "
+                f"sys.path.insert(0, {str(target_dir)!r}); "
+                "from snektest.cli import main; "
+                "sys.argv = ['snektest', '--collect-only']; "
+                "main()"
+            ),
+        ],
+        cwd=installed_project,
+    )
+    assert_eq(collect_only.returncode, 0, msg=collect_only.stderr)
+    installed_selector = (
+        f"{Path('checks') / 'test_installed_collection.py'}::test_installed_case"
+    )
+    assert_in(installed_selector, collect_only.stdout)
 
     type_checker = Path(sys.executable).with_name("ty")
     checked = _run(

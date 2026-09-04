@@ -15,6 +15,7 @@ from snektest.models import (
     UnexpectedPassResult,
 )
 from snektest.presenter.errors import print_failures as _print_failures
+from snektest.presenter.summary import print_slowest_tests as _print_slowest_tests
 from snektest.presenter.summary import print_summary as _print_summary
 
 console = Console()
@@ -231,6 +232,11 @@ def print_failures(
     )
 
 
+def print_slowest_tests(run_result: RunResult, *, count: int) -> None:
+    """Print the selected number of slowest completed tests."""
+    _print_slowest_tests(console, run_result, count=count)
+
+
 def print_summary(run_result: RunResult) -> None:
     """Print one normalized run summary."""
     _print_summary(console, run_result)
@@ -241,6 +247,7 @@ __all__ = [
     "humanize_bytes",
     "print_error",
     "print_failures",
+    "print_slowest_tests",
     "print_summary",
     "print_test_result",
     "print_test_result_to_console",
