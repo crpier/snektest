@@ -31,6 +31,7 @@ from snektest.models import (
     ExpectedFailureResult,
     FailedResult,
     PassedResult,
+    RunResult,
     RunTeardownDiagnostics,
     SkippedResult,
     TeardownFailure,
@@ -558,6 +559,8 @@ async def run_tests(  # noqa: PLR0913
     test_cases: Sequence[TestCase],
     *,
     capture_output: bool = True,
+    collection_output: str = "",
+    collection_warnings: tuple[str, ...] = (),
     pdb_on_failure: bool = False,
     timeout: float | None = None,  # noqa: ASYNC109
     post_mortem: Callable[[TracebackType], None] = pdb.post_mortem,
@@ -565,8 +568,8 @@ async def run_tests(  # noqa: PLR0913
     resolver: Callable[[Path], Path] = Path.resolve,
     benchmark_baseline: BenchmarkBaseline | None = None,
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
-) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
-    """Run a completed test plan and report progress through a small seam."""
+) -> RunResult:
+    """Run a completed test plan and report one normalized completion."""
     if reporter is None:
         reporter = ConsoleRunReporter()
 
@@ -619,16 +622,6 @@ async def run_tests(  # noqa: PLR0913
                 teardown_diagnostics.run_warnings = run_warnings
                 teardown_diagnostics.session_output = session_output
                 teardown_diagnostics.session_warnings = session_warnings
-            if test_results and (session_warnings or run_warnings):
-                final_result = test_results[-1]
-                test_results[-1] = replace(
-                    final_result,
-                    warnings=(
-                        *final_result.warnings,
-                        *session_warnings,
-                        *run_warnings,
-                    ),
-                )
             if not pdb_triggered and _maybe_debug_session_teardown(
                 session_teardown_failures,
                 live_diagnostics=live_diagnostics,
@@ -637,33 +630,17 @@ async def run_tests(  # noqa: PLR0913
             ):
                 pdb_triggered = True
 
-            (
-                has_test_failures,
-                has_fixture_teardown_failures,
-                has_session_teardown_failures,
-                has_run_teardown_failures,
-            ) = has_any_failures(
-                test_results,
-                session_teardown_failures,
-                run_teardown_failures,
-            )
-
-            session_output_for_display = None
-            if session_output and (
-                has_test_failures
-                or has_fixture_teardown_failures
-                or has_session_teardown_failures
-            ):
-                session_output_for_display = session_output
-
-            reporter.run_finished(
+            completed_run = RunResult.from_execution(
+                collection_output=collection_output,
+                collection_warnings=collection_warnings,
                 run_teardown_failures=run_teardown_failures,
-                run_teardown_output=(
-                    run_output if run_output and has_run_teardown_failures else None
-                ),
-                test_results=test_results,
+                run_teardown_output=run_output,
+                run_teardown_warnings=run_warnings,
                 session_teardown_failures=session_teardown_failures,
-                session_teardown_output=session_output_for_display,
+                session_teardown_output=session_output,
+                session_teardown_warnings=session_warnings,
+                test_results=test_results,
                 total_duration=time.monotonic() - total_duration,
             )
-    return test_results, session_teardown_failures, run_teardown_failures
+            reporter.run_finished(completed_run)
+    return completed_run

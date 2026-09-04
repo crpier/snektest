@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from rich.console import Console
 from rich.text import Text
 
@@ -10,25 +8,12 @@ from snektest.models import (
     ExceptionDiagnostic,
     ExpectedFailureResult,
     FailedResult,
-    PassedResult,
+    RunResult,
     SkippedResult,
     TeardownFailure,
     TestResult,
     UnexpectedPassResult,
 )
-
-
-@dataclass(frozen=True)
-class RunCounts:
-    passed: int
-    failed: int
-    errors: int
-    skipped: int
-    expected_failures: int
-    unexpected_passes: int
-    fixture_teardown_failed: int
-    run_teardown_failed: int
-    session_teardown_failed: int
 
 
 def _ellipsize_summary_detail(detail: str, max_width: int) -> str:
@@ -84,13 +69,12 @@ def _summarize_exception(exception: ExceptionDiagnostic) -> str:
     return f"{exception.type_name}: {first_line}"
 
 
-def _print_warnings(console: Console, test_results: list[TestResult]) -> None:
-    """Print warnings from test results."""
-    all_warnings = [w for result in test_results for w in result.warnings]
-    if all_warnings:
+def _print_warnings(console: Console, run_result: RunResult) -> None:
+    """Print warnings retained across all phases of the run."""
+    if run_result.warnings:
         console.print()
         console.rule("WARNINGS", style="bold yellow")
-        for warning in all_warnings:
+        for warning in run_result.warnings:
             console.print(warning, markup=False, style="yellow")
         console.print()
 
@@ -187,7 +171,7 @@ def _print_run_teardown_failures(
         )
 
 
-def _has_failures(counts: RunCounts) -> bool:
+def _has_failures(counts: RunResult) -> bool:
     return (
         counts.failed > 0
         or counts.errors > 0
@@ -198,11 +182,11 @@ def _has_failures(counts: RunCounts) -> bool:
     )
 
 
-def _has_summary_entries(counts: RunCounts) -> bool:
+def _has_summary_entries(counts: RunResult) -> bool:
     return _has_failures(counts) or counts.skipped > 0 or counts.expected_failures > 0
 
 
-def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str, str]:
+def _build_status_text(*, counts: RunResult) -> tuple[str, str]:
     """Build status text and set its color."""
     status_color = "red" if _has_failures(counts) else "green"
     status_text = ""
@@ -224,71 +208,23 @@ def _build_status_text(*, counts: RunCounts, total_duration: float) -> tuple[str
         )
     if counts.run_teardown_failed > 0:
         status_text += f"{counts.run_teardown_failed} run fixture teardown failed, "
-    status_text += f"{counts.passed} passed in {total_duration:.2f}s"
+    status_text += f"{counts.passed} passed in {counts.total_duration:.2f}s"
     return status_text, f"bold {status_color}"
 
 
-def print_summary(
-    console: Console,
-    test_results: list[TestResult],
-    total_duration: float,
-    run_teardown_failures: list[TeardownFailure] | None = None,
-    session_teardown_failures: list[TeardownFailure] | None = None,
-) -> None:
-    """Print test summary with counts and status."""
-    if session_teardown_failures is None:
-        session_teardown_failures = []
-    if run_teardown_failures is None:
-        run_teardown_failures = []
+def print_summary(console: Console, run_result: RunResult) -> None:
+    """Render counts already normalized by the completed run."""
+    _print_warnings(console, run_result)
 
-    passed = sum(
-        1 for result in test_results if isinstance(result.result, PassedResult)
-    )
-    failed = sum(
-        1 for result in test_results if isinstance(result.result, FailedResult)
-    )
-    errors = sum(1 for result in test_results if isinstance(result.result, ErrorResult))
-    skipped = sum(
-        1 for result in test_results if isinstance(result.result, SkippedResult)
-    )
-    expected_failures = sum(
-        1 for result in test_results if isinstance(result.result, ExpectedFailureResult)
-    )
-    unexpected_passes = sum(
-        1 for result in test_results if isinstance(result.result, UnexpectedPassResult)
-    )
-    fixture_teardown_failed = sum(
-        1 for result in test_results if result.fixture_teardown_failures
-    )
-    session_teardown_failed = len(session_teardown_failures)
-    run_teardown_failed = len(run_teardown_failures)
-
-    counts = RunCounts(
-        passed=passed,
-        failed=failed,
-        errors=errors,
-        skipped=skipped,
-        expected_failures=expected_failures,
-        unexpected_passes=unexpected_passes,
-        fixture_teardown_failed=fixture_teardown_failed,
-        run_teardown_failed=run_teardown_failed,
-        session_teardown_failed=session_teardown_failed,
-    )
-
-    _print_warnings(console, test_results)
-
-    if _has_summary_entries(counts):
+    if _has_summary_entries(run_result):
         console.rule("SUMMARY", style="wheat1")
-        _print_outcomes(console, test_results)
-        _print_test_failures(console, test_results)
-        _print_test_errors(console, test_results)
-        _print_fixture_teardown_failures(console, test_results)
-        _print_session_teardown_failures(console, session_teardown_failures)
-        _print_run_teardown_failures(console, run_teardown_failures)
+        _print_outcomes(console, run_result.test_results)
+        _print_test_failures(console, run_result.test_results)
+        _print_test_errors(console, run_result.test_results)
+        _print_fixture_teardown_failures(console, run_result.test_results)
+        _print_session_teardown_failures(console, run_result.session_teardown_failures)
+        _print_run_teardown_failures(console, run_result.run_teardown_failures)
         console.print()
 
-    status_text, status_style = _build_status_text(
-        counts=counts,
-        total_duration=total_duration,
-    )
+    status_text, status_style = _build_status_text(counts=run_result)
     console.rule(status_text, style=status_style)

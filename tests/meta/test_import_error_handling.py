@@ -1,5 +1,6 @@
 """Meta tests for handling import errors in test collection."""
 
+import json
 import subprocess
 import sys
 from textwrap import dedent
@@ -65,16 +66,14 @@ def test_import_error_does_not_hang() -> None:
             text=True,
             timeout=5,
         )
+        payload = json.loads(result.stdout)
         assert_ne(result.returncode, 0)
-        assert_in("Collection error:", result.stdout)
-        assert_in("Traceback (most recent call last):", result.stdout)
+        assert_eq(payload["kind"], "error")
+        assert_eq(payload["error"]["category"], "collection")
+        assert_eq(payload["error"]["cause"]["type"], "RuntimeError")
         assert_in(
-            'raise RuntimeError("Intentional import error for testing")', result.stdout
-        )
-        assert_in("RuntimeError: Intentional import error for testing", result.stdout)
-        assert_in(
-            "snektest.models.CollectionError: Error during collection:",
-            result.stdout,
+            'raise RuntimeError("Intentional import error for testing")',
+            payload["error"]["cause"]["traceback"][-1]["source"],
         )
         assert_not_in("0 passed", result.stdout)
     except subprocess.TimeoutExpired:

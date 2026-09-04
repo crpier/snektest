@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 import pdb  # noqa: T100
 import sys
 import warnings
@@ -10,7 +11,8 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any, TextIO, cast
+from tempfile import TemporaryFile
+from typing import Any, BinaryIO, Self, TextIO, cast
 
 
 class StdinProxy:
@@ -77,6 +79,59 @@ class StdinProxy:
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._original_stdin, name)
+
+
+class DescriptorOutputCapture:
+    """Temporarily quarantine writes to the process stdout descriptor.
+
+    Python stream capture cannot intercept `os.write` or output inherited by a
+    child process. This guard redirects descriptors 1 and 2 to a temporary file
+    until the structured adapter is ready to write its single document.
+    """
+
+    def __init__(self) -> None:
+        self._output_file: BinaryIO | None = None
+        self._saved_stderr: int | None = None
+        self._saved_stdout: int | None = None
+        self._text: str | None = None
+
+    def __enter__(self) -> Self:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        self._saved_stdout = os.dup(1)
+        self._saved_stderr = os.dup(2)
+        output_file = cast("BinaryIO", TemporaryFile(mode="w+b"))
+        self._output_file = output_file
+        os.dup2(output_file.fileno(), 1)
+        os.dup2(output_file.fileno(), 2)
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        _ = exc_info
+        self.release()
+
+    def release(self) -> str:
+        """Restore stdout and return every byte written while quarantined."""
+        if self._text is not None:
+            return self._text
+        output_file = self._output_file
+        saved_stderr = self._saved_stderr
+        saved_stdout = self._saved_stdout
+        if output_file is None or saved_stderr is None or saved_stdout is None:
+            return ""
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved_stdout, 1)
+        os.dup2(saved_stderr, 2)
+        os.close(saved_stdout)
+        os.close(saved_stderr)
+        output_file.seek(0)
+        self._text = output_file.read().decode("utf-8", errors="replace")
+        output_file.close()
+        self._output_file = None
+        self._saved_stderr = None
+        self._saved_stdout = None
+        return self._text
 
 
 @dataclass(frozen=True)

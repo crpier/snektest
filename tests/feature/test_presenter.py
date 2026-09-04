@@ -15,6 +15,7 @@ from snektest.models import (
     ExceptionDiagnostic,
     FailedResult,
     PassedResult,
+    RunResult,
     TestName,
     TestResult,
 )
@@ -34,6 +35,19 @@ def _traceback_from_exception(exc: BaseException) -> TracebackType:
 
 def _diagnostic_from_exception(exc: BaseException) -> ExceptionDiagnostic:
     return snapshot_exception(type(exc), exc, _traceback_from_exception(exc))
+
+
+def _completed_run(test_results: list[TestResult]) -> RunResult:
+    return RunResult.from_execution(
+        run_teardown_failures=[],
+        run_teardown_output=None,
+        run_teardown_warnings=(),
+        session_teardown_failures=[],
+        session_teardown_output=None,
+        session_teardown_warnings=(),
+        test_results=test_results,
+        total_duration=0.0,
+    )
 
 
 @test()
@@ -210,7 +224,7 @@ def test_print_summary_soft_wraps_long_names() -> None:
         warnings=(),
     )
 
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
+    print_summary(console, _completed_run([result]))
 
     text = console.export_text()
     assert_in(str(result.name), text)
@@ -233,8 +247,8 @@ def test_print_summary_error_without_message() -> None:
         warnings=(),
     )
 
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
+    print_summary(console, _completed_run([result]))
+    print_summary(console, _completed_run([result]))
 
 
 @test()
@@ -252,7 +266,7 @@ def test_print_summary_uses_one_line_exception_messages() -> None:
         warnings=(),
     )
 
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
+    print_summary(console, _completed_run([result]))
 
     text = console.export_text()
     assert_in("ERROR x.py::e - RuntimeError: first line", text)
@@ -275,7 +289,7 @@ def test_print_summary_truncates_long_exception_messages() -> None:
         warnings=(),
     )
 
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
+    print_summary(console, _completed_run([result]))
 
     failed_lines = [
         line for line in console.export_text().splitlines() if line.startswith("FAILED")
@@ -312,8 +326,8 @@ def test_print_summary_warnings_and_failed_without_message() -> None:
         warnings=(),
     )
 
-    print_summary(console, [passed, failed], 0.0, session_teardown_failures=None)
-    print_summary(console, [passed, failed], 0.0, session_teardown_failures=None)
+    print_summary(console, _completed_run([passed, failed]))
+    print_summary(console, _completed_run([passed, failed]))
     text = console.export_text()
     assert_in("WARNINGS", text)
     assert_in("SUMMARY", text)
@@ -394,7 +408,7 @@ def test_print_summary_keeps_detail_when_name_is_long() -> None:
         warnings=(),
     )
 
-    print_summary(console, [result], 0.0, session_teardown_failures=[])
+    print_summary(console, _completed_run([result]))
 
     assert_in("SENTINEL_DETAIL", console.export_text())
 

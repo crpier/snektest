@@ -35,6 +35,7 @@ from snektest.models import (
     ExpectedFailureResult,
     FilterItem,
     PassedResult,
+    RunResult,
     SkippedResult,
     TestName,
     TestResult,
@@ -107,10 +108,13 @@ def test_parse_cli_args_rejects_workers_with_pdb() -> None:
 
 
 @test()
-def test_parse_cli_args_rejects_uncaptured_json_output() -> None:
-    result = assert_isinstance(parse_cli_args(["-s", "--json-output", "."]), ParseError)
+def test_parse_cli_args_allows_uncaptured_json_output() -> None:
+    options = assert_isinstance(
+        parse_cli_args(["-s", "--json-output", "."]), CliOptions
+    )
 
-    assert_in("Cannot combine -s", result.message)
+    assert_eq(options.capture_output, False)
+    assert_eq(options.json_output, True)
 
 
 @test()
@@ -790,24 +794,16 @@ async def test_run_script_json_output_includes_markers() -> None:
             fixture_teardown_output=None,
             warnings=(),
         )
-        return type(
-            "Summary",
-            (),
-            {
-                "passed": 1,
-                "skipped": 0,
-                "expected_failures": 0,
-                "unexpected_passes": 0,
-                "failed": 0,
-                "errors": 0,
-                "fixture_teardown_failed": 0,
-                "run_teardown_failed": 0,
-                "session_teardown_failed": 0,
-                "run_teardown_failures": [],
-                "session_teardown_failures": [],
-                "test_results": [test_result],
-            },
-        )()
+        return RunResult.from_execution(
+            run_teardown_failures=[],
+            run_teardown_output=None,
+            run_teardown_warnings=(),
+            session_teardown_failures=[],
+            session_teardown_output=None,
+            session_teardown_warnings=(),
+            test_results=[test_result],
+            total_duration=0.0,
+        )
 
     buffer = StringIO()
     with contextlib.redirect_stdout(buffer):

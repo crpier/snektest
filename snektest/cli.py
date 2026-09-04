@@ -3,7 +3,8 @@ import json
 import sys
 import traceback
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
+from contextlib import nullcontext
+from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from typing import Literal, cast
@@ -14,33 +15,23 @@ from snektest.agent_docs import (
     get_example_source,
     get_examples_listing,
 )
-from snektest.benchmark_baseline import (
-    BenchmarkBaseline,
-    MachineFingerprint,
-    discover_project_root,
-)
+from snektest.benchmark_baseline import BenchmarkBaseline, discover_project_root
 from snektest.collection import collect_test_plan
+from snektest.diagnostics import snapshot_exception
 from snektest.execution import run_tests
+from snektest.junit import build_junit_xml
 from snektest.models import (
     ArgsError,
     BadRequestError,
+    BenchmarkBaselineRun,
+    CollectionDiagnostics,
     CollectionError,
-    EmptyCollectionError,
-    ErrorResult,
-    ExceptionDiagnostic,
-    ExpectedFailureResult,
-    FailedResult,
     FilterItem,
-    InvalidTestDefinitionError,
-    PassedResult,
     RunInfrastructureError,
-    RunTeardownDiagnostics,
-    SkippedResult,
-    TeardownFailure,
-    TestResult,
-    UnexpectedPassResult,
+    RunResult,
     UnreachableError,
 )
+from snektest.output import DescriptorOutputCapture
 from snektest.parallel import run_tests_parallel
 from snektest.presenter import print_error
 from snektest.reporting import (
@@ -49,43 +40,12 @@ from snektest.reporting import (
     NullRunReporter,
     RunReporter,
 )
-
-
-def _json_result_status(result: TestResult) -> str:
-    match result.result:
-        case PassedResult():
-            return "passed"
-        case SkippedResult():
-            return "skipped"
-        case ExpectedFailureResult():
-            return "expected_failure"
-        case UnexpectedPassResult():
-            return "unexpected_pass"
-        case FailedResult():
-            return "failed"
-        case ErrorResult():
-            return "error"
-
-
-def _json_exception(exception: ExceptionDiagnostic) -> dict[str, str]:
-    return {"type": exception.type_name, "message": exception.message}
-
-
-def _json_background_exception(
-    exception: ExceptionDiagnostic,
-) -> dict[str, object]:
-    return {
-        **_json_exception(exception),
-        "traceback": [
-            {
-                "file": frame.filename,
-                "function": frame.function_name,
-                "line": frame.lineno,
-                "source": frame.source_line,
-            }
-            for frame in exception.frames
-        ],
-    }
+from snektest.structured import (
+    build_json_error as _json_error_document,
+)
+from snektest.structured import (
+    build_json_summary,
+)
 
 
 def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
@@ -93,195 +53,23 @@ def _baseline_cli_error(error: BadRequestError, *, json_output: bool) -> int:
     if json_output:
         print(
             json.dumps(
-                {
-                    "error": {
-                        "type": type(error).__name__,
-                        "message": str(error),
-                    }
-                }
+                _json_error_document(
+                    category="configuration",
+                    exception=snapshot_exception(
+                        type(error), error, error.__traceback__
+                    ),
+                    exit_code=2,
+                    message=str(error),
+                    type_name=type(error).__name__,
+                )
             )
         )
         return 2
     raise error
 
 
-def _json_test_entry(result: TestResult) -> dict[str, object]:  # noqa: C901
-    entry: dict[str, object] = {
-        "name": str(result.name),
-        "duration": result.duration,
-        "fixture_teardown_output": result.fixture_teardown_output,
-        "markers": list(result.markers),
-        "status": _json_result_status(result),
-        "warnings": list(result.warnings),
-    }
-    match result.result:
-        case FailedResult(exception=exception):
-            entry["exception"] = _json_exception(exception)
-        case ErrorResult(exception=exception):
-            entry["exception"] = _json_exception(exception)
-        case (
-            SkippedResult(reason=reason)
-            | ExpectedFailureResult(reason=reason)
-            | UnexpectedPassResult(reason=reason)
-        ):
-            entry["reason"] = reason
-        case PassedResult(measurements=measurements):
-            if measurements:
-                entry["memory_measurements"] = [
-                    {
-                        "peak_bytes": measurement.peak_bytes,
-                        "growth_slope": measurement.growth_slope,
-                        "rounds": measurement.rounds,
-                        "peak_budget": measurement.peak_budget,
-                        "slope_budget": measurement.slope_budget,
-                    }
-                    for measurement in measurements
-                ]
-    benchmarks = result.result.benchmarks
-    comparisons_by_index = {
-        comparison.measurement_index: comparison
-        for comparison in result.result.benchmark_comparisons
-    }
-    if benchmarks:
-        benchmark_entries: list[dict[str, object]] = []
-        for index, benchmark in enumerate(benchmarks):
-            benchmark_entry: dict[str, object] = {
-                "name": benchmark.name,
-                "rounds": benchmark.rounds,
-                "warmup": benchmark.warmup,
-                "disable_gc": benchmark.disable_gc,
-                "min_seconds": benchmark.min_seconds,
-                "median_seconds": benchmark.median_seconds,
-                "p95_seconds": benchmark.p95_seconds,
-                "mean_seconds": benchmark.mean_seconds,
-                "stddev_seconds": benchmark.stddev_seconds,
-                "median_budget_seconds": benchmark.median_budget_seconds,
-                "p95_budget_seconds": benchmark.p95_budget_seconds,
-                "median_regression_below": benchmark.median_regression_below,
-                "regression_noise_floor_seconds": benchmark.regression_noise_floor_seconds,
-            }
-            comparison = comparisons_by_index.get(index)
-            if comparison is not None:
-                benchmark_entry["baseline_comparison"] = {
-                    "verdict": comparison.verdict,
-                    "baseline_median_seconds": comparison.baseline_median_seconds,
-                    "observed_median_seconds": comparison.observed_median_seconds,
-                    "change_ratio": comparison.change_ratio,
-                    "regression_below": comparison.regression_below,
-                    "noise_floor_seconds": comparison.noise_floor_seconds,
-                    "allowed_increase_seconds": comparison.allowed_increase_seconds,
-                    "limit_seconds": comparison.limit_seconds,
-                }
-            benchmark_entries.append(benchmark_entry)
-        entry["benchmark_measurements"] = benchmark_entries
-    if result.background_failures:
-        entry["background_failures"] = [
-            {
-                "origin": failure.origin,
-                "label": failure.label,
-                "exception": _json_background_exception(failure.exception),
-            }
-            for failure in result.background_failures
-        ]
-    if result.fixture_teardown_failures:
-        entry["fixture_teardown_failures"] = [
-            {
-                "fixture_name": failure.fixture_name,
-                "exception": _json_exception(failure.exception),
-            }
-            for failure in result.fixture_teardown_failures
-        ]
-    return entry
-
-
-def build_json_summary(summary: TestRunSummary) -> dict[str, object]:
-    output: dict[str, object] = {
-        "passed": summary.passed,
-        "skipped": summary.skipped,
-        "expected_failures": summary.expected_failures,
-        "unexpected_passes": summary.unexpected_passes,
-        "failed": summary.failed,
-        "errors": summary.errors,
-        "fixture_teardown_failed": summary.fixture_teardown_failed,
-        "run_teardown_failed": summary.run_teardown_failed,
-        "session_teardown_failed": summary.session_teardown_failed,
-        "run_teardown_output": getattr(summary, "run_teardown_output", None),
-        "run_teardown_warnings": list(getattr(summary, "run_teardown_warnings", ())),
-        "session_teardown_output": getattr(summary, "session_teardown_output", None),
-        "session_teardown_warnings": list(
-            getattr(summary, "session_teardown_warnings", ())
-        ),
-        "run_teardown_failures": [
-            {
-                "fixture_name": failure.fixture_name,
-                "exception": _json_exception(failure.exception),
-            }
-            for failure in summary.run_teardown_failures
-        ],
-        "session_teardown_failures": [
-            {
-                "fixture_name": failure.fixture_name,
-                "exception": _json_exception(failure.exception),
-            }
-            for failure in summary.session_teardown_failures
-        ],
-        "tests": [_json_test_entry(result) for result in summary.test_results],
-    }
-    baseline = getattr(summary, "benchmark_baseline", None)
-    if isinstance(baseline, BenchmarkBaselineRun):
-        machine_output: dict[str, object] | None = None
-        if baseline.machine is not None:
-            machine_output = {
-                "architecture": baseline.machine.architecture,
-                "logical_cpu_count": baseline.machine.logical_cpu_count,
-                "processor": baseline.machine.processor,
-                "python_implementation": baseline.machine.python_implementation,
-                "python_version": baseline.machine.python_version,
-                "system": baseline.machine.system,
-            }
-        output["benchmark_baseline"] = {
-            "mode": baseline.mode,
-            "path": baseline.path,
-            "machine": machine_output,
-            "written": baseline.written,
-            "updated_entries": baseline.updated_entries,
-        }
-    return output
-
-
-@dataclass(frozen=True)
-class BenchmarkBaselineRun:
-    """Machine-readable metadata for one compare or update CLI mode."""
-
-    mode: Literal["compare", "update"]
-    path: str
-    machine: MachineFingerprint | None = None
-    updated_entries: int = 0
-    written: bool = False
-
-
-@dataclass
-class TestRunSummary:
-    """Summary of test run results."""
-
-    total_tests: int
-    passed: int
-    skipped: int
-    expected_failures: int
-    unexpected_passes: int
-    failed: int
-    errors: int
-    fixture_teardown_failed: int
-    session_teardown_failed: int
-    test_results: list[TestResult]
-    session_teardown_failures: list[TeardownFailure]
-    run_teardown_failed: int = 0
-    run_teardown_failures: list[TeardownFailure] = field(default_factory=list)
-    run_teardown_output: str | None = None
-    run_teardown_warnings: tuple[str, ...] = ()
-    session_teardown_output: str | None = None
-    session_teardown_warnings: tuple[str, ...] = ()
-    benchmark_baseline: BenchmarkBaselineRun | None = None
+TestRunSummary = RunResult
+"""Compatibility name for the normalized programmatic run result."""
 
 
 type CliAction = Literal[
@@ -301,6 +89,7 @@ class CliOptions:
     example_name: str | None = None
     filters: tuple[str, ...] = ()
     json_output: bool = False
+    junit_output: str | None = None
     pdb_on_failure: bool = False
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
@@ -339,7 +128,9 @@ Options:
   --llms            Alias for --agent-docs
   --examples        List bundled examples
   --example NAME    Print a bundled example
-  --json-output     Print machine-readable JSON summary
+  --json-output     Print one versioned JSON document to stdout
+  --junit-output PATH
+                    Write a JUnit XML report
   --allow-empty     Exit successfully when no tests are selected
   --benchmark-baseline PATH
                     Compare opted-in benchmarks with a machine-bound baseline
@@ -510,6 +301,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     capture_output = True
     example_name: str | None = None
     json_output = False
+    junit_output: str | None = None
     mark: str | None = None
     pdb_on_failure = False
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
@@ -538,6 +330,13 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             capture_output = False
         elif arg == "--json-output":
             json_output = True
+        elif arg == "--junit-output":
+            if junit_output is not None:
+                return ParseError("Only one --junit-output value is supported")
+            consumed = _consume_flag_value(argv, index, arg)
+            if isinstance(consumed, ParseError):
+                return consumed
+            junit_output, index = consumed
         elif arg == "--allow-empty":
             allow_empty = True
         elif arg in {"--benchmark-baseline", "--update-benchmark-baseline"}:
@@ -589,20 +388,23 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             filters.append(arg)
         index += 1
 
+    if action is not None and json_output:
+        return ParseError("Cannot combine informational commands with --json-output")
     if action is not None and (
         filters
         or benchmark_baseline is not None
+        or junit_output is not None
         or update_benchmark_baseline is not None
     ):
         return ParseError(
             "Cannot combine informational commands with test filters or baseline options"
         )
+    if pdb_on_failure and json_output:
+        return ParseError("Cannot combine --pdb with --json-output")
     if pdb_on_failure and workers is not None:
         return ParseError(
             "Cannot combine --pdb with --workers; rerun without --workers to debug locally"
         )
-    if not capture_output and json_output:
-        return ParseError("Cannot combine -s with --json-output")
     if action is None and not filters:
         filters.append(".")
 
@@ -614,6 +416,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         example_name=example_name,
         filters=tuple(filters),
         json_output=json_output,
+        junit_output=junit_output,
         mark=mark,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
@@ -632,36 +435,35 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
-    teardown_diagnostics: RunTeardownDiagnostics | None = None,
-) -> tuple[list[TestResult], list[TeardownFailure], list[TeardownFailure]]:
-    test_cases = await asyncio.to_thread(
-        collect_test_plan,
-        filter_items,
-        allow_empty=allow_empty,
-        capture_output=capture_output,
-        mark=mark,
-    )
+) -> RunResult:
+    collection_diagnostics = CollectionDiagnostics()
+    try:
+        test_cases = await asyncio.to_thread(
+            collect_test_plan,
+            filter_items,
+            allow_empty=allow_empty,
+            capture_output=capture_output,
+            diagnostics=collection_diagnostics,
+            mark=mark,
+        )
+    except CollectionError as error:
+        error.collection_output = collection_diagnostics.output
+        error.collection_warnings = collection_diagnostics.warnings
+        raise
     return await run_tests(
         test_cases,
         capture_output=capture_output,
+        collection_output=collection_diagnostics.output,
+        collection_warnings=collection_diagnostics.warnings,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
         reporter=reporter,
         benchmark_baseline=benchmark_baseline,
-        teardown_diagnostics=teardown_diagnostics,
     )
 
 
-def exit_code_from_summary(summary: TestRunSummary) -> int:
-    has_failures = (
-        summary.failed > 0
-        or summary.errors > 0
-        or summary.unexpected_passes > 0
-        or summary.fixture_teardown_failed > 0
-        or summary.run_teardown_failed > 0
-        or summary.session_teardown_failed > 0
-    )
-    return 1 if has_failures else 0
+def exit_code_from_summary(summary: RunResult) -> int:
+    return summary.exit_code
 
 
 async def run_tests_programmatic(  # noqa: PLR0913
@@ -675,7 +477,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
     workers: WorkerCount | None = None,
-) -> TestRunSummary:
+) -> RunResult:
     """Run tests and return structured results instead of printing.
 
     This is the programmatic API for testing snektest itself.
@@ -687,7 +489,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         reporter: Optional progress reporter. Defaults to no presentation side effects.
 
     Returns:
-        TestRunSummary with test results and counts
+        RunResult with test results and normalized counts
     """
     if mark is not None and not _is_valid_mark_value(mark):
         raise BadRequestError(_invalid_mark_message(mark))
@@ -700,13 +502,8 @@ async def run_tests_programmatic(  # noqa: PLR0913
         raise BadRequestError(msg)
 
     selected_reporter = reporter or NullRunReporter()
-    teardown_diagnostics = RunTeardownDiagnostics()
     if workers is None:
-        (
-            test_results,
-            session_teardown_failures,
-            run_teardown_failures,
-        ) = await _run_tests_with_collected_plan(
+        return await _run_tests_with_collected_plan(
             filter_items,
             allow_empty=allow_empty,
             capture_output=capture_output,
@@ -715,65 +512,46 @@ async def run_tests_programmatic(  # noqa: PLR0913
             timeout=timeout,
             reporter=selected_reporter,
             benchmark_baseline=benchmark_baseline,
-            teardown_diagnostics=teardown_diagnostics,
         )
-    else:
-        if pdb_on_failure:
-            msg = "Cannot combine pdb_on_failure with workers"
-            raise BadRequestError(msg)
-        (
-            test_results,
-            session_teardown_failures,
-            run_teardown_failures,
-        ) = await run_tests_parallel(
-            filter_items,
-            allow_empty=allow_empty,
-            capture_output=capture_output,
-            mark=mark,
-            reporter=selected_reporter,
-            timeout=timeout,
-            workers=workers,
-            benchmark_baseline=benchmark_baseline,
-            teardown_diagnostics=teardown_diagnostics,
-        )
-
-    return TestRunSummary(
-        total_tests=len(test_results),
-        passed=sum(1 for r in test_results if isinstance(r.result, PassedResult)),
-        failed=sum(1 for r in test_results if isinstance(r.result, FailedResult)),
-        errors=sum(1 for r in test_results if isinstance(r.result, ErrorResult)),
-        skipped=sum(1 for r in test_results if isinstance(r.result, SkippedResult)),
-        expected_failures=sum(
-            1 for r in test_results if isinstance(r.result, ExpectedFailureResult)
-        ),
-        unexpected_passes=sum(
-            1 for r in test_results if isinstance(r.result, UnexpectedPassResult)
-        ),
-        fixture_teardown_failed=sum(
-            1 for result in test_results if result.fixture_teardown_failures
-        ),
-        run_teardown_failed=len(run_teardown_failures),
-        session_teardown_failed=len(session_teardown_failures),
-        run_teardown_failures=run_teardown_failures,
-        run_teardown_output=teardown_diagnostics.run_output,
-        run_teardown_warnings=teardown_diagnostics.run_warnings,
-        test_results=test_results,
-        session_teardown_failures=session_teardown_failures,
-        session_teardown_output=teardown_diagnostics.session_output,
-        session_teardown_warnings=teardown_diagnostics.session_warnings,
+    if pdb_on_failure:
+        msg = "Cannot combine pdb_on_failure with workers"
+        raise BadRequestError(msg)
+    return await run_tests_parallel(
+        filter_items,
+        allow_empty=allow_empty,
+        capture_output=capture_output,
+        mark=mark,
+        reporter=selected_reporter,
+        timeout=timeout,
+        workers=workers,
+        benchmark_baseline=benchmark_baseline,
     )
 
 
-async def run_script(  # noqa: C901, PLR0911, PLR0912
+async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
     argv: list[str] | None = None,
     *,
     run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
     | None = None,
 ) -> int:
     """Parse arguments and run tests."""
-    parsed = parse_cli_args(sys.argv[1:] if argv is None else argv)
+    arguments = sys.argv[1:] if argv is None else argv
+    json_requested = "--json-output" in arguments
+    parsed = parse_cli_args(arguments)
     if isinstance(parsed, ParseError):
-        print_error(parsed.message)
+        if json_requested:
+            print(
+                json.dumps(
+                    _json_error_document(
+                        category="usage",
+                        exit_code=2,
+                        message=parsed.message,
+                        type_name="ParseError",
+                    )
+                )
+            )
+        else:
+            print_error(parsed.message)
         return 2
 
     options = parsed
@@ -783,8 +561,23 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
 
     try:
         filter_items = [FilterItem(item) for item in options.filters]
-    except ArgsError as e:
-        print_error(str(e))
+    except ArgsError as error:
+        if options.json_output:
+            print(
+                json.dumps(
+                    _json_error_document(
+                        category="usage",
+                        exception=snapshot_exception(
+                            type(error), error, error.__traceback__
+                        ),
+                        exit_code=2,
+                        message=str(error),
+                        type_name=type(error).__name__,
+                    )
+                )
+            )
+        else:
+            print_error(str(error))
         return 2
 
     project_root = discover_project_root()
@@ -802,7 +595,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
     runner = run_tests_programmatic_fn or run_tests_programmatic
     deferred_reporter: DeferredRunReporter | None = None
     if options.json_output:
-        reporter: RunReporter = NullRunReporter(retain_passed_output=False)
+        reporter: RunReporter = NullRunReporter(retain_passed_output=True)
     elif (
         options.update_benchmark_baseline is not None
         or options.benchmark_baseline is not None
@@ -810,40 +603,125 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
         deferred_reporter = DeferredRunReporter(ConsoleRunReporter())
         reporter = deferred_reporter
     else:
-        reporter = ConsoleRunReporter()
-    try:
-        summary = cast(
-            "TestRunSummary",
-            await runner(
-                filter_items,
-                allow_empty=options.allow_empty,
-                capture_output=options.capture_output,
-                pdb_on_failure=options.pdb_on_failure,
-                mark=options.mark,
-                timeout=options.timeout,
-                reporter=reporter,
-                benchmark_baseline=benchmark_baseline,
-                workers=options.workers,
-            ),
+        reporter = ConsoleRunReporter(
+            retain_passed_output=options.junit_output is not None
         )
-    except asyncio.CancelledError:
-        return 2
-    except (EmptyCollectionError, InvalidTestDefinitionError) as error:
-        if options.json_output:
-            print(
-                json.dumps(
-                    {
-                        "error": {
-                            "type": "CollectionError",
-                            "message": str(error),
-                        }
-                    }
-                )
+    descriptor_capture = DescriptorOutputCapture() if options.json_output else None
+    capture_context = descriptor_capture or nullcontext()
+    structured_error: dict[str, object] | None = None
+    structured_exit_code = 2
+    summary: RunResult | None = None
+    with capture_context:
+        try:
+            summary = cast(
+                "RunResult",
+                await runner(
+                    filter_items,
+                    allow_empty=options.allow_empty,
+                    capture_output=options.capture_output,
+                    pdb_on_failure=options.pdb_on_failure,
+                    mark=options.mark,
+                    timeout=options.timeout,
+                    reporter=reporter,
+                    benchmark_baseline=benchmark_baseline,
+                    workers=options.workers,
+                ),
             )
-            return 2
-        raise
-    except BadRequestError as error:
-        return _baseline_cli_error(error, json_output=options.json_output)
+        except asyncio.CancelledError as error:
+            if not options.json_output:
+                return 2
+            structured_error = _json_error_document(
+                category="interrupted",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except CollectionError as error:
+            if not options.json_output:
+                raise
+            structured_error = _json_error_document(
+                category="collection",
+                exception=(
+                    error.collection_diagnostic
+                    or snapshot_exception(type(error), error, error.__traceback__)
+                ),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+            structured_error["collection_output"] = error.collection_output
+            structured_error["collection_warnings"] = list(error.collection_warnings)
+        except BadRequestError as error:
+            if not options.json_output:
+                raise
+            structured_error = _json_error_document(
+                category="configuration",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except RunInfrastructureError as error:
+            if not options.json_output:
+                raise
+            structured_error = _json_error_document(
+                category="infrastructure",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except UnreachableError as error:
+            if not options.json_output:
+                raise
+            structured_error = _json_error_document(
+                category="internal",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except SystemExit as error:
+            if not options.json_output:
+                raise
+            structured_exit_code = error.code if isinstance(error.code, int) else 2
+            structured_error = _json_error_document(
+                category="interrupted",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=structured_exit_code,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except KeyboardInterrupt as error:
+            if not options.json_output:
+                raise
+            structured_error = _json_error_document(
+                category="interrupted",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=2,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+        except Exception as error:
+            if not options.json_output:
+                raise
+            structured_exit_code = 1
+            structured_error = _json_error_document(
+                category="unexpected",
+                exception=snapshot_exception(type(error), error, error.__traceback__),
+                exit_code=structured_exit_code,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+    uncaptured_output = descriptor_capture.release() if descriptor_capture else ""
+    if structured_error is not None:
+        structured_error["uncaptured_output"] = uncaptured_output
+        print(json.dumps(structured_error))
+        return structured_exit_code
+    if summary is None:
+        message = "test runner returned neither a run nor an error"
+        raise UnreachableError(message)
 
     if benchmark_baseline is not None:
         summary.benchmark_baseline = BenchmarkBaselineRun(
@@ -882,11 +760,29 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912
                 )
         summary.benchmark_baseline = baseline_run
 
+    if options.junit_output is not None:
+        try:
+            _ = await asyncio.to_thread(
+                Path(options.junit_output).write_text,
+                build_junit_xml(summary),
+                encoding="utf-8",
+            )
+        except OSError as error:
+            message = f"Could not write JUnit output `{options.junit_output}`: {error}"
+            raise BadRequestError(message) from error
+
     if deferred_reporter is not None:
         deferred_reporter.finish()
 
     if options.json_output:
-        print(json.dumps(build_json_summary(summary)))
+        print(
+            json.dumps(
+                build_json_summary(
+                    summary,
+                    uncaptured_output=uncaptured_output,
+                )
+            )
+        )
 
     return exit_code_from_summary(summary)
 
@@ -897,35 +793,75 @@ def main() -> None:
     sys.exit(main_inner(async_runner=async_runner))
 
 
-def main_inner(  # noqa: PLR0911
+def main_inner(  # noqa: C901, PLR0911, PLR0912
     *,
     async_runner: Callable[[Coroutine[object, object, int]], int],
     argv: list[str] | None = None,
 ) -> int:
-    coroutine = run_script(argv)
+    arguments = sys.argv[1:] if argv is None else argv
+    json_requested = "--json-output" in arguments
+    coroutine = run_script(arguments)
+
+    def render_error(
+        error: BaseException,
+        *,
+        category: str,
+        exit_code: int,
+    ) -> int:
+        if json_requested:
+            diagnostic = (
+                error.collection_diagnostic
+                if isinstance(error, CollectionError)
+                else None
+            ) or snapshot_exception(type(error), error, error.__traceback__)
+            document = _json_error_document(
+                category=category,
+                exception=diagnostic,
+                exit_code=exit_code,
+                message=str(error),
+                type_name=type(error).__name__,
+            )
+            if isinstance(error, CollectionError):
+                document["collection_output"] = error.collection_output
+                document["collection_warnings"] = list(error.collection_warnings)
+            print(json.dumps(document))
+        return exit_code
+
     try:
         return async_runner(coroutine)
-    except CollectionError as e:
-        if e.__cause__ is None:
-            print_error(f"Collection error: {e}")
+    except CollectionError as error:
+        if json_requested:
+            return render_error(error, category="collection", exit_code=2)
+        if error.__cause__ is None:
+            print_error(f"Collection error: {error}")
         else:
-            formatted = "".join(traceback.format_exception(e)).rstrip()
+            formatted = "".join(traceback.format_exception(error)).rstrip()
             print_error(f"Collection error:\n{formatted}")
         return 2
-    except BadRequestError as e:
-        print_error(f"Bad request error: {e}")
+    except BadRequestError as error:
+        if json_requested:
+            return render_error(error, category="configuration", exit_code=2)
+        print_error(f"Bad request error: {error}")
         return 2
-    except RunInfrastructureError as e:
-        print_error(f"Run infrastructure error: {e}")
+    except RunInfrastructureError as error:
+        if json_requested:
+            return render_error(error, category="infrastructure", exit_code=2)
+        print_error(f"Run infrastructure error: {error}")
         return 2
-    except UnreachableError as e:
-        print_error(f"Internal error: {e}")
+    except UnreachableError as error:
+        if json_requested:
+            return render_error(error, category="internal", exit_code=2)
+        print_error(f"Internal error: {error}")
         return 2
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as error:
+        if json_requested:
+            return render_error(error, category="interrupted", exit_code=2)
         print_error("Interrupted by user")
         return 2
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
+    except Exception as error:
+        if json_requested:
+            return render_error(error, category="unexpected", exit_code=1)
+        print_error(f"Unexpected error: {error}")
         return 1
     finally:
         coroutine.close()

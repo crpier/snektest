@@ -1,9 +1,9 @@
 """Adapters for reporting test run progress and completion."""
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Protocol
 
-from snektest.models import PassedResult, TeardownFailure, TestResult
+from snektest.models import PassedResult, RunResult, TestResult
 from snektest.presenter import print_failures, print_summary, print_test_result
 
 
@@ -21,17 +21,8 @@ class RunReporter(Protocol):
     def test_finished(self, test_result: TestResult) -> None:
         """Observe one completed test result before retention policy is applied."""
 
-    def run_finished(  # noqa: PLR0913
-        self,
-        *,
-        run_teardown_failures: list[TeardownFailure],
-        run_teardown_output: str | None,
-        test_results: list[TestResult],
-        session_teardown_failures: list[TeardownFailure],
-        session_teardown_output: str | None,
-        total_duration: float,
-    ) -> None:
-        """Observe final run results after session fixture teardown."""
+    def run_finished(self, run_result: RunResult) -> None:
+        """Observe one normalized result after all fixture teardown."""
 
 
 def result_for_retention(
@@ -55,34 +46,33 @@ def result_for_retention(
 class ConsoleRunReporter:
     """Reporter adapter that renders the human-readable console output."""
 
-    retain_passed_output = False
+    def __init__(self, *, retain_passed_output: bool = False) -> None:
+        self.retain_passed_output: bool = retain_passed_output
 
     def test_finished(self, test_result: TestResult) -> None:
         print_test_result(test_result)
 
-    def run_finished(  # noqa: PLR0913
-        self,
-        *,
-        run_teardown_failures: list[TeardownFailure],
-        run_teardown_output: str | None,
-        test_results: list[TestResult],
-        session_teardown_failures: list[TeardownFailure],
-        session_teardown_output: str | None,
-        total_duration: float,
-    ) -> None:
+    def run_finished(self, run_result: RunResult) -> None:
+        show_session_output = (
+            run_result.failed > 0
+            or run_result.errors > 0
+            or run_result.fixture_teardown_failed > 0
+            or run_result.session_teardown_failed > 0
+        )
         print_failures(
-            test_results,
-            run_teardown_failures=run_teardown_failures,
-            run_teardown_output=run_teardown_output,
-            session_teardown_failures=session_teardown_failures,
-            session_teardown_output=session_teardown_output,
+            run_result.test_results,
+            run_teardown_failures=run_result.run_teardown_failures,
+            run_teardown_output=(
+                run_result.run_teardown_output
+                if run_result.run_teardown_failed > 0
+                else None
+            ),
+            session_teardown_failures=run_result.session_teardown_failures,
+            session_teardown_output=(
+                run_result.session_teardown_output if show_session_output else None
+            ),
         )
-        print_summary(
-            test_results,
-            run_teardown_failures=run_teardown_failures,
-            session_teardown_failures=session_teardown_failures,
-            total_duration=total_duration,
-        )
+        print_summary(run_result)
 
 
 class NullRunReporter:
@@ -94,34 +84,8 @@ class NullRunReporter:
     def test_finished(self, test_result: TestResult) -> None:
         _ = test_result
 
-    def run_finished(  # noqa: PLR0913
-        self,
-        *,
-        run_teardown_failures: list[TeardownFailure],
-        run_teardown_output: str | None,
-        test_results: list[TestResult],
-        session_teardown_failures: list[TeardownFailure],
-        session_teardown_output: str | None,
-        total_duration: float,
-    ) -> None:
-        _ = (
-            run_teardown_failures,
-            run_teardown_output,
-            test_results,
-            session_teardown_failures,
-            session_teardown_output,
-            total_duration,
-        )
-
-
-@dataclass(frozen=True)
-class _DeferredRunFinished:
-    run_teardown_failures: list[TeardownFailure]
-    run_teardown_output: str | None
-    test_results: list[TestResult]
-    session_teardown_failures: list[TeardownFailure]
-    session_teardown_output: str | None
-    total_duration: float
+    def run_finished(self, run_result: RunResult) -> None:
+        _ = run_result
 
 
 class DeferredRunReporter:
@@ -129,44 +93,21 @@ class DeferredRunReporter:
 
     def __init__(self, reporter: RunReporter) -> None:
         self._reporter: RunReporter = reporter
-        self._run_finished: _DeferredRunFinished | None = None
+        self._run_finished: RunResult | None = None
         self.retain_passed_output: bool = reporter.retain_passed_output
 
     def test_finished(self, test_result: TestResult) -> None:
         self._reporter.test_finished(test_result)
 
-    def run_finished(  # noqa: PLR0913
-        self,
-        *,
-        run_teardown_failures: list[TeardownFailure],
-        run_teardown_output: str | None,
-        test_results: list[TestResult],
-        session_teardown_failures: list[TeardownFailure],
-        session_teardown_output: str | None,
-        total_duration: float,
-    ) -> None:
-        self._run_finished = _DeferredRunFinished(
-            run_teardown_failures=run_teardown_failures,
-            run_teardown_output=run_teardown_output,
-            test_results=test_results,
-            session_teardown_failures=session_teardown_failures,
-            session_teardown_output=session_teardown_output,
-            total_duration=total_duration,
-        )
+    def run_finished(self, run_result: RunResult) -> None:
+        self._run_finished = run_result
 
     def finish(self) -> None:
         """Emit the final summary after any post-run persistence succeeds."""
         run_finished = self._run_finished
         if run_finished is None:
             return
-        self._reporter.run_finished(
-            run_teardown_failures=run_finished.run_teardown_failures,
-            run_teardown_output=run_finished.run_teardown_output,
-            test_results=run_finished.test_results,
-            session_teardown_failures=run_finished.session_teardown_failures,
-            session_teardown_output=run_finished.session_teardown_output,
-            total_duration=run_finished.total_duration,
-        )
+        self._reporter.run_finished(run_finished)
 
 
 __all__ = [

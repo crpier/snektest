@@ -8,6 +8,7 @@ from snektest.models import (
     FailedResult,
     MemoryMeasurement,
     PassedResult,
+    RunResult,
     SkippedResult,
     TeardownFailure,
     TestResult,
@@ -230,20 +231,9 @@ def print_failures(
     )
 
 
-def print_summary(
-    test_results: list[TestResult],
-    total_duration: float,
-    run_teardown_failures: list[TeardownFailure] | None = None,
-    session_teardown_failures: list[TeardownFailure] | None = None,
-) -> None:
-    """Print test summary."""
-    _print_summary(
-        console,
-        test_results,
-        total_duration,
-        run_teardown_failures=run_teardown_failures,
-        session_teardown_failures=session_teardown_failures,
-    )
+def print_summary(run_result: RunResult) -> None:
+    """Print one normalized run summary."""
+    _print_summary(console, run_result)
 
 
 __all__ = [

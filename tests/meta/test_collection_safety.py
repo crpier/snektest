@@ -12,7 +12,6 @@ from typing import Any, cast
 from snektest import (
     Param,
     assert_eq,
-    assert_not_in,
     assert_raises,
     fail,
     load_fixture,
@@ -70,8 +69,8 @@ def test_import_output_and_warnings_do_not_corrupt_json(
     assert_eq(result.returncode, 0)
     assert_eq(summary["passed"], 1)
     assert_eq(summary["tests"][0]["warnings"], [])
-    assert_not_in("import output", result.stdout)
-    assert_not_in("import warning", result.stdout)
+    assert_eq(summary["collection_output"], "import output\n")
+    assert_eq(len(summary["collection_warnings"]), 1)
 
 
 @test(mark="medium")

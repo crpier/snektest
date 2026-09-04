@@ -9,6 +9,7 @@ from importlib import import_module
 from importlib.machinery import ModuleSpec
 from importlib.util import module_from_spec, spec_from_file_location
 from inspect import isfunction
+from io import StringIO
 from pathlib import Path
 from shutil import which
 from sys import modules
@@ -22,6 +23,7 @@ from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.decorators import reset_run_fixture_catalog
 from snektest.models import (
     BadRequestError,
+    CollectionDiagnostics,
     CollectionError,
     EmptyCollectionError,
     FilterItem,
@@ -383,12 +385,26 @@ def collect_test_plan(
     *,
     allow_empty: bool = False,
     capture_output: bool = False,
+    diagnostics: CollectionDiagnostics | None = None,
     mark: str | None = None,
 ) -> list[TestCase]:
     """Collect one complete plan under process-global import/output guards."""
-    with _COLLECTION_LOCK, maybe_capture_output(capture_output):
-        return collect_tests_from_filters(
-            filter_items,
-            allow_empty=allow_empty,
-            mark=mark,
-        )
+    output = StringIO()
+    warnings: list[str] = []
+    with _COLLECTION_LOCK:
+        try:
+            with maybe_capture_output(capture_output) as (output, warnings):
+                test_cases = collect_tests_from_filters(
+                    filter_items,
+                    allow_empty=allow_empty,
+                    mark=mark,
+                )
+        except BaseException:
+            if diagnostics is not None:
+                diagnostics.output = output.getvalue()
+                diagnostics.warnings = tuple(warnings)
+            raise
+        if diagnostics is not None:
+            diagnostics.output = output.getvalue()
+            diagnostics.warnings = tuple(warnings)
+        return test_cases

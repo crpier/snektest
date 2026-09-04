@@ -33,7 +33,7 @@ def _assert_rejected_empty_selection(result: subprocess.CompletedProcess[str]) -
     rejection = _json_output(result)
 
     assert_eq(result.returncode, 2)
-    assert_eq(rejection["error"]["type"], "CollectionError")
+    assert_eq(rejection["error"]["type"], "EmptyCollectionError")
     assert_in("No tests selected", rejection["error"]["message"])
 
 
@@ -159,7 +159,7 @@ def test_bare_test_decorator_is_a_clear_collection_error() -> None:
     error = _json_output(result)["error"]
 
     assert_eq(result.returncode, 2)
-    assert_eq(error["type"], "CollectionError")
+    assert_eq(error["type"], "InvalidTestDefinitionError")
     assert_in("Use @test()", error["message"])
 
 
