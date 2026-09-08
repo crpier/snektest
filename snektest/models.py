@@ -508,7 +508,7 @@ class BackgroundFailure:
 
     exception: ExceptionDiagnostic
     label: str
-    origin: Literal["thread", "thread_leak", "unraisable"]
+    origin: Literal["thread", "thread_leak", "unraisable", "task_cleanup"]
 
 
 type TestStatus = Literal[

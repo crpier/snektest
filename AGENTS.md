@@ -203,7 +203,7 @@ A fixture that returns while its tasks remain pending receives an attributed
 teardown failure. Test-owned leaks are cancelled after function teardown. New
 tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
-the owning test or fixture fails.
+the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
 ### Thread Observability
 

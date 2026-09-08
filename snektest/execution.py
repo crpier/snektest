@@ -142,6 +142,7 @@ def _with_background_failures(
 ) -> TestResult:
     if not failures:
         return test_result
+    failures = [*test_result.background_failures, *failures]
     if isinstance(test_result.result, (FailedResult, ErrorResult)):
         return replace(test_result, background_failures=tuple(failures))
 
@@ -394,6 +395,14 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
         fixture_teardown_output=fixture_teardown_output_value,
         ordinal=test_case.ordinal,
         warnings=(*captured_warnings, *fixture_teardown_warnings),
+        background_failures=tuple(
+            BackgroundFailure(
+                exception=diagnostic,
+                label="Abandoned task finalization",
+                origin="task_cleanup",
+            )
+            for diagnostic in task_cleanup.failures
+        ),
     )
 
 
