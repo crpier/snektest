@@ -70,12 +70,19 @@ class _PendingAsyncSessionFixtureSetup:
 
 @dataclass(frozen=True)
 class _PendingAsyncRunFixtureSetup:
-    task: asyncio.Task[bytes]
+    task: asyncio.Task[bytes | _RunFixtureInterruption]
 
 
 @dataclass(frozen=True)
 class _RunFixturePublicationFailure:
     message: str
+
+
+@dataclass(frozen=True)
+class _RunFixtureInterruption:
+    """Carry setup interruption through a child task without stopping its loop."""
+
+    interruption: BaseException
 
 
 async def _teardown_async_fixture(
@@ -185,7 +192,9 @@ class FixtureRegistry:
         self._run_copies: dict[object, object] = {}
         self._run_order: list[object] = []
         self._run_task_owners: set[object] = set()
-        self._pending_run_tasks: set[asyncio.Task[bytes]] = set()
+        self._pending_run_tasks: set[asyncio.Task[bytes | _RunFixtureInterruption]] = (
+            set()
+        )
         self._function_stack: list[
             tuple[str, AsyncGenerator[Any] | Generator[Any]]
         ] = []
@@ -342,6 +351,8 @@ class FixtureRegistry:
         slot = self._run.get(handle.key)
         if slot is not None:
             cached = slot[1]
+            if isinstance(cached, _RunFixtureInterruption):
+                raise cached.interruption
             if isinstance(cached, _RunFixturePublicationFailure):
                 raise FixtureError(cached.message)
             if isinstance(cached, _PendingAsyncRunFixtureSetup):
@@ -363,11 +374,10 @@ class FixtureRegistry:
                 descriptor = next(generator)
             payload = self._serialize_run_descriptor(handle.name, descriptor)
         except BaseException as exc:
-            message = f"Run fixture {handle.name} publication failed: {type(exc).__name__}: {exc}"
-            failure = _RunFixturePublicationFailure(message)
-            self._run[handle.key] = (generator, failure, handle.name)
-            self._run_order.append(handle.key)
-            raise FixtureError(message) from None
+            failure = self._record_run_setup_failure(handle, generator, exc)
+            if isinstance(failure, _RunFixtureInterruption):
+                raise
+            raise FixtureError(failure.message) from None
         self._run[handle.key] = (generator, payload, handle.name)
         self._run_order.append(handle.key)
         self._run_task_owners.add(generator)
@@ -377,7 +387,7 @@ class FixtureRegistry:
         _ensure_session_fixture_has_no_parameters(handle.key, handle.name)
         generator = handle.make()
 
-        async def setup() -> bytes:
+        async def setup() -> bytes | _RunFixtureInterruption:
             try:
                 with (
                     self._fixture_setup_scope(handle.key, handle.name),
@@ -387,11 +397,10 @@ class FixtureRegistry:
                     descriptor = await anext(generator)
                 payload = self._serialize_run_descriptor(handle.name, descriptor)
             except BaseException as exc:
-                message = f"Run fixture {handle.name} publication failed: {type(exc).__name__}: {exc}"
-                failure = _RunFixturePublicationFailure(message)
-                self._run[handle.key] = (generator, failure, handle.name)
-                self._run_order.append(handle.key)
-                raise FixtureError(message) from None
+                failure = self._record_run_setup_failure(handle, generator, exc)
+                if isinstance(failure, _RunFixtureInterruption):
+                    return failure
+                raise FixtureError(failure.message) from None
             self._run[handle.key] = (generator, payload, handle.name)
             self._run_order.append(handle.key)
             self._run_task_owners.add(generator)
@@ -407,6 +416,27 @@ class FixtureRegistry:
         )
         return cast("Coroutine[bytes]", self._await_run_setup(task))
 
+    def _record_run_setup_failure(
+        self,
+        handle: _RunFixtureHandle,
+        generator: AsyncGenerator[Any] | Generator[Any],
+        error: BaseException,
+    ) -> _RunFixtureInterruption | _RunFixturePublicationFailure:
+        """Retain cleanup ownership without relabeling interruption as publication."""
+        failure: _RunFixtureInterruption | _RunFixturePublicationFailure
+        if isinstance(error, (SystemExit, KeyboardInterrupt, asyncio.CancelledError)):
+            failure = _RunFixtureInterruption(error)
+        else:
+            diagnostic = snapshot_exception(type(error), error, error.__traceback__)
+            failure = _RunFixturePublicationFailure(
+                f"Run fixture {handle.name} publication failed: "
+                f"{diagnostic.type_name}: {diagnostic.message}"
+            )
+        self._run[handle.key] = (generator, failure, handle.name)
+        self._run_order.append(handle.key)
+        self._run_task_owners.add(generator)
+        return failure
+
     @staticmethod
     def _serialize_run_descriptor(name: str, descriptor: object) -> bytes:
         payload = dumps(descriptor, protocol=HIGHEST_PROTOCOL)
@@ -418,13 +448,20 @@ class FixtureRegistry:
             raise FixtureError(msg)
         return payload
 
-    def _run_setup_finished(self, task: asyncio.Task[bytes]) -> None:
+    def _run_setup_finished(
+        self, task: asyncio.Task[bytes | _RunFixtureInterruption]
+    ) -> None:
         self._pending_run_tasks.discard(task)
         if not task.cancelled():
             _ = task.exception()
 
-    async def _await_run_setup(self, task: asyncio.Task[bytes]) -> bytes:
-        return await asyncio.shield(task)
+    async def _await_run_setup(
+        self, task: asyncio.Task[bytes | _RunFixtureInterruption]
+    ) -> bytes:
+        outcome = await asyncio.shield(task)
+        if isinstance(outcome, _RunFixtureInterruption):
+            raise outcome.interruption from None
+        return outcome
 
     def _load_session_sync[R](self, handle: Fixture[R]) -> R:
         slot = self._session.get(handle.key)

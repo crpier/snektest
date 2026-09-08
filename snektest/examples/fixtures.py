@@ -1,5 +1,8 @@
 """Fixture examples for snektest.
 
+Run-fixture setup preserves interruption and cleans established dependencies.
+Workers stop new dispatch, drain active work and tear down before propagating it.
+
 Caller cancellation during cleanup waits for bounded teardown to finish, even
 when repeated. Older fixtures and later scopes still receive teardown attempts.
 """

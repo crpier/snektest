@@ -120,6 +120,8 @@ class _RunFixtureFailed:
     identity: RunFixtureIdentity
     message: str
     output: str = ""
+    interruption: str | None = None
+    exit_code: int | str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,15 +311,26 @@ def _host_main(  # noqa: PLR0913
                     else:
                         payload = cast("bytes", registry.load_run_payload(handle))
             except BaseException as exc:
+                diagnostic = snapshot_exception(type(exc), exc, exc.__traceback__)
+                interrupted = isinstance(
+                    exc, (SystemExit, KeyboardInterrupt, asyncio.CancelledError)
+                )
                 connection.send(
                     _RunFixtureFailed(
                         message.identity,
                         (
                             f"Run fixture {message.identity[0]}."
                             f"{message.identity[1]} publication failed: "
-                            f"{type(exc).__name__}: {exc}"
+                            f"{diagnostic.type_name}: {diagnostic.message}"
                         ),
                         output.getvalue() if output is not None else "",
+                        interruption=type(exc).__name__ if interrupted else None,
+                        exit_code=(
+                            exc.code
+                            if isinstance(exc, SystemExit)
+                            and isinstance(exc.code, (int, str, type(None)))
+                            else 1
+                        ),
                     )
                 )
             else:
@@ -632,7 +645,7 @@ async def _publish_run_fixture(  # noqa: C901, PLR0913
     published_descriptors: dict[RunFixtureIdentity, bytes],
     lifecycle_outputs: list[str],
     workers: list[_Worker],
-) -> _CommitRunFixture | _RunFixtureUnavailable:
+) -> _CommitRunFixture | _RunFixtureUnavailable | _RunFixtureFailed:
     """Stage one host descriptor everywhere before making any copy visible."""
     if identity in published_descriptors or identity in publication_failures:
         if identity in published_descriptors:
@@ -647,6 +660,8 @@ async def _publish_run_fixture(  # noqa: C901, PLR0913
     if isinstance(host_message, _RunFixtureFailed):
         if host_message.output:
             lifecycle_outputs.append(host_message.output)
+        if host_message.interruption is not None:
+            return host_message
         publication_failures[identity] = host_message.message
         return _RunFixtureUnavailable(identity, host_message.message)
     if not isinstance(host_message, _RunFixtureLoaded):
@@ -792,6 +807,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         replacements_needed = 0
         run_ahead_limit = 1 if fail_fast else requested_workers * 2
         run_fixture_requests: list[RunFixtureIdentity] = []
+        run_interruption: _RunFixtureFailed | None = None
 
         while pending or receive_tasks or run_fixture_requests:
             if run_fixture_requests and not receive_tasks:
@@ -800,6 +816,11 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 ] = []
                 while run_fixture_requests:
                     identity = run_fixture_requests.pop(0)
+                    if run_interruption is not None:
+                        publication_releases.append(
+                            _RunFixtureUnavailable(identity, run_interruption.message)
+                        )
+                        continue
                     publication = _publish_run_fixture(
                         identity,
                         host_connection=host_connection,
@@ -822,6 +843,10 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                             f"within {timeout:g}s"
                         )
                         raise RunInfrastructureError(msg) from None
+                    if isinstance(release, _RunFixtureFailed):
+                        run_interruption = release
+                        pending.clear()
+                        release = _RunFixtureUnavailable(identity, release.message)
                     publication_releases.append(release)
                 for release in publication_releases:
                     for worker in worker_processes:
@@ -964,6 +989,12 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.run_warnings = run_warnings
             teardown_diagnostics.session_output = session_output
             teardown_diagnostics.session_warnings = tuple(session_warnings)
+        if run_interruption is not None:
+            if run_interruption.interruption == "SystemExit":
+                raise SystemExit(run_interruption.exit_code)
+            if run_interruption.interruption == "KeyboardInterrupt":
+                raise KeyboardInterrupt
+            raise asyncio.CancelledError(run_interruption.message)
         completed_run = RunResult.from_execution(
             collection_output=canonical_bootstrap.collection_output,
             collection_warnings=canonical_bootstrap.collection_warnings,
