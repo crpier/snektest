@@ -1,12 +1,13 @@
 """CLI regressions for empty and incomplete test collection."""
 
+import asyncio
 import json
 import subprocess
 import sys
 from textwrap import dedent
 from typing import Any, cast
 
-from snektest import assert_eq, assert_in, load_fixture, test
+from snektest import Param, assert_eq, assert_in, load_fixture, test
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file
 
@@ -189,3 +190,36 @@ def test_empty_parameter_axis_cannot_drop_one_test_from_nonempty_file() -> None:
     assert_eq(result.returncode, 2)
     assert_in("parameter list", error["message"])
     assert_in("must not be empty", error["message"])
+
+
+@test(
+    [
+        Param((), "local"),
+        Param(("--workers", "1"), "worker"),
+        Param(("--collect-only",), "collect"),
+        Param(("--collect-only", "--workers", "1"), "worker-collect"),
+    ],
+    [Param((), "strict"), Param(("--allow-empty",), "allow-empty")],
+    mark="slow",
+)
+async def test_empty_case_brackets_are_invalid(
+    mode: tuple[str, ...], empty_policy: tuple[str, ...]
+) -> None:
+    """An explicit empty case is invalid in every CLI mode, before execution."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        "from snektest import Param, test\n"
+        "@test([Param(1, 'one'), Param(2, 'two')])\n"
+        "def test_cases(value: int) -> None:\n    pass\n",
+        name="test_empty_brackets",
+    )
+
+    result = await asyncio.to_thread(
+        _run_json_selection, f"{test_file}::test_cases[]", *mode, *empty_policy
+    )
+
+    assert_eq(result.returncode, 2)
+    assert_eq(_json_output(result)["error"]["type"], "ArgsError")
+    assert_in("empty parameter case", _json_output(result)["error"]["message"])

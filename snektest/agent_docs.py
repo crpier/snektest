@@ -144,6 +144,8 @@ counts now count each failed fixture teardown.
 - Every requested filter must select a test by default; empty directories, files, marker selections, and individual filters fail with a collection error. Pass `--allow-empty` only when a zero-test selection is intentional. Explicit missing test-name and parameter-case filters remain errors even in allow-empty mode.
 - Install `snektest[schema]` and use `@test_schema("openapi.json", base_url=..., mark="slow")` for positive OpenAPI contract tests. It collects one test per operation and checks for server errors and response-schema violations. Native Schemathesis auth providers and custom checks may be passed through `auth=` and `checks=`. Use `@test_schema_workflow` for linked stateful sequences. Decorated function bodies are declarative and are not called; `base_url` and `headers` may be fixture handles.
 - Set `generation="negative"` on `@test_schema` to generate schema-violating requests. A passing response must use an allowed, documented 4xx status; `expected_statuses` defaults to all 4xx responses. Accepted 2xx responses and all 5xx responses fail. Negative stateful workflows are not supported.
+Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--allow-empty`, in local, worker, and collect-only modes.
+
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
 
 ## Skips and known defects

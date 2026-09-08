@@ -233,7 +233,7 @@ def collect_tests_from_file(  # noqa: PLR0913
     for func in runnable_functions:
         markers = get_test_function_markers(func)
         for param_names, params in get_test_function_params(func).items():
-            if filter_item.params and filter_item.params != param_names:
+            if filter_item.params is not None and filter_item.params != param_names:
                 continue
             test_name = TestName(
                 file_path=file_path,

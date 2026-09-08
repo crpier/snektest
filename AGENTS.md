@@ -54,7 +54,7 @@ uv run snektest --durations 10
 
 Every filter must select at least one test by default. `--allow-empty` permits
 empty files, directories, marker selections, and filters only when intentional;
-explicit missing test-name and parameter-case filters remain errors.
+explicit missing test-name and parameter-case filters remain errors. Empty parameter-case brackets are rejected during argument parsing in all modes, including with `--allow-empty`.
 
 ### Type Checking & Linting
 ```bash

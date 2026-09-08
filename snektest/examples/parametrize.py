@@ -1,4 +1,8 @@
-"""Parameter lists form Cartesian products capped at 10,000 cases per test."""
+"""Parameter lists form Cartesian products capped at 10,000 cases per test.
+
+Select cases by their nonempty names; `test_cases[]` is an argument error,
+even with workers, collect-only, or `--allow-empty`.
+"""
 
 from snektest import Param, assert_eq, test
 
