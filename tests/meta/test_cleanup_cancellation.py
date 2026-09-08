@@ -26,6 +26,7 @@ def _run_cancelled_cleanup(
             from snektest.reporting import NullRunReporter
 
             events: list[str] = []
+            children: list[asyncio.Task[None]] = []
             started: asyncio.Event
 
             @fixture(scope="run")
@@ -66,7 +67,7 @@ def _run_cancelled_cleanup(
                 _ = load_fixture(root())
                 _ = load_fixture(older())
                 _ = await load_fixture(newer())
-                _ = asyncio.create_task(child())
+                children.append(asyncio.create_task(child()))
                 await asyncio.sleep(0)
 
             async def main() -> None:
