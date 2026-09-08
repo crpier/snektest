@@ -1,13 +1,39 @@
 """Bounded cancellation for async tasks abandoned by tests or fixtures."""
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
 from snektest.diagnostics import snapshot_exception
-from snektest.models import ExceptionDiagnostic
+from snektest.models import DEFAULT_CLEANUP_TIMEOUT_SECONDS, ExceptionDiagnostic
+
+cleanup_budget: ContextVar[float] = ContextVar(
+    "snektest_cleanup_budget", default=DEFAULT_CLEANUP_TIMEOUT_SECONDS
+)
+"""Run cleanup ceiling inherited by async property examples."""
+cleanup_failures: ContextVar[list[ExceptionDiagnostic] | None] = ContextVar(
+    "snektest_cleanup_failures", default=None
+)
+"""Attributed cleanup errors discovered inside a test-body adapter."""
+
+
+@contextmanager
+def collect_cleanup(timeout: float | None) -> Generator[list[ExceptionDiagnostic]]:
+    """Carry the run budget and retain adapter cleanup diagnostics for its test."""
+    failures: list[ExceptionDiagnostic] = []
+    budget_token = cleanup_budget.set(
+        DEFAULT_CLEANUP_TIMEOUT_SECONDS if timeout is None else timeout
+    )
+    failures_token = cleanup_failures.set(failures)
+    try:
+        yield failures
+    finally:
+        cleanup_failures.reset(failures_token)
+        cleanup_budget.reset(budget_token)
 
 
 @dataclass(frozen=True)

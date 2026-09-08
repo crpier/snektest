@@ -261,7 +261,7 @@ Interactions:
   single `await asyncio.to_thread(run_hypothesis)` (`decorators.py`), so the
   timeout wraps the whole property run, not each example. If it fires while an
   example is suspended, task cancellation completes the cross-thread handoff and
-  lets the Hypothesis worker stop. Synchronous or CPU-bound work in that thread
+  lets the Hypothesis worker stop. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Blocking thread work still needs an outer timeout. Synchronous or CPU-bound work in that thread
   remains uninterruptible. Sync property tests are not coroutines, so the timeout
   never applies. Prefer Hypothesis's own `deadline`/`max_examples` for per-example
   bounds; use `--no-timeout` if the complete property run must remain unbounded.

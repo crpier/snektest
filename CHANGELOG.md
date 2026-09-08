@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Bound cancellation-resistant async Hypothesis cleanup, stop new examples, release worker handoffs, and retain finalizer diagnostics. (#73)
+
 - Make memory and benchmark contexts single-use; reject rounds access or resumption outside their active lifetime instead of publishing stale samples. (#72)
 
 - Restore capture state unconditionally and retain safe warning text when exit-time message formatting raises. (#71)
