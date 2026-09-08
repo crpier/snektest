@@ -149,7 +149,7 @@ def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Pat
     if git_executable is None or not file_paths:
         return frozenset[Path]()
 
-    encoded_paths = b"\0".join(os.fsencode(path.resolve()) for path in file_paths)
+    encoded_paths = b"\0".join(os.fsencode(path.absolute()) for path in file_paths)
     try:
         process: subprocess.CompletedProcess[bytes] = subprocess.run(  # noqa: S603
             [git_executable, "check-ignore", "--stdin", "-z"],
@@ -161,9 +161,20 @@ def git_ignored_files(file_paths: Sequence[Path], *, cwd: Path) -> frozenset[Pat
     except OSError:
         return frozenset[Path]()
     if process.returncode not in {0, 1}:
-        return frozenset[Path]()
+        repository = subprocess.run(  # noqa: S603
+            [git_executable, "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+        )
+        if repository.returncode != 0 or repository.stdout.strip() != b"true":
+            return frozenset[Path]()
+        raise CollectionError(
+            "Git ignore filtering failed: "
+            + process.stderr.decode(errors="replace").strip()
+        )
     return frozenset(
-        Path(os.fsdecode(path)).resolve()
+        Path(os.fsdecode(path)).absolute()
         for path in process.stdout.split(b"\0")
         if path
     )
@@ -278,7 +289,7 @@ def generate_file_list(filter_item: FilterItem) -> list[PyFilePath]:
     ignored_paths = git_ignored_files(paths, cwd=filter_item.file_path)
 
     return sorted(
-        (path for path in paths if path.resolve() not in ignored_paths),
+        (path for path in paths if path.absolute() not in ignored_paths),
         key=lambda path: path.as_posix(),
     )
 

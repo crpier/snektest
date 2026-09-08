@@ -1,4 +1,9 @@
-"""Basic tests for `--collect-only`, `--fail-fast`, and `--durations` workflows."""
+"""Basic tests for `--collect-only`, `--fail-fast`, and `--durations` workflows.
+
+Directory discovery applies Git ignore rules to symlink names, not targets.
+Explicit file selection bypasses ignores; unexpected Git filtering failures in a
+worktree are collection errors.
+"""
 
 from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
 

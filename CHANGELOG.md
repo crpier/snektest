@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Fixed Git ignore filtering for symlink discovery paths; failed Git batches now report collection errors inside a worktree. (#63)
+
 - Added deterministic, import-safe collection and strict empty-selection checks.
 - Added bounded async cleanup, async-test timeouts, and task ownership diagnostics.
 - Added process workers, run fixtures, memory assertions, and benchmark baselines.
