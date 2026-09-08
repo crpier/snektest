@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Finish bounded fixture and task cleanup before propagating cancellation received during teardown, including repeated requests and later fixture scopes. (#65)
+
 - Reject empty parameter-case brackets consistently before local or worker execution, including collect-only and `--allow-empty`. (#64)
 
 - Fixed Git ignore filtering for symlink discovery paths; failed Git batches now report collection errors inside a worktree. (#63)

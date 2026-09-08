@@ -1,4 +1,8 @@
-"""Fixture examples for snektest."""
+"""Fixture examples for snektest.
+
+Caller cancellation during cleanup waits for bounded teardown to finish, even
+when repeated. Older fixtures and later scopes still receive teardown attempts.
+"""
 
 from collections.abc import AsyncGenerator, Generator
 

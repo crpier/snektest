@@ -746,7 +746,7 @@ command.
 
 Cleanup has a separate guarantee. Snektest tears down every established fixture
 in reverse setup order, even after test failure, interruption, or parent
-cancellation. It then propagates parent cancellation. Each async fixture teardown
+cancellation. It then propagates parent cancellation. Cancellation arriving during cleanup, including repeated requests, waits for the bounded cleanup phase to finish. Later fixture scopes still receive teardown attempts. Each async fixture teardown
 and task-cancellation attempt uses the configured `--timeout`; without one,
 including under `--no-timeout`, cleanup keeps a 60-second ceiling. A timeout or
 abandoned fixture task is attributed to its fixture, and one teardown failure
