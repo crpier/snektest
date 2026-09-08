@@ -213,7 +213,7 @@ teardown and task cleanup. An unhandled thread or unraisable exception turns a
 pass into an error. New non-daemon threads alive afterward turn a pass into a
 failure; daemon and current event-loop default-executor threads are exempt.
 Additional background failures on an existing failure/error remain process-safe
-`BackgroundFailure` diagnostics in console and JSON. Hooks are process-global,
+`BackgroundFailure` diagnostics in console and JSON. Broken exception message formatters cannot hide thread or unraisable failures; diagnostics use a safe fallback and still chain the previous hooks. Hooks are process-global,
 so concurrent direct `execute_test` calls are unsupported. The standard runner
 never overlaps tests within one process.
 
