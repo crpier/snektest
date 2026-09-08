@@ -1,5 +1,7 @@
 """Async snektest examples.
 
+Thread and unraisable failures remain errors even if their message formatter fails.
+
 Forced task-finalizer errors become task_cleanup background diagnostics or
 fixture teardown failures; they do not abort later cleanup or test execution.
 """

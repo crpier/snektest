@@ -1,5 +1,6 @@
 """Subprocess regressions for thread and unraisable failure observability."""
 
+import asyncio
 from textwrap import dedent
 
 from snektest import Param, assert_eq, assert_in, assert_true, load_fixture, test
@@ -292,3 +293,58 @@ def test_body_failure_keeps_structured_background_failure() -> None:
     assert_eq(background["label"], "secondary-worker")
     assert_eq(background["exception"]["type"], "RuntimeError")
     assert_true("secondary boom" in background["exception"]["message"])
+
+
+@test(
+    [Param("thread", "thread"), Param("unraisable", "unraisable")],
+    [Param((), "local"), Param(("--workers", "1"), "worker")],
+    mark="slow",
+)
+async def test_broken_exception_message_remains_an_error(
+    origin: str, arguments: tuple[str, ...]
+) -> None:
+    """User exception formatting cannot suppress thread or finalizer failures."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        dedent(f"""
+            import threading
+            from typing import override
+            from snektest import FixtureError, SnektestError, test
+
+            class BrokenMessage(SnektestError):
+                @override
+                def __str__(self) -> str:
+                    raise FixtureError("exception formatting failed")
+
+            def child() -> None:
+                raise BrokenMessage
+
+            class BrokenFinalizer:
+                def __del__(self) -> None:
+                    raise BrokenMessage
+
+            @test(mark="medium")
+            def test_background_failure() -> None:
+                if {origin!r} == "thread":
+                    worker = threading.Thread(target=child)
+                    worker.start()
+                    worker.join()
+                else:
+                    value = BrokenFinalizer()
+                    del value
+        """),
+        name="test_broken_background_message",
+    )
+
+    result = await asyncio.to_thread(
+        run_test_subprocess, test_file, *arguments, timeout=15
+    )
+
+    assert_eq(result["returncode"], 1)
+    assert_eq(result["tests"][0]["status"], "error")
+    diagnostic = result["tests"][0]["exception"]
+    assert_eq(diagnostic["type"], "BrokenMessage")
+    assert_in("<str failed: FixtureError>", diagnostic["message"])
+    assert_eq(result["tests"][0]["background_failures"][0]["origin"], origin)

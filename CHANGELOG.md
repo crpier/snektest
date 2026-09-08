@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Preserve thread and unraisable failures when an exception message formatter raises. (#67)
+
 - Contain forced task-finalizer errors, retain attributed diagnostics, and finish reaping tasks without aborting later selected tests. (#66)
 
 - Finish bounded fixture and task cleanup before propagating cancellation received during teardown, including repeated requests and later fixture scopes. (#65)

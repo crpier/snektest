@@ -43,11 +43,11 @@ class _Observer:
         traceback: TracebackType | None,
         label: str,
         origin: _FailureOrigin,
-        message: str,
+        message_prefix: str = "",
     ) -> None:
         diagnostic = snapshot_exception(type(exception), exception, traceback)
         failure = BackgroundFailure(
-            exception=replace(diagnostic, message=message),
+            exception=replace(diagnostic, message=message_prefix + diagnostic.message),
             label=label,
             origin=origin,
         )
@@ -65,9 +65,7 @@ class _Observer:
             traceback=args.exc_traceback,
             label=thread_name,
             origin="thread",
-            message=(
-                f"Thread {thread_name!r} raised {type(exception).__name__}: {exception}"
-            ),
+            message_prefix=f"Thread {thread_name!r} raised {type(exception).__name__}: ",
         )
         _ = self.previous_thread_hook(args)
 
@@ -82,7 +80,7 @@ class _Observer:
                 traceback=args.exc_traceback,
                 label=label,
                 origin="unraisable",
-                message=f"Unraisable exception in {label}: {exception}",
+                message_prefix=f"Unraisable exception in {label}: ",
             )
         _ = self.previous_unraisable_hook(args)
 
@@ -110,7 +108,6 @@ class _Observer:
                     traceback=exception.__traceback__,
                     label=thread.name,
                     origin="thread_leak",
-                    message=message,
                 )
 
 
