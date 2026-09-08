@@ -99,15 +99,19 @@ async def _cancel_pending_test_tasks(
     cleanup_timeout: float,
 ) -> TaskCleanup:
     """Cancel tasks owned by one test after its fixtures have torn down."""
-    return await cancel_tasks(
-        {
+
+    def owned_tasks() -> set[asyncio.Task[Any]]:
+        return {
             task
             for task in asyncio.all_tasks()
             if task.get_context().get(_test_task_owner) is owner
+            and task is not asyncio.current_task()
             and not task.done()
             and not registry.owns_task(task)
-        },
-        timeout=cleanup_timeout,
+        }
+
+    return await cancel_tasks(
+        owned_tasks(), timeout=cleanup_timeout, discover=owned_tasks
     )
 
 

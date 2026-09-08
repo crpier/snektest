@@ -9,7 +9,11 @@ from functools import wraps
 from typing import Any
 
 from snektest.diagnostics import snapshot_exception
-from snektest.models import DEFAULT_CLEANUP_TIMEOUT_SECONDS, ExceptionDiagnostic
+from snektest.models import (
+    DEFAULT_CLEANUP_TIMEOUT_SECONDS,
+    ExceptionDiagnostic,
+    RunInfrastructureError,
+)
 
 cleanup_budget: ContextVar[float] = ContextVar(
     "snektest_cleanup_budget", default=DEFAULT_CLEANUP_TIMEOUT_SECONDS
@@ -86,36 +90,68 @@ class TaskCleanup:
     failures: tuple[ExceptionDiagnostic, ...] = ()
 
 
-async def cancel_tasks(
-    tasks: set[asyncio.Task[Any]],
-    *,
-    timeout: float,  # noqa: ASYNC109
-) -> TaskCleanup:
-    """Cancel tasks, force-closing coroutines that exceed the cleanup ceiling."""
-    for task in tasks:
-        _ = task.cancel()
-    if not tasks:
-        return TaskCleanup(resistant=0, total=0)
-
-    completed, resistant = await asyncio.wait(tasks, timeout=timeout)
-    resistant_count = len(resistant)
+def _force_close_tasks(tasks: set[asyncio.Task[Any]]) -> list[ExceptionDiagnostic]:
+    """Contain synchronous finalizer errors and always wake the closed task."""
     failures: list[ExceptionDiagnostic] = []
-    for task in resistant:
+    for task in tasks:
         coroutine = task.get_coro()
         if coroutine is not None:
             try:
-                coroutine.close()
+                task.get_context().run(coroutine.close)
             except BaseException as error:
                 failures.append(
                     snapshot_exception(type(error), error, error.__traceback__)
                 )
         _ = task.cancel()
-    if resistant:
-        forced_completed, resistant = await asyncio.wait(resistant, timeout=timeout)
-        completed.update(forced_completed)
-    for task in completed:
-        if not task.cancelled():
-            _ = task.exception()
-    return TaskCleanup(
-        resistant=resistant_count, total=len(tasks), failures=tuple(failures)
-    )
+    return failures
+
+
+async def cancel_tasks(  # noqa: C901
+    tasks: set[asyncio.Task[Any]],
+    *,
+    timeout: float,  # noqa: ASYNC109
+    discover: Callable[[], set[asyncio.Task[Any]]] | None = None,
+) -> TaskCleanup:
+    """Reap owned generations under one deadline, then force-close survivors.
+
+    Re-scan after each cancellation wave. At the deadline, close newly spawned
+    coroutines before giving them a chance to start another generation. A run
+    cannot safely continue if tasks still survive that final bounded attempt.
+    Synchronous finalizers remain subject to the outer process timeout.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    pending = {task for task in tasks if not task.done()}
+    total = 0
+    resistant_count = 0
+    failures: list[ExceptionDiagnostic] = []
+    while pending:
+        total += len(pending)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining > 0:
+            for task in pending:
+                _ = task.cancel()
+            completed, pending = await asyncio.wait(pending, timeout=remaining)
+            for task in completed:
+                if not task.cancelled():
+                    _ = task.exception()
+        if pending:
+            resistant_count += len(pending)
+            failures.extend(_force_close_tasks(pending))
+            newcomers = discover() - pending if discover is not None else set()
+            total += len(newcomers)
+            failures.extend(_force_close_tasks(newcomers))
+            completed, survivors = await asyncio.wait(pending | newcomers, timeout=0)
+            for task in completed:
+                if not task.cancelled():
+                    _ = task.exception()
+            if discover is not None:
+                survivors |= discover()
+            if survivors:
+                msg = (
+                    f"Task cleanup could not stop {len(survivors)} owned tasks "
+                    f"within {timeout:g}s; refusing to continue the run."
+                )
+                raise RunInfrastructureError(msg)
+            break
+        pending = discover() if discover is not None else set()
+    return TaskCleanup(resistant=resistant_count, total=total, failures=tuple(failures))

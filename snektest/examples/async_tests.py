@@ -1,5 +1,8 @@
 """Async snektest examples.
 
+Cleanup follows cancellation-created descendants under one owner deadline, leaving
+unrelated tasks alone. Unreapable owned tasks stop the run before another test.
+
 Hypothesis cancellation stops new examples, releases cross-thread handoffs and
 bounds resistant async-example cleanup. Blocking thread work needs an outer timeout.
 

@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Reap cancellation-created task descendants under one cleanup deadline, preserve ownership during forced finalization, and stop unsafe continuation if owned tasks survive. (#74)
+
 - Bound cancellation-resistant async Hypothesis cleanup, stop new examples, release worker handoffs, and retain finalizer diagnostics. (#73)
 
 - Make memory and benchmark contexts single-use; reject rounds access or resumption outside their active lifetime instead of publishing stale samples. (#72)
