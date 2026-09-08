@@ -773,7 +773,7 @@ Interactions to know about:
   (every example) executes inside one `await asyncio.to_thread(...)`, so the
   timeout bounds the *entire* property run, not each example. When it fires while
   an example is suspended, snektest cancels that example and relays the outcome
-  to the Hypothesis worker so the CLI can exit promptly. It still cannot interrupt
+  to the Hypothesis worker so the CLI can exit promptly. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Blocking thread work still needs an outer timeout. It still cannot interrupt
   synchronous or CPU-bound work, including work running in the Hypothesis thread.
   Sync property tests are not bounded. For per-example limits, use Hypothesis's
   own `deadline`/`max_examples`; use `--no-timeout` if the complete property run

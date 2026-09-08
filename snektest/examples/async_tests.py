@@ -1,5 +1,8 @@
 """Async snektest examples.
 
+Hypothesis cancellation stops new examples, releases cross-thread handoffs and
+bounds resistant async-example cleanup. Blocking thread work needs an outer timeout.
+
 Thread and unraisable failures remain errors even if their message formatter fails.
 
 Forced task-finalizer errors become task_cleanup background diagnostics or

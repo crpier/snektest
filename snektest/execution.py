@@ -45,7 +45,12 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter, result_for_retention
-from snektest.task_cleanup import TaskCleanup, cancel_tasks, defer_cancellation
+from snektest.task_cleanup import (
+    TaskCleanup,
+    cancel_tasks,
+    collect_cleanup,
+    defer_cancellation,
+)
 from snektest.thread_observation import observe_background_failures
 
 _test_task_owner: ContextVar[object | None] = ContextVar(
@@ -225,6 +230,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
         _test_task_scope(test_task_owner),
         maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
         collect_benchmarks(compare=compare_benchmark) as benchmark_capture,
+        collect_cleanup(timeout) as body_cleanup_failures,
         collect_measurements() as measurements,
     ):
         test_start = time.monotonic()
@@ -401,7 +407,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
                 label="Abandoned task finalization",
                 origin="task_cleanup",
             )
-            for diagnostic in task_cleanup.failures
+            for diagnostic in (*body_cleanup_failures, *task_cleanup.failures)
         ),
     )
 

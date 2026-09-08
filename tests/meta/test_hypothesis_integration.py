@@ -1,8 +1,9 @@
 """Meta tests for running Hypothesis-based tests via snektest."""
 
+import asyncio
 from textwrap import dedent
 
-from snektest import load_fixture, test
+from snektest import Param, assert_in, load_fixture, test
 from snektest.assertions import assert_eq
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file, run_test_subprocess
@@ -240,3 +241,74 @@ async def test_hypothesis_marked_test_filters_with_cli_mark() -> None:
     assert_eq(payload["tests"][0]["name"], f"{test_file}::test_fast")
     assert_eq(payload["tests"][0]["markers"], ["fast"])
     assert_eq(payload["returncode"], 0)
+
+
+@test(
+    [Param(mode, mode) for mode in ("once", "forever", "finalizer")],
+    [Param((), "local"), Param(("--workers", "1"), "worker")],
+    mark="slow",
+)
+async def test_resistant_hypothesis_example_cleanup_is_bounded(
+    mode: str, arguments: tuple[str, ...]
+) -> None:
+    """Suspended resistant examples cannot leave the executor handoff blocked."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        dedent(f"""
+            import asyncio
+            from collections.abc import Generator
+            from hypothesis import settings
+            from hypothesis.strategies import just
+            from snektest import FixtureError, fixture, load_fixture, test, test_hypothesis
+
+            @fixture
+            def resource() -> Generator[None]:
+                yield None
+                print("fixture cleaned")
+
+            @settings(max_examples=1, deadline=None, database=None)
+            @test_hypothesis(just(1), mark="fast")
+            async def test_property(value: int) -> None:
+                _ = load_fixture(resource())
+                try:
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        if {mode!r} == "forever":
+                            while True:
+                                try:
+                                    await asyncio.Event().wait()
+                                except asyncio.CancelledError:
+                                    continue
+                        await asyncio.Event().wait()
+                finally:
+                    if {mode!r} == "finalizer":
+                        raise FixtureError("example finalizer failed")
+
+            @test(mark="fast")
+            def test_later() -> None:
+                pass
+        """),
+        name="test_resistant_example",
+    )
+
+    result = await asyncio.to_thread(
+        run_test_subprocess,
+        test_file,
+        "--timeout",
+        "2" if arguments else "0.05",
+        *arguments,
+        timeout=20,
+    )
+
+    assert_eq(result["returncode"], 1)
+    assert_eq((result["errors"], result["passed"]), (1, 1))
+    assert_eq(result["tests"][0]["exception"]["type"], "TestTimeoutError")
+    assert_eq(result["tests"][0]["fixture_teardown_output"], "fixture cleaned\n")
+    assert_eq(result["stderr"], "")
+    if mode == "finalizer":
+        background = result["tests"][0]["background_failures"][0]
+        assert_eq(background["origin"], "task_cleanup")
+        assert_in("example finalizer failed", background["exception"]["message"])
