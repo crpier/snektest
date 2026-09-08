@@ -22,7 +22,7 @@ from snektest.models import (
     TeardownFailure,
     UnreachableError,
 )
-from snektest.task_cleanup import cancel_tasks
+from snektest.task_cleanup import cancel_tasks, defer_cancellation
 
 type _SessionSlot = tuple[AsyncGenerator[Any] | Generator[Any], object, str]
 type _RunFixtureHandle = Fixture[Any] | AsyncFixture[Any]
@@ -501,6 +501,7 @@ class FixtureRegistry:
             or owner in self._run_task_owners
         )
 
+    @defer_cancellation
     async def teardown_function_fixtures(
         self, *, cleanup_timeout: float | None = None
     ) -> list[TeardownFailure]:
@@ -534,6 +535,7 @@ class FixtureRegistry:
         finally:
             self._tearing_down = False
 
+    @defer_cancellation
     async def teardown_session_fixtures(
         self, *, cleanup_timeout: float | None = None
     ) -> list[TeardownFailure]:
@@ -577,6 +579,7 @@ class FixtureRegistry:
         finally:
             self._tearing_down = False
 
+    @defer_cancellation
     async def teardown_run_fixtures(
         self, *, cleanup_timeout: float | None = None
     ) -> list[TeardownFailure]:

@@ -45,7 +45,7 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter, result_for_retention
-from snektest.task_cleanup import TaskCleanup, cancel_tasks
+from snektest.task_cleanup import TaskCleanup, cancel_tasks, defer_cancellation
 from snektest.thread_observation import observe_background_failures
 
 _test_task_owner: ContextVar[object | None] = ContextVar(
@@ -87,6 +87,7 @@ async def _await_test_body(
         raise
 
 
+@defer_cancellation
 async def _cancel_pending_test_tasks(
     owner: object,
     registry: FixtureRegistry,
@@ -329,16 +330,26 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
             fixture_teardown_warnings,
         ),
     ):
-        fixture_teardown_failures = await registry.teardown_function_fixtures(
-            cleanup_timeout=timeout
-        )
+        fixture_teardown_failures: list[TeardownFailure] = []
+        try:
+            fixture_teardown_failures = await registry.teardown_function_fixtures(
+                cleanup_timeout=timeout
+            )
+        except asyncio.CancelledError as error:
+            if interruption is None:
+                interruption = error
 
     fixture_teardown_output_value = fixture_teardown_buffer.getvalue() or None
 
     cleanup_timeout = DEFAULT_CLEANUP_TIMEOUT_SECONDS if timeout is None else timeout
-    task_cleanup = await _cancel_pending_test_tasks(
-        test_task_owner, registry, cleanup_timeout
-    )
+    try:
+        task_cleanup = await _cancel_pending_test_tasks(
+            test_task_owner, registry, cleanup_timeout
+        )
+    except asyncio.CancelledError:
+        if interruption is not None:
+            raise interruption from None
+        raise
     if (
         result is not None
         and not isinstance(result, (FailedResult, ErrorResult))
@@ -605,20 +616,22 @@ async def run_tests(  # noqa: PLR0913
                 if pdb_triggered or (fail_fast and test_result.is_actionable_failure):
                     break
         finally:
-            (
-                session_teardown_failures,
-                session_output,
-                session_warnings,
-            ) = await teardown_session_fixtures(
-                capture_output=capture_output, cleanup_timeout=timeout
-            )
-            (
-                run_teardown_failures,
-                run_output,
-                run_warnings,
-            ) = await teardown_run_fixtures(
-                capture_output=capture_output, cleanup_timeout=timeout
-            )
+            try:
+                (
+                    session_teardown_failures,
+                    session_output,
+                    session_warnings,
+                ) = await teardown_session_fixtures(
+                    capture_output=capture_output, cleanup_timeout=timeout
+                )
+            finally:
+                (
+                    run_teardown_failures,
+                    run_output,
+                    run_warnings,
+                ) = await teardown_run_fixtures(
+                    capture_output=capture_output, cleanup_timeout=timeout
+                )
             if teardown_diagnostics is not None:
                 teardown_diagnostics.run_output = run_output
                 teardown_diagnostics.run_warnings = run_warnings

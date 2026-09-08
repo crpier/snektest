@@ -1,8 +1,51 @@
 """Bounded cancellation for async tasks abandoned by tests or fixtures."""
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
+
+
+@dataclass(frozen=True)
+class _CleanupValue[T]:
+    value: T
+
+
+def defer_cancellation[**P, T](
+    cleanup: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Finish a bounded cleanup phase before propagating caller cancellation.
+
+    Keep a strong task reference and wait through repeated cancellation requests.
+    Cleanup itself remains responsible for its deadlines. Capture BaseException
+    inside the child so interruption cannot terminate the event loop prematurely.
+    """
+
+    @wraps(cleanup)
+    async def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
+        async def capture() -> _CleanupValue[T] | BaseException:
+            try:
+                return _CleanupValue(await cleanup(*args, **kwargs))
+            except BaseException as error:
+                return error
+
+        pending = asyncio.create_task(capture(), name="snektest cleanup")
+        interruption: asyncio.CancelledError | None = None
+        while not pending.done():
+            try:
+                _ = await asyncio.shield(pending)
+            except asyncio.CancelledError as error:
+                if interruption is None:
+                    interruption = error
+        outcome = pending.result()
+        if interruption is not None:
+            raise interruption
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome.value
+
+    return wrapped
 
 
 @dataclass(frozen=True)

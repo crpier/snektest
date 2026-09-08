@@ -251,7 +251,7 @@ teardown and task-cancellation attempt gets the configured timeout, or 60 second
 when `timeout=None`. Cleanup failures identify the fixture and do not stop later
 teardown attempts. Function teardown runs before task-leak classification.
 `SystemExit`, `KeyboardInterrupt`, and parent task cancellation propagate only
-after cleanup; explicit test-raised `CancelledError` remains a failed test.
+after cleanup; explicit test-raised `CancelledError` remains a failed test. Cancellation arriving during cleanup, including repeated requests, waits for the bounded cleanup phase to finish. Later fixture scopes still receive teardown attempts.
 Synchronous teardown cannot be interrupted on the local event-loop thread and
 requires an outer process or CI timeout.
 
