@@ -149,3 +149,10 @@ def test_filter_item_repr() -> None:
     assert_eq("test_basic.py" in repr_str, True)
     assert_eq("test_func" in repr_str, True)
     assert_eq("params" in repr_str, True)
+
+
+@test(mark="fast")
+def test_filter_item_rejects_empty_case() -> None:
+    """Selector presence cannot disappear during worker serialization."""
+    with assert_raises(ArgsError):
+        _ = FilterItem("tests/isolated/test_basic.py::test_func[]")

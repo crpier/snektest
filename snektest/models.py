@@ -153,6 +153,9 @@ class FilterItem:
                     raise ArgsError(msg)
                 rest = rest.removesuffix("]")
                 function_name, params = rest.split("[", 1)
+                if params == "":
+                    msg = f"Invalid test filter - empty parameter case in '{raw_input}'"
+                    raise ArgsError(msg)
             else:
                 function_name = rest
                 params = None
@@ -184,7 +187,7 @@ class FilterItem:
         result = str(self.file_path)
         if self.function_name is not None:
             result += f"::{self.function_name}"
-        if self.params:
+        if self.params is not None:
             result += f"[{self.params}]"
         return result
 

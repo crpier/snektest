@@ -673,6 +673,8 @@ Explicit test filters replace `test_paths`. `--timeout`, `--no-timeout`,
 `--no-json-output`, `--junit-output`, and `--no-junit-output` override matching
 project values. Unknown keys and invalid values are configuration errors.
 
+Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--allow-empty`, in local, worker, and collect-only modes.
+
 Recursive directory discovery excludes files ignored by Git, including generated
 test-shaped files under ignored output directories. An explicitly named test file
 still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
