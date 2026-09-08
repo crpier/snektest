@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Serialize worker run-fixture readers, share concurrent first loads, and drain pending readers after waiter cancellation. (#69)
+
 - Preserve run-fixture setup interruption and exit codes after dependency cleanup; workers stop new dispatch and tear down before propagating host interruption. (#68)
 
 - Preserve thread and unraisable failures when an exception message formatter raises. (#67)

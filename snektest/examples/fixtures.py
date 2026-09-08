@@ -1,5 +1,8 @@
 """Fixture examples for snektest.
 
+Concurrent async run loads share an in-flight request per identity. Workers drain
+outstanding loads after waiter cancellation before receiving another command.
+
 Run-fixture setup preserves interruption and cleans established dependencies.
 Workers stop new dispatch, drain active work and tear down before propagating it.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -352,6 +353,8 @@ class _RemoteRunFixtureLoader:
         self._connection: _ProcessConnection = connection
         self._failures: dict[RunFixtureIdentity, str] = {}
         self._staged: dict[RunFixtureIdentity, object] = {}
+        self._load_lock: threading.Lock = threading.Lock()
+        self._pending: dict[RunFixtureIdentity, asyncio.Future[object]] = {}
 
     def __call__[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
         identity = (
@@ -361,10 +364,28 @@ class _RemoteRunFixtureLoader:
         if isinstance(handle, AsyncFixture):
 
             async def load_async() -> R:
-                return cast("R", await asyncio.to_thread(self._load, identity))
+                pending = self._pending.get(identity)
+                if pending is None:
+                    pending = asyncio.get_running_loop().run_in_executor(
+                        None, self._load, identity
+                    )
+                    self._pending[identity] = pending
+                # wait does not cancel the shared future or log abandoned shield errors.
+                _ = await asyncio.wait({pending})
+                return cast("R", pending.result())
 
             return cast("Coroutine[R]", load_async())
         return cast("R", self._load(identity))
+
+    async def drain(self) -> None:
+        """Finish remote readers before the worker main loop receives again.
+
+        Cancelling an async waiter cannot stop its executor thread. Keep the
+        underlying futures alive and retrieve their outcomes even without waiters.
+        """
+        if self._pending:
+            _ = await asyncio.gather(*self._pending.values(), return_exceptions=True)
+            self._pending.clear()
 
     def process_control(self, message: _ParentToWorker) -> bool:
         """Apply one publication message, returning whether it was recognized."""
@@ -395,24 +416,28 @@ class _RemoteRunFixtureLoader:
         return False
 
     def _load(self, identity: RunFixtureIdentity) -> object:
-        if identity in self._failures:
-            raise FixtureError(self._failures[identity])
-        if identity in self._committed:
-            return self._committed[identity]
-
-        self._connection.send(_RunFixtureRequested(identity))
-        while True:
-            message = cast("_ParentToWorker", self._connection.recv())
-            if not self.process_control(message):
-                msg = f"Expected run fixture publication, got {type(message).__name__}"
-                raise FixtureError(msg)
-            if isinstance(message, _CommitRunFixture) and message.identity == identity:
+        with self._load_lock:
+            if identity in self._failures:
+                raise FixtureError(self._failures[identity])
+            if identity in self._committed:
                 return self._committed[identity]
-            if (
-                isinstance(message, _RunFixtureUnavailable)
-                and message.identity == identity
-            ):
-                raise FixtureError(message.message)
+
+            self._connection.send(_RunFixtureRequested(identity))
+            while True:
+                message = cast("_ParentToWorker", self._connection.recv())
+                if not self.process_control(message):
+                    msg = f"Expected run fixture publication, got {type(message).__name__}"
+                    raise FixtureError(msg)
+                if (
+                    isinstance(message, _CommitRunFixture)
+                    and message.identity == identity
+                ):
+                    return self._committed[identity]
+                if (
+                    isinstance(message, _RunFixtureUnavailable)
+                    and message.identity == identity
+                ):
+                    raise FixtureError(message.message)
 
 
 def _worker_main(  # noqa: PLR0913
@@ -488,14 +513,17 @@ def _run_worker(  # noqa: PLR0913
                 msg = f"Execution worker received unexpected {type(message).__name__}"
                 raise RunInfrastructureError(msg)
             test_case = test_cases[message.ordinal]
-            result = runner.run(
-                execute_test(
-                    test_case,
-                    capture_output=capture_output,
-                    timeout=timeout,
-                    benchmark_baseline=benchmark_baseline,
+            try:
+                result = runner.run(
+                    execute_test(
+                        test_case,
+                        capture_output=capture_output,
+                        timeout=timeout,
+                        benchmark_baseline=benchmark_baseline,
+                    )
                 )
-            )
+            finally:
+                runner.run(run_fixture_loader.drain())
             connection.send(_ExecutionFinished(result))
     connection.close()
 

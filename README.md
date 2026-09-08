@@ -686,6 +686,8 @@ Broken exception message formatters cannot hide thread or unraisable failures; d
 
 Run-fixture setup preserves interruption instead of converting it to a publication error. Established dependencies still tear down. Worker mode stops further dispatch, drains active work, tears down worker sessions and host fixtures, then propagates the interruption.
 
+Concurrent async run-fixture loads share one in-flight request per identity. Worker connection reads are serialized, and cancelled waiters do not abandon readers: outstanding loads drain before the worker resumes command receipt.
+
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.
