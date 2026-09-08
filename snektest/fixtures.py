@@ -134,7 +134,7 @@ async def _cleanup_fixture_tasks(
     owner: object,
     *,
     cleanup_timeout: float,
-) -> TeardownFailure | None:
+) -> list[TeardownFailure]:
     """Cancel tasks abandoned by one fixture and attribute the failure."""
     cleanup = await cancel_tasks(
         {
@@ -145,7 +145,7 @@ async def _cleanup_fixture_tasks(
         timeout=cleanup_timeout,
     )
     if not cleanup.total:
-        return None
+        return []
 
     try:
         raise FixtureTaskLeakError(fixture_name, cleanup.total)  # noqa: TRY301
@@ -154,10 +154,16 @@ async def _cleanup_fixture_tasks(
         if traceback is None:
             msg = "Fixture task leak had no traceback. This shouldn't be possible!"
             raise UnreachableError(msg) from None
-        return TeardownFailure(
-            exception=snapshot_exception(type(error), error, traceback),
-            fixture_name=fixture_name,
-        )
+        return [
+            TeardownFailure(
+                exception=snapshot_exception(type(error), error, traceback),
+                fixture_name=fixture_name,
+            ),
+            *(
+                TeardownFailure(exception=diagnostic, fixture_name=fixture_name)
+                for diagnostic in cleanup.failures
+            ),
+        ]
 
 
 class FixtureRegistry:
@@ -526,8 +532,7 @@ class FixtureRegistry:
                         generator,
                         cleanup_timeout=timeout,
                     )
-                    if task_failure is not None:
-                        failures.append(task_failure)
+                    failures.extend(task_failure)
                 finally:
                     self._function_task_owners.discard(generator)
             self._function_stack.clear()
@@ -569,8 +574,7 @@ class FixtureRegistry:
                         generator,
                         cleanup_timeout=timeout,
                     )
-                    if task_failure is not None:
-                        failures.append(task_failure)
+                    failures.extend(task_failure)
                 finally:
                     self._session_task_owners.discard(generator)
             self._session.clear()
@@ -613,8 +617,7 @@ class FixtureRegistry:
                         generator,
                         cleanup_timeout=timeout,
                     )
-                    if task_failure is not None:
-                        failures.append(task_failure)
+                    failures.extend(task_failure)
                 finally:
                     self._run_task_owners.discard(generator)
             self._run.clear()

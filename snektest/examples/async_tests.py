@@ -1,4 +1,8 @@
-"""Async snektest examples."""
+"""Async snektest examples.
+
+Forced task-finalizer errors become task_cleanup background diagnostics or
+fixture teardown failures; they do not abort later cleanup or test execution.
+"""
 
 import asyncio
 from collections.abc import AsyncGenerator

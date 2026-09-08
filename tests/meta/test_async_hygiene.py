@@ -3,7 +3,7 @@
 import asyncio
 from textwrap import dedent
 
-from snektest import assert_false, load_fixture, test
+from snektest import Param, assert_false, assert_in, load_fixture, test
 from snektest.assertions import assert_eq
 from snektest.cli import run_tests_programmatic
 from snektest.models import FilterItem
@@ -93,7 +93,7 @@ async def test_function_fixture_owns_background_task_through_teardown() -> None:
             import asyncio
             from collections.abc import AsyncGenerator
 
-            from snektest import assert_false, fixture, load_fixture, test
+            from snektest import Param, assert_false, assert_in, fixture, load_fixture, test
 
             async def serve() -> None:
                 await asyncio.Event().wait()
@@ -134,7 +134,7 @@ async def test_session_fixture_owns_background_task_through_teardown() -> None:
             import asyncio
             from collections.abc import AsyncGenerator
 
-            from snektest import assert_false, fixture, load_fixture, test
+            from snektest import Param, assert_false, assert_in, fixture, load_fixture, test
 
             async def serve() -> None:
                 await asyncio.Event().wait()
@@ -262,3 +262,69 @@ async def test_embedded_run_does_not_cancel_new_host_task() -> None:
         if not host_task.done():
             _ = host_task.cancel()
             _ = await asyncio.gather(host_task, return_exceptions=True)
+
+
+@test(
+    [Param("test", "test"), Param("fixture", "fixture")],
+    [Param((), "local"), Param(("--workers", "1"), "worker")],
+    mark="slow",
+)
+async def test_forced_finalizer_failure_is_contained(
+    owner: str, worker_args: tuple[str, ...]
+) -> None:
+    """A finalizer error is attributed without preventing the next selected body."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        dedent(f"""
+            import asyncio
+            from collections.abc import AsyncGenerator
+            from snektest import FixtureError, fixture, load_fixture, test
+
+            children: list[asyncio.Task[None]] = []
+
+            async def child() -> None:
+                try:
+                    while True:
+                        try:
+                            await asyncio.Event().wait()
+                        except asyncio.CancelledError:
+                            continue
+                finally:
+                    raise FixtureError("child finalizer failed")
+
+            @fixture
+            async def resource() -> AsyncGenerator[None]:
+                children.extend([asyncio.create_task(child()), asyncio.create_task(child())])
+                await asyncio.sleep(0)
+                yield None
+
+            @test(mark="fast")
+            async def test_leaks() -> None:
+                if {owner!r} == "fixture":
+                    _ = await load_fixture(resource())
+                else:
+                    children.extend([asyncio.create_task(child()), asyncio.create_task(child())])
+                    await asyncio.sleep(0)
+
+            @test(mark="fast")
+            def test_later() -> None:
+                pass
+        """),
+        name="test_finalizer_failure",
+    )
+
+    result = await asyncio.to_thread(
+        run_test_subprocess, test_file, "--timeout", "2", *worker_args, timeout=30
+    )
+
+    assert_eq(result["returncode"], 1)
+    assert_eq(len(result["tests"]), 2)
+    assert_eq(result["tests"][1]["status"], "passed")
+    assert_in("child finalizer failed", str(result["tests"][0]))
+    assert_eq(result["stderr"], "")
+    diagnostics = result["tests"][0][
+        "background_failures" if owner == "test" else "fixture_teardown_failures"
+    ]
+    assert_eq(len(diagnostics), 2 if owner == "test" else 3)

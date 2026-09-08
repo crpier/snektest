@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
+from snektest.diagnostics import snapshot_exception
+from snektest.models import ExceptionDiagnostic
+
 
 @dataclass(frozen=True)
 class _CleanupValue[T]:
@@ -54,6 +57,7 @@ class TaskCleanup:
 
     resistant: int
     total: int
+    failures: tuple[ExceptionDiagnostic, ...] = ()
 
 
 async def cancel_tasks(
@@ -69,10 +73,16 @@ async def cancel_tasks(
 
     completed, resistant = await asyncio.wait(tasks, timeout=timeout)
     resistant_count = len(resistant)
+    failures: list[ExceptionDiagnostic] = []
     for task in resistant:
         coroutine = task.get_coro()
         if coroutine is not None:
-            coroutine.close()
+            try:
+                coroutine.close()
+            except BaseException as error:
+                failures.append(
+                    snapshot_exception(type(error), error, error.__traceback__)
+                )
         _ = task.cancel()
     if resistant:
         forced_completed, resistant = await asyncio.wait(resistant, timeout=timeout)
@@ -80,4 +90,6 @@ async def cancel_tasks(
     for task in completed:
         if not task.cancelled():
             _ = task.exception()
-    return TaskCleanup(resistant=resistant_count, total=len(tasks))
+    return TaskCleanup(
+        resistant=resistant_count, total=len(tasks), failures=tuple(failures)
+    )

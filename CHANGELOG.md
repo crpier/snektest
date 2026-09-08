@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Contain forced task-finalizer errors, retain attributed diagnostics, and finish reaping tasks without aborting later selected tests. (#66)
+
 - Finish bounded fixture and task cleanup before propagating cancellation received during teardown, including repeated requests and later fixture scopes. (#65)
 
 - Reject empty parameter-case brackets consistently before local or worker execution, including collect-only and `--allow-empty`. (#64)
