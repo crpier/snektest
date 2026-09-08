@@ -143,13 +143,18 @@ async def _cleanup_fixture_tasks(
     cleanup_timeout: float,
 ) -> list[TeardownFailure]:
     """Cancel tasks abandoned by one fixture and attribute the failure."""
-    cleanup = await cancel_tasks(
-        {
+
+    def owned_tasks() -> set[asyncio.Task[Any]]:
+        return {
             task
             for task in asyncio.all_tasks()
-            if task.get_context().get(_fixture_task_owner) is owner and not task.done()
-        },
-        timeout=cleanup_timeout,
+            if task.get_context().get(_fixture_task_owner) is owner
+            and task is not asyncio.current_task()
+            and not task.done()
+        }
+
+    cleanup = await cancel_tasks(
+        owned_tasks(), timeout=cleanup_timeout, discover=owned_tasks
     )
     if not cleanup.total:
         return []

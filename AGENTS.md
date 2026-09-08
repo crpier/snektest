@@ -200,7 +200,7 @@ event-loop snapshots. Function fixtures tear down before test-owned tasks are
 classified. Tasks created during fixture setup inherit that fixture's owner and
 remain alive through its teardown; session-owned tasks may survive between tests.
 A fixture that returns while its tasks remain pending receives an attributed
-teardown failure. Test-owned leaks are cancelled after function teardown. New
+teardown failure. Test-owned leaks are cancelled after function teardown. Owned-task cleanup re-scans cancellation-created descendants under one deadline. Forced finalizers run in their original task context so descendants retain ownership. If tasks survive the final close/reap attempt, the command stops rather than starting another test. Unrelated embedding tasks are left alone. New
 tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
 the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
