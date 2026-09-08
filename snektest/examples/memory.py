@@ -1,4 +1,8 @@
-"""Non-yielding memory budgets: 1..1000 rounds and non-negative warmup."""
+"""Non-yielding memory budgets: 1..1000 rounds and non-negative warmup.
+
+Each measurement context is single-use. Create a fresh context for each region,
+and access or advance its rounds iterator only inside that active context.
+"""
 
 from snektest import assert_memory, test
 

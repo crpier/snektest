@@ -449,6 +449,8 @@ measurements do not reset it and conservatively include prior peak history.
   result line by the presenter, and appear under `memory_measurements` in
   `--json-output`.
 
+Measurement lifetime: Measurement contexts are single-use, including after failed entry or exit. Create a fresh `assert_memory` or `assert_benchmark` context for each region. Access and advance `.rounds` only while that context is active; saved iterators cannot resume after exit.
+
 ### Performance Benchmarks
 
 `assert_benchmark(median_below=..., p95_below=..., rounds=100, warmup=10)` is a

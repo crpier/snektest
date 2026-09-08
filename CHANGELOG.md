@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Make memory and benchmark contexts single-use; reject rounds access or resumption outside their active lifetime instead of publishing stale samples. (#72)
+
 - Restore capture state unconditionally and retain safe warning text when exit-time message formatting raises. (#71)
 
 - Replace XML-forbidden characters in JUnit reports with U+FFFD without changing JSON or programmatic strings. (#70)

@@ -193,10 +193,15 @@ class MemoryContext:
         self._loop_probe: asyncio.Handle | None = None
         self._loop_advanced: bool = False
         self.has_exited: bool = False
+        self._entered: bool = False
         self._peak_bytes: int | None = None
         self._growth_slope: float | None = None
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> Self:  # noqa: C901
+        if self._entered:
+            msg = "assert_memory contexts are single-use; create a new context."
+            raise BadRequestError(msg)
+        self._entered = True
         if is_measurement_active():
             msg = (
                 "assert_memory cannot be nested: a second measurement inside an "
@@ -277,6 +282,7 @@ class MemoryContext:
     @property
     def rounds(self) -> Generator[int]:
         """Stateful iterator over warmup + measured rounds; loop your work over it."""
+        self._require_active()
         if self._rounds_iter is None:
             self._rounds_iter = self._run_rounds()
         return self._rounds_iter
@@ -301,6 +307,12 @@ class MemoryContext:
             raise BadRequestError(msg)
         return self._growth_slope
 
+    def _require_active(self) -> None:
+        """Keep saved iterators from sampling outside their owning context."""
+        if not (self._guard_token is not None and not self.has_exited):
+            msg = "assert_memory rounds require an active context."
+            raise BadRequestError(msg)
+
     def _run_rounds(self) -> Generator[int]:
         """Yield each round index, sampling the round on resume after the body.
 
@@ -308,10 +320,12 @@ class MemoryContext:
         measured round so per-round list growth does not masquerade as leaked
         memory in the slope fit.
         """
+        self._require_active()
         self._retained_samples = [0] * self._rounds
         for index in range(self._warmup + self._rounds):
             self._backend.reset_peak()
             yield index
+            self._require_active()
             self._record_round(index)
         self._exhausted = True
 
