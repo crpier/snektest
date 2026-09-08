@@ -692,6 +692,8 @@ JUnit replaces XML 1.0-forbidden characters, including NUL and lone surrogates, 
 
 Warning message formatters that raise use a safe text fallback. Capture always restores standard streams and debugger hooks even if exit-time warning rendering fails.
 
+Measurement contexts are single-use, including after failed entry or exit. Create a fresh `assert_memory` or `assert_benchmark` context for each region. Access and advance `.rounds` only while that context is active; saved iterators cannot resume after exit.
+
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.

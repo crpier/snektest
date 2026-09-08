@@ -210,8 +210,13 @@ class BenchmarkContext:
         self._gc_was_enabled: bool = False
         self._measurement: BenchmarkMeasurement | None = None
         self.has_exited: bool = False
+        self._entered: bool = False
 
     def __enter__(self) -> Self:  # noqa: C901
+        if self._entered:
+            msg = "assert_benchmark contexts are single-use; create a new context."
+            raise BadRequestError(msg)
+        self._entered = True
         if self._rounds < 1:
             msg = f"assert_benchmark rounds must be positive, got {self._rounds}."
             raise BadRequestError(msg)
@@ -294,6 +299,7 @@ class BenchmarkContext:
     @property
     def rounds(self) -> Generator[int]:
         """Stateful iterator over warmup and measured rounds."""
+        self._require_active()
         if self._rounds_iter is None:
             self._rounds_iter = self._run_rounds()
         return self._rounds_iter
@@ -327,14 +333,22 @@ class BenchmarkContext:
             raise BadRequestError(msg)
         return self._measurement
 
+    def _require_active(self) -> None:
+        """Keep saved iterators from sampling outside their owning context."""
+        if not (self._context_lock_acquired):
+            msg = "assert_benchmark rounds require an active context."
+            raise BadRequestError(msg)
+
     def _run_rounds(self) -> Generator[int]:
         """Time each yielded body and retain only post-warmup durations."""
+        self._require_active()
         self._durations_ns = [0] * self._rounds
         for index in range(self._warmup + self._rounds):
             if index == self._warmup and self._disable_gc:
                 gc.disable()
             started_ns = self._clock()
             yield index
+            self._require_active()
             if index >= self._warmup:
                 self._durations_ns[index - self._warmup] = self._clock() - started_ns
             else:

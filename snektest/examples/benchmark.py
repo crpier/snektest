@@ -1,4 +1,8 @@
-"""Sync and async benchmark examples."""
+"""Sync and async benchmark examples.
+
+Each measurement context is single-use. Create a fresh context for each region,
+and access or advance its rounds iterator only inside that active context.
+"""
 
 import asyncio
 
