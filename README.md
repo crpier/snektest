@@ -688,6 +688,8 @@ Run-fixture setup preserves interruption instead of converting it to a publicati
 
 Concurrent async run-fixture loads share one in-flight request per identity. Worker connection reads are serialized, and cancelled waiters do not abandon readers: outstanding loads drain before the worker resumes command receipt.
 
+JUnit replaces XML 1.0-forbidden characters, including NUL and lone surrogates, with U+FFFD in text and attributes. JSON and programmatic results retain the original strings.
+
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.

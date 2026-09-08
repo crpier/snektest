@@ -1,4 +1,8 @@
-"""Skip unavailable environments and track known assertion defects."""
+"""Skip unavailable environments and track known assertion defects.
+
+JUnit replaces XML-forbidden characters with U+FFFD in text and attributes.
+JSON and programmatic outcomes retain the original strings.
+"""
 
 import os
 
