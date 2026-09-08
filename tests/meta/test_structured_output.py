@@ -754,3 +754,59 @@ async def test_junit_sanitization_keeps_json_originals() -> None:
     assert_eq(result["tests"][0]["captured_output"], "before\x00after\n")
     output = assert_is_not_none(document.getroot().find("testcase/system-out"))
     assert_eq(output.text, "before\ufffdafter\n")
+
+
+@test(
+    [Param((), "local"), Param(("--workers", "1"), "worker")],
+    [
+        Param("FixtureError('broken formatter')", "error"),
+        Param("SystemExit(7)", "exit"),
+    ],
+    mark="slow",
+)
+async def test_warning_formatter_failure_keeps_json_complete(
+    arguments: tuple[str, ...], formatter_error: str
+) -> None:
+    """Exit-time warning formatting cannot hide the document or later test."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        dedent(f"""
+            from typing import override
+            from warnings import warn
+            from snektest import FixtureError, test
+
+            class MutableWarning(UserWarning):
+                def __init__(self) -> None:
+                    super().__init__("initial")
+                    self.broken: bool = False
+
+                @override
+                def __str__(self) -> str:
+                    if self.broken:
+                        raise {formatter_error}
+                    return "initial"
+
+            @test(mark="fast")
+            def test_warning() -> None:
+                warning = MutableWarning()
+                warn(warning, stacklevel=1)
+                warning.broken = True
+
+            @test(mark="fast")
+            def test_later() -> None:
+                print("later body ran")
+        """),
+        name="test_warning_formatter",
+    )
+
+    result = await asyncio.to_thread(
+        run_test_subprocess, test_file, *arguments, timeout=15
+    )
+
+    assert_eq(result["returncode"], 0)
+    assert_eq(result["passed"], 2)
+    assert_in("<str failed:", result["tests"][0]["warnings"][0])
+    assert_eq(result["tests"][1]["captured_output"], "later body ran\n")
+    assert_eq(result["stderr"], "")

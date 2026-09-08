@@ -3,6 +3,9 @@
 Directory discovery applies Git ignore rules to symlink names, not targets.
 Explicit file selection bypasses ignores; unexpected Git filtering failures in a
 worktree are collection errors.
+
+Warning message formatting failures use safe fallback text; capture still restores
+standard streams and debugger hooks.
 """
 
 from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test

@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Restore capture state unconditionally and retain safe warning text when exit-time message formatting raises. (#71)
+
 - Replace XML-forbidden characters in JUnit reports with U+FFFD without changing JSON or programmatic strings. (#70)
 
 - Serialize worker run-fixture readers, share concurrent first loads, and drain pending readers after waiter cancellation. (#69)

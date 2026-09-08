@@ -233,10 +233,16 @@ def _make_breakpointhook_wrapper(
 
 
 def _format_warnings(warnings_list: list[warnings.WarningMessage]) -> list[str]:
-    return [
-        f"{warning.filename}:{warning.lineno}: {warning.category.__name__}: {warning.message}"
-        for warning in warnings_list
-    ]
+    formatted: list[str] = []
+    for warning in warnings_list:
+        try:
+            message = str(warning.message)
+        except BaseException as error:
+            message = f"<str failed: {type(error).__name__}>"
+        formatted.append(
+            f"{warning.filename}:{warning.lineno}: {warning.category.__name__}: {message}"
+        )
+    return formatted
 
 
 def _install_capture(
@@ -307,13 +313,15 @@ def capture_output(
         breakpointhook_wrapper=breakpointhook_wrapper,
     )
 
-    with warnings.catch_warnings(record=True) as warning_list:
-        warnings.simplefilter("always")
-        try:
-            yield output_buffer, captured_warnings
-        finally:
-            captured_warnings.extend(_format_warnings(warning_list))
-            _restore_system_state(original_sys)
+    try:
+        with warnings.catch_warnings(record=True) as warning_list:
+            warnings.simplefilter("always")
+            try:
+                yield output_buffer, captured_warnings
+            finally:
+                captured_warnings.extend(_format_warnings(warning_list))
+    finally:
+        _restore_system_state(original_sys)
 
 
 @contextmanager
