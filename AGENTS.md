@@ -364,7 +364,7 @@ markers, measurements, and bounded exception tracebacks. A command-level file
 descriptor guard quarantines uncaptured stdout/stderr, child output, and direct
 descriptor writes as `uncaptured_output`; malformed UTF-8 uses replacement
 characters. `--junit-output PATH` maps the same `RunResult` to JUnit XML and emits
-one synthetic error case per fixture teardown failure.
+one synthetic error case per fixture teardown failure. JUnit replaces XML 1.0-forbidden characters, including NUL and lone surrogates, with U+FFFD in text and attributes. JSON and programmatic results retain the original strings.
 
 `--collect-only` lists canonical selectors without executing bodies and emits a
 versioned `collection` document with `--json-output`. `-x` / `--fail-fast` stops

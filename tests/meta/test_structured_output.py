@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from snektest import (
 from snektest.cli import run_tests_programmatic
 from snektest.models import FilterItem, RunResult, TestResult
 from testutils.fixtures import tmp_dir_fixture
-from testutils.helpers import create_test_file
+from testutils.helpers import create_test_file, run_test_subprocess
 
 
 class _RecordingReporter:
@@ -729,3 +730,27 @@ def test_junit_represents_every_fixture_teardown_failure() -> None:
             "run teardown[run_resource]": "RuntimeError",
         },
     )
+
+
+@test(mark="slow")
+async def test_junit_sanitization_keeps_json_originals() -> None:
+    """The XML adapter replaces forbidden characters without mutating run output."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    test_file = await asyncio.to_thread(
+        create_test_file,
+        tmp_dir,
+        "from snektest import test\n@test(mark='fast')\n"
+        "def test_output() -> None:\n    print('before\\x00after')\n",
+        name="test_xml_control",
+    )
+    junit_file = tmp_dir / "report.xml"
+
+    result = await asyncio.to_thread(
+        run_test_subprocess, test_file, "--junit-output", str(junit_file), timeout=15
+    )
+    document = await asyncio.to_thread(ElementTree.parse, junit_file)
+
+    assert_eq(result["returncode"], 0)
+    assert_eq(result["tests"][0]["captured_output"], "before\x00after\n")
+    output = assert_is_not_none(document.getroot().find("testcase/system-out"))
+    assert_eq(output.text, "before\ufffdafter\n")

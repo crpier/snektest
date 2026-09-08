@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from re import sub
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
 from snektest._version import __version__
@@ -17,6 +18,9 @@ from snektest.models import (
     UnexpectedPassResult,
 )
 from snektest.structured import SCHEMA_VERSION
+
+_XML_FORBIDDEN = "[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]"
+"""Characters excluded by the XML 1.0 Char production."""
 
 
 def _diagnostic_text(exception: ExceptionDiagnostic) -> str:
@@ -177,7 +181,11 @@ def build_junit_xml(run_result: RunResult) -> str:
         SubElement(suite, "system-err").text = "\n".join(run_result.warnings)
 
     indent(suite)
-    return tostring(suite, encoding="unicode", xml_declaration=True)
+    return sub(
+        _XML_FORBIDDEN,
+        "\ufffd",
+        tostring(suite, encoding="unicode", xml_declaration=True),
+    )
 
 
 __all__ = ["build_junit_xml"]

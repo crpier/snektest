@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Replace XML-forbidden characters in JUnit reports with U+FFFD without changing JSON or programmatic strings. (#70)
+
 - Serialize worker run-fixture readers, share concurrent first loads, and drain pending readers after waiter cancellation. (#69)
 
 - Preserve run-fixture setup interruption and exit codes after dependency cleanup; workers stop new dispatch and tear down before propagating host interruption. (#68)
