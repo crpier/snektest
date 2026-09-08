@@ -352,6 +352,8 @@ and the reproducible benchmark command live in
 
 ### Structured output
 
+Warning message formatters that raise use a safe text fallback. Capture always restores standard streams and debugger hooks even if exit-time warning rendering fails.
+
 `RunResult` is the normalized completion consumed by console, JSON, and JUnit
 adapters and returned by `run_tests_programmatic`. It owns status and teardown
 counts, total duration, collection diagnostics, test results, and session/run

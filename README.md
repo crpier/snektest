@@ -690,6 +690,8 @@ Concurrent async run-fixture loads share one in-flight request per identity. Wor
 
 JUnit replaces XML 1.0-forbidden characters, including NUL and lone surrogates, with U+FFFD in text and attributes. JSON and programmatic results retain the original strings.
 
+Warning message formatters that raise use a safe text fallback. Capture always restores standard streams and debugger hooks even if exit-time warning rendering fails.
+
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.
