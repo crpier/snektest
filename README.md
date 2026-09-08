@@ -676,6 +676,7 @@ project values. Unknown keys and invalid values are configuration errors.
 Recursive directory discovery excludes files ignored by Git, including generated
 test-shaped files under ignored output directories. An explicitly named test file
 still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
+Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
 
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
