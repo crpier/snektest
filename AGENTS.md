@@ -135,7 +135,7 @@ current registry — tests take no context parameter.
   round-trip through stdlib pickle in at most 1 MiB. Publication stages an
   independent decoded copy in every worker before commit; the host retains the
   original for teardown after worker sessions. Local mode enforces the same
-  descriptor-copy contract.
+  descriptor-copy contract. Run-fixture setup preserves interruption instead of converting it to a publication error. Established dependencies still tear down. Worker mode stops further dispatch, drains active work, tears down worker sessions and host fixtures, then propagates the interruption.
 - **Fixtures depending on fixtures**: a fixture may `load_fixture()` another in
   its body (resolved through the ambient registry). The dependency is registered
   for teardown only after its own setup completes, so it lands below the
