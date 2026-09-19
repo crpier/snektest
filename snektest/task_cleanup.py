@@ -1,4 +1,4 @@
-"""Bounded cancellation for async tasks abandoned by tests or fixtures."""
+"""Task ownership and bounded cleanup shared by tests and fixtures."""
 
 import asyncio
 from collections.abc import Callable, Coroutine, Generator
@@ -14,6 +14,24 @@ from snektest.models import (
     ExceptionDiagnostic,
     RunInfrastructureError,
 )
+
+_task_owner: ContextVar[object | None] = ContextVar("snektest_task_owner", default=None)
+"""The innermost test or fixture owns newly created tasks, not its caller."""
+
+
+@contextmanager
+def task_scope(owner: object) -> Generator[None]:
+    """Attribute child tasks to one lifetime, restoring the parent on exit.
+
+    Descendants inherit ownership through their task context. Fixture setup and
+    teardown use the same identity even if setup raises before yielding.
+    """
+    token = _task_owner.set(owner)
+    try:
+        yield
+    finally:
+        _task_owner.reset(token)
+
 
 cleanup_budget: ContextVar[float] = ContextVar(
     "snektest_cleanup_budget", default=DEFAULT_CLEANUP_TIMEOUT_SECONDS
@@ -155,3 +173,28 @@ async def cancel_tasks(  # noqa: C901
             break
         pending = discover() if discover is not None else set()
     return TaskCleanup(resistant=resistant_count, total=total, failures=tuple(failures))
+
+
+@defer_cancellation
+async def cancel_owned_tasks(
+    owner: object,
+    *,
+    timeout: float,  # noqa: ASYNC109
+) -> TaskCleanup:
+    """Reap one owner's descendants without touching nested or unrelated owners.
+
+    Discovery and cancellation share a deadline, including cancellation-created
+    descendants. Repeated caller cancellation waits for this cleanup to finish.
+    """
+
+    def owned_tasks() -> set[asyncio.Task[Any]]:
+        current_task = asyncio.current_task()
+        return {
+            task
+            for task in asyncio.all_tasks()
+            if task is not current_task
+            and not task.done()
+            and task.get_context().get(_task_owner) is owner
+        }
+
+    return await cancel_tasks(owned_tasks(), timeout=timeout, discover=owned_tasks)

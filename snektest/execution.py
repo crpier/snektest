@@ -4,9 +4,8 @@ import asyncio
 import pdb  # noqa: T100
 import sys
 import time
-from collections.abc import Callable, Coroutine, Generator, Sequence
-from contextlib import contextmanager, nullcontext
-from contextvars import ContextVar
+from collections.abc import Callable, Coroutine, Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 from inspect import iscoroutine
 from pathlib import Path
@@ -46,26 +45,11 @@ from snektest.models import (
 from snektest.output import maybe_capture_output
 from snektest.reporting import ConsoleRunReporter, RunReporter, result_for_retention
 from snektest.task_cleanup import (
-    TaskCleanup,
-    cancel_tasks,
+    cancel_owned_tasks,
     collect_cleanup,
-    defer_cancellation,
+    task_scope,
 )
 from snektest.thread_observation import observe_background_failures
-
-_test_task_owner: ContextVar[object | None] = ContextVar(
-    "snektest_test_task_owner", default=None
-)
-
-
-@contextmanager
-def _test_task_scope(owner: object) -> Generator[None]:
-    """Tag child tasks with the test whose execution context created them."""
-    token = _test_task_owner.set(owner)
-    try:
-        yield
-    finally:
-        _test_task_owner.reset(token)
 
 
 async def _await_test_body(
@@ -90,29 +74,6 @@ async def _await_test_body(
         if cancel_scope.expired():
             raise TestTimeoutError(timeout) from None
         raise
-
-
-@defer_cancellation
-async def _cancel_pending_test_tasks(
-    owner: object,
-    registry: FixtureRegistry,
-    cleanup_timeout: float,
-) -> TaskCleanup:
-    """Cancel tasks owned by one test after its fixtures have torn down."""
-
-    def owned_tasks() -> set[asyncio.Task[Any]]:
-        return {
-            task
-            for task in asyncio.all_tasks()
-            if task.get_context().get(_test_task_owner) is owner
-            and task is not asyncio.current_task()
-            and not task.done()
-            and not registry.owns_task(task)
-        }
-
-    return await cancel_tasks(
-        owned_tasks(), timeout=cleanup_timeout, discover=owned_tasks
-    )
 
 
 def _task_leak_result(
@@ -231,7 +192,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
     registry = current_registry()
     test_task_owner = object()
     with (
-        _test_task_scope(test_task_owner),
+        task_scope(test_task_owner),
         maybe_capture_output(capture_output) as (output_buffer, captured_warnings),
         collect_benchmarks(compare=compare_benchmark) as benchmark_capture,
         collect_cleanup(timeout) as body_cleanup_failures,
@@ -335,7 +296,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
             interruption = error
 
     with (
-        _test_task_scope(test_task_owner),
+        task_scope(test_task_owner),
         maybe_capture_output(capture_output) as (
             fixture_teardown_buffer,
             fixture_teardown_warnings,
@@ -354,8 +315,8 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
 
     cleanup_timeout = DEFAULT_CLEANUP_TIMEOUT_SECONDS if timeout is None else timeout
     try:
-        task_cleanup = await _cancel_pending_test_tasks(
-            test_task_owner, registry, cleanup_timeout
+        task_cleanup = await cancel_owned_tasks(
+            test_task_owner, timeout=cleanup_timeout
         )
     except asyncio.CancelledError:
         if interruption is not None:

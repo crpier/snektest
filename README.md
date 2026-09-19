@@ -335,6 +335,17 @@ alive between tests. Snektest reports tasks abandoned by fixture teardown agains
 the responsible fixture. Tasks created by an embedding host application are not
 touched.
 
+Failed setup retains fixture task ownership even if it never yields. At that
+fixture's scope teardown, Snektest cancels its abandoned tasks and reports any
+cleanup failures separately from the original setup error. Retrying a failed
+session fixture does not discard the earlier attempt's cleanup. Shared async
+session setup remains fixture-owned when a test cancels its waiter, so a later
+test can finish loading it. At scope teardown, cancellation of unfinished setup
+is bounded too; resistance and cleanup errors become fixture teardown diagnostics.
+Function setup left pending when its test returns counts as abandoned fixture
+work and is cleaned before the next test. Use `try`/`finally` around background-task setup as well as the
+fixture's `yield` to stop tasks yourself on either path.
+
 ### Skips and known defects
 
 Call `skip(reason)` when the current environment cannot run a test. Call

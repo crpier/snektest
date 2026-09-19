@@ -704,3 +704,122 @@ async def test_async_session_fixture_cannot_depend_on_function_fixture() -> None
         in str(exc_info.exception),
         True,
     )
+
+
+@test(mark="fast")
+async def test_failed_session_attempt_retains_its_tasks_after_retry() -> None:
+    """Retrying a cache entry cannot replace the failed attempt's cleanup owner."""
+    attempts = 0
+    finalized: list[int] = []
+    background_tasks: list[asyncio.Task[None]] = []
+
+    @fixture(scope="session")
+    async def resource() -> AsyncGenerator[str]:
+        nonlocal attempts
+        attempts += 1
+        attempt = attempts
+        started = asyncio.Event()
+
+        async def background() -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                finalized.append(attempt)
+
+        background_tasks.append(asyncio.create_task(background()))
+        await started.wait()
+        if attempt == 1:
+            error = FixtureError("first setup failed")
+            raise error
+        yield "ready"
+
+    registry = FixtureRegistry()
+    with use_registry(registry):
+        with assert_raises(FixtureError):
+            _ = await load_fixture(resource())
+        _ = await load_fixture(resource())
+        failures = await registry.teardown_session_fixtures()
+
+    assert_eq(finalized, [2, 1])
+    assert_eq(
+        [failure.exception.type_name for failure in failures],
+        ["FixtureTaskLeakError", "FixtureTaskLeakError"],
+    )
+
+
+@test(mark="fast")
+async def test_failed_fixture_tasks_finish_before_dependency_teardown() -> None:
+    """A failed dependent's tasks can still use its dependency during cleanup."""
+    finalized: list[str] = []
+    background_tasks: list[asyncio.Task[None]] = []
+
+    @fixture
+    def dependency() -> Generator[list[str]]:
+        state: list[str] = ["dependency alive"]
+        yield state
+        state.clear()
+        finalized.append("dependency ended")
+
+    @fixture
+    async def resource() -> AsyncGenerator[None]:
+        state = load_fixture(dependency())
+        started = asyncio.Event()
+
+        async def background() -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                finalized.append(state[0])
+
+        background_tasks.append(asyncio.create_task(background()))
+        await started.wait()
+        error = FixtureError("setup failed")
+        raise error
+        yield
+
+    registry = FixtureRegistry()
+    with use_registry(registry):
+        with assert_raises(FixtureError):
+            _ = await load_fixture(resource())
+        failures = await registry.teardown_function_fixtures()
+
+    assert_eq(finalized, ["dependency alive", "dependency ended"])
+    assert_eq([failure.fixture_name for failure in failures], ["resource"])
+
+
+@test(mark="fast")
+async def test_pending_setup_finalizer_descendants_keep_fixture_ownership() -> None:
+    """Force-closing unfinished setup must still reap its finalizer's new tasks."""
+    started = asyncio.Event()
+    descendants: list[asyncio.Task[bool]] = []
+
+    @fixture(scope="session")
+    async def resource() -> AsyncGenerator[None]:
+        started.set()
+        try:
+            while True:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    continue
+        finally:
+            descendants.append(asyncio.create_task(asyncio.Event().wait()))
+        yield
+
+    registry = FixtureRegistry()
+    with use_registry(registry):
+        waiter = asyncio.ensure_future(load_fixture(resource()))
+        await started.wait()
+        _ = waiter.cancel()
+        with assert_raises(asyncio.CancelledError):
+            _ = await waiter
+        failures = await registry.teardown_session_fixtures(cleanup_timeout=0.01)
+
+    assert_eq([task.done() for task in descendants], [True])
+    assert_eq(
+        [failure.exception.type_name for failure in failures],
+        ["FixtureTeardownTimeoutError", "FixtureTaskLeakError"],
+    )
+    assert_eq([failure.fixture_name for failure in failures], ["resource", "resource"])
