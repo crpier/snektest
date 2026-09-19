@@ -176,6 +176,31 @@ async def my_fixture() -> AsyncGenerator[str]:
     # teardown
 ```
 
+### Keyword selection
+
+`-k EXPR` / `--keyword EXPR` uses `keywords.py` to compile a pytest-style
+case-insensitive substring expression without eval or recursive parsing.
+Operators are lowercase `not`, `and`, `or`, in precedence order; parentheses
+group. Terms accept Unicode word characters and `: + - . [ ] /` and backslash.
+Empty expressions match all. Repeated flags and malformed syntax are usage
+errors before imports. No persistent keyword config is supported.
+
+Collection validates positional selectors before globally intersecting keyword
+and marker selection. A file with no keyword matches is allowed if the combined
+selection is nonempty; empty positional files still require `--allow-empty`.
+Missing explicit functions/cases always fail. Searchable names are function names
+with bracketed case IDs, markers, and individual project-relative file/directory
+components. Root is the nearest `pyproject.toml`, or cwd; exclude checkout/parent
+names and use only the basename for external files. No arbitrary attributes or
+parameter-value repr matching. `-k slow` also matches names; `--mark slow` only
+matches markers. Syntax supports neither regex/globs nor marker arguments.
+
+Selection precedes ordinal assignment for the final plan, retaining order and
+repeated occurrences. Host, original workers, replacement workers, local runs,
+and collect-only share selection. Workers accept empty positional filters already
+validated by the host and check its manifest. Valid keyword expressions do not
+skip imports or schema generation. Programmatic runners accept `keyword=`.
+
 ### Markers
 
 `@test(mark=...)` attaches a built-in marker describing the resources a test may
@@ -540,7 +565,7 @@ and error results so baseline diagnostics remain available in console and JSON.
 
 `--update-benchmark-baseline PATH` atomically updates opted-in regions after a
 fully successful run. Filtered runs replace only matching entries and preserve
-unselected entries; marked runs replace only observed tests. Baseline identity is
+unselected entries; marked or keyword-filtered runs replace only observed tests. Baseline identity is
 the project-relative path, test function, parameter case, and required unique
 region name. Rounds, warmup, and GC policy are part of the stored measurement
 protocol. `--benchmark-baseline PATH` compares at context exit, before result

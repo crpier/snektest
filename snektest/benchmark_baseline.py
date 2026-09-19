@@ -323,6 +323,7 @@ class BenchmarkBaseline:
         test_results: list[TestResult],
         filter_items: list[FilterItem],
         mark: str | None,
+        keyword: str | None = None,
         current_machine: MachineFingerprint | None = None,
     ) -> BaselineUpdate:
         """Merge the selected successful run and atomically replace the JSON file."""
@@ -335,6 +336,7 @@ class BenchmarkBaseline:
                 test_results=test_results,
                 filter_items=filter_items,
                 mark=mark,
+                keyword=keyword,
                 observed_machine=observed_machine,
             )
 
@@ -347,6 +349,7 @@ class BenchmarkBaseline:
         test_results: list[TestResult],
         filter_items: list[FilterItem],
         mark: str | None,
+        keyword: str | None = None,
         observed_machine: MachineFingerprint,
     ) -> BaselineUpdate:
         if resolved_path.exists():
@@ -383,7 +386,7 @@ class BenchmarkBaseline:
                     raise BadRequestError(msg)
                 current_entries[identity] = cls._stored_entry(identity, measurement)
 
-        if mark is None:
+        if mark is None and keyword is None:
             entries = {
                 identity: entry
                 for identity, entry in entries.items()
