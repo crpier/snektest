@@ -285,6 +285,37 @@ combination becomes a separate test execution and cardinality is the product of
 axis sizes. One decorated test may produce at most 10,000 cases. Larger products
 raise `BadRequestError` before expansion. The limit is per test, not per suite.
 
+### GraphQL contract testing
+
+`test_graphql` (`schema.py`) uses optional `snektest[schema]` dependencies to
+load local SDL or introspection JSON and collect one positive generated case per
+selected root field. Introspection accepts raw `__schema` objects and `data`
+wrappers; non-empty response errors reject the export even with usable data.
+Files are UTF-8 with optional BOM. JSON is content-detected, while `.json` files
+must parse as JSON. Collection never fetches introspection from the endpoint.
+Queries are the default; `allow_mutations=True` permits mutations before filtering.
+`operations=GraphQLFilter(...)` uses exact `GraphQLOperationSelector(kind=...,
+field=...)` matches. Criteria are AND, include/exclude tuples are OR, and excludes
+win. Filters never enable mutations on their own. Kinds work with custom root
+type names; field names are case-sensitive. Empty selections fail collection.
+Subscriptions are excluded. The body is metadata-only; `url` is
+the complete endpoint and may be a literal or sync/async fixture handle.
+Each case runs Hypothesis in a worker thread, preserving the main event loop for
+fixture-started services. Native server-error checks reject HTTP 5xx, malformed
+JSON, non-object responses, and GraphQL errors even with HTTP 200 or partial data.
+Failure groups become `AssertionFailure` with the root field, generated query,
+and HTTP status for server errors;
+transport/configuration errors remain errors. Returned field types are not fully
+validated against SDL. Generated values and server messages may be sensitive.
+`headers` accepts literal dictionaries or sync/async fixture handles, resolved
+before the worker thread starts. `auth` registers a native Schemathesis provider
+class on the loaded schema; `checks` adds native checks without replacing defaults.
+Provider and check callbacks run in the Hypothesis worker thread. Custom assertion
+failures become contract failures; other callback exceptions remain errors.
+Subscriptions and stateful sequences are unsupported. Generated mutations can
+repeat during shrinking; use disposable services. Use ordinary tests for
+application-specific response assertions.
+
 ### OpenAPI Contract Testing
 
 `test_schema` (`schema.py`) is an optional Schemathesis integration installed
