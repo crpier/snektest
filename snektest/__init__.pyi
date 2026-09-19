@@ -47,6 +47,8 @@ from snektest.models import (
     TestTimeoutError,
 )
 from snektest.schema import (
+    GraphQLFilter,
+    GraphQLOperationSelector,
     SchemaAuthProvider,
     SchemaCheck,
     SchemaFilter,
@@ -61,6 +63,8 @@ __all__ = [
     "CollectionError",
     "Fixture",
     "FixtureError",
+    "GraphQLFilter",
+    "GraphQLOperationSelector",
     "Marker",
     "Param",
     "SchemaAuthProvider",
@@ -97,6 +101,7 @@ __all__ = [
     "load_fixture",
     "skip",
     "test",
+    "test_graphql",
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",
@@ -216,6 +221,24 @@ def test_hypothesis(
 ) -> Callable[
     [Callable[..., Coroutine[None] | None]],
     Callable[..., Coroutine[None] | None],
+]: ...
+def test_graphql(
+    schema_path: str | Path,
+    *,
+    url: str | Fixture[str] | AsyncFixture[str],
+    headers: dict[str, str]
+    | Fixture[dict[str, str]]
+    | AsyncFixture[dict[str, str]]
+    | None = None,
+    allow_mutations: bool = False,
+    auth: type[SchemaAuthProvider] | None = None,
+    checks: Sequence[SchemaCheck] = (),
+    operations: GraphQLFilter | None = None,
+    request_timeout: float = 10.0,
+    mark: Marker | None = None,
+) -> Callable[
+    [Callable[[], Coroutine[None] | None]],
+    Callable[[], Coroutine[None]],
 ]: ...
 def test_schema(
     schema_path: str | Path,

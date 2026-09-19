@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Add `test_graphql` contracts from local SDL or raw/data-wrapped introspection JSON through `snektest[schema]`, with fixture-backed endpoints and headers, native auth providers and custom checks, root-field filters, explicit mutation opt-in, and root-field-attributed generated failures with HTTP server-error status codes.
+
 - Reap cancellation-created task descendants under one cleanup deadline, preserve ownership during forced finalization, and stop unsafe continuation if owned tasks survive. (#74)
 
 - Bound cancellation-resistant async Hypothesis cleanup, stop new examples, release worker handoffs, and retain finalizer diagnostics. (#73)

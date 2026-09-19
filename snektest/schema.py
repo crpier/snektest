@@ -1,4 +1,4 @@
-"""Optional OpenAPI contract testing powered by Schemathesis."""
+"""Optional API contract testing powered by Schemathesis."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from functools import wraps
 from importlib import import_module
+from json import JSONDecodeError, loads
 from pathlib import Path
+from re import fullmatch
 from types import ModuleType
 from typing import Any, Literal, Protocol, cast
+from urllib.parse import urlsplit
 
 from hypothesis.errors import Unsatisfiable
 
@@ -87,6 +90,45 @@ class SchemaFilter:
     exclude: tuple[SchemaOperationSelector, ...] = ()
     exclude_deprecated: bool = False
     include: tuple[SchemaOperationSelector, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class GraphQLOperationSelector:
+    """Match an exact root field, operation kind, or both.
+
+    `GraphQLOperationSelector(kind="query", field="user")` selects the `user`
+    field on the query root, including schemas with a custom root type name.
+    """
+
+    field: str | None = None
+    kind: Literal["query", "mutation"] | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind is None and self.field is None:
+            msg = "GraphQLOperationSelector requires a kind or field"
+            raise BadRequestError(msg)
+        if self.kind is not None and self.kind not in {"query", "mutation"}:
+            msg = "GraphQL operation kind must be query or mutation"
+            raise BadRequestError(msg)
+        if (
+            self.field is not None
+            and fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.field) is None
+        ):
+            msg = "GraphQL field must be an exact root field name"
+            raise BadRequestError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphQLFilter:
+    """Select root fields before generation; excludes take precedence.
+
+    Selectors combine their kind and field with AND; tuples are OR sets.
+    An empty include tuple includes every otherwise eligible operation.
+    Selecting mutations still requires `allow_mutations=True` on the decorator.
+    """
+
+    exclude: tuple[GraphQLOperationSelector, ...] = ()
+    include: tuple[GraphQLOperationSelector, ...] = ()
 
 
 def _schema_config(
@@ -174,7 +216,7 @@ def _load_optional_module(
     except ModuleNotFoundError as exc:
         if exc.name != module_name:
             raise
-        msg = "test_schema requires the optional schema dependencies; install `snektest[schema]`"
+        msg = "Schema contract testing requires the optional schema dependencies; install `snektest[schema]`"
         raise BadRequestError(msg) from exc
 
 
@@ -190,6 +232,67 @@ def _collect_operations(schema: Any) -> list[Any]:
     return collected_operations
 
 
+def _load_graphql_schema(
+    schemathesis: Any, schema_path: str | Path, *, config: Any
+) -> Any:
+    """Normalize saved introspection responses without fetching the endpoint."""
+    path = Path(schema_path)
+    document = path.read_text(encoding="utf-8-sig")
+    try:
+        introspection = loads(document)
+    except JSONDecodeError:
+        if path.suffix.lower() == ".json" or document.lstrip().startswith(("{", "[")):
+            msg = f"GraphQL schema `{schema_path}` contains invalid introspection JSON"
+            raise BadRequestError(msg) from None
+        schema = schemathesis.graphql.from_file(document, config=config)
+    else:
+        if not isinstance(introspection, dict):
+            msg = f"GraphQL schema `{schema_path}` must contain an introspection object"
+            raise BadRequestError(msg)
+        if introspection.get("errors"):
+            msg = f"GraphQL schema `{schema_path}` contains introspection errors; export a successful response"
+            raise BadRequestError(msg)
+        introspection = introspection.get("data", introspection)
+        if not isinstance(introspection, dict) or not isinstance(
+            introspection.get("__schema"), dict
+        ):
+            msg = f"GraphQL schema `{schema_path}` requires __schema or data.__schema"
+            raise BadRequestError(msg)
+        schema = schemathesis.graphql.from_dict(introspection, config=config)
+    schema.location = path.absolute().as_uri()
+    return schema
+
+
+def _collect_graphql_operations(
+    schema: Any, operation_filter: GraphQLFilter | None, *, allow_mutations: bool
+) -> list[Any]:
+    """Apply the mutation safety gate before user selectors, preserving SDL order."""
+
+    def matches(selector: GraphQLOperationSelector, operation: Any) -> bool:
+        kind = "query" if operation.definition.is_query else "mutation"
+        return (selector.kind is None or selector.kind == kind) and (
+            selector.field is None or selector.field == operation.definition.field_name
+        )
+
+    selected: list[Any] = []
+    for operation in _collect_operations(schema):
+        if not operation.definition.is_query and (
+            not allow_mutations or not operation.definition.is_mutation
+        ):
+            continue
+        if operation_filter is not None:
+            if operation_filter.include and not any(
+                matches(selector, operation) for selector in operation_filter.include
+            ):
+                continue
+            if any(
+                matches(selector, operation) for selector in operation_filter.exclude
+            ):
+                continue
+        selected.append(operation)
+    return selected
+
+
 async def _resolve_runtime_value[T](
     value: T | Fixture[T] | AsyncFixture[T],
 ) -> T:
@@ -199,6 +302,121 @@ async def _resolve_runtime_value[T](
     if isinstance(value, Fixture):
         return load_fixture(cast("Fixture[T]", value))
     return value
+
+
+def test_graphql(  # noqa: PLR0913
+    schema_path: str | Path,
+    *,
+    url: str | Fixture[str] | AsyncFixture[str],
+    headers: dict[str, str]
+    | Fixture[dict[str, str]]
+    | AsyncFixture[dict[str, str]]
+    | None = None,
+    allow_mutations: bool = False,
+    auth: type[SchemaAuthProvider] | None = None,
+    checks: Sequence[SchemaCheck] = (),
+    operations: GraphQLFilter | None = None,
+    request_timeout: float = 10.0,
+    mark: Marker | None = None,
+) -> Callable[
+    [Callable[[], Coroutine[None] | None]],
+    Callable[[], Coroutine[None]],
+]:
+    """Generate positive HTTP operations from local SDL or introspection JSON.
+
+    Each selected root field becomes one parameter case. Mutations require
+    `allow_mutations=True`; subscriptions are excluded. The decorated body is
+    metadata-only. HTTP server errors and GraphQL errors fail, including errors
+    returned with HTTP 200 or partial data.
+    Returned field types are not comprehensively checked against the SDL.
+    URL and headers may be fixture-backed. Native auth providers and additional
+    checks run in the Hypothesis worker thread after fixtures are resolved.
+    """
+    if not isinstance(allow_mutations, bool):
+        msg = "allow_mutations must be a bool; use True to enable mutations explicitly"
+        raise BadRequestError(msg)
+    schemathesis = _load_optional_module("schemathesis")
+    failures_module = _load_optional_module("schemathesis.core.failures")
+    # The optional dependency exposes its exception class only at runtime.
+    failure_group_type = cast("type[BaseException]", failures_module.FailureGroup)
+    schema = _load_graphql_schema(
+        schemathesis,
+        schema_path,
+        config=schemathesis.Config.from_dict(
+            {
+                "checks": {
+                    "enabled": False,
+                    "not_a_server_error": {"enabled": True},
+                },
+                "request-timeout": request_timeout,
+            }
+        ),
+    )
+    _register_auth(schema, auth)
+    additional_checks = list(checks)
+    collected_operations = _collect_graphql_operations(
+        schema, operations, allow_mutations=allow_mutations
+    )
+    if not collected_operations:
+        msg = (
+            f"GraphQL schema `{schema_path}` selected no root fields; "
+            "check operations filters and allow_mutations (mutations are disabled by default)"
+        )
+        raise BadRequestError(msg)
+    markers = _normalize_markers(mark)
+    operation_params = [
+        Param(value=operation, name=str(operation.label))
+        for operation in collected_operations
+    ]
+
+    def decorator(
+        test_func: Callable[[], Coroutine[None] | None],
+    ) -> Callable[[], Coroutine[None]]:
+        @wraps(test_func)
+        async def wrapper(operation: Any) -> None:
+            resolved_url = await _resolve_runtime_value(url)
+            resolved_headers = (
+                None if headers is None else await _resolve_runtime_value(headers)
+            )
+            endpoint = urlsplit(resolved_url)
+            if endpoint.scheme not in {"http", "https"} or not endpoint.netloc:
+                msg = "test_graphql url must be an absolute HTTP or HTTPS endpoint"
+                raise BadRequestError(msg)
+
+            def run_one_example(case: Any) -> None:
+                # Local schemas have no endpoint path; preserve the supplied URL.
+                case.path = endpoint.path or "/"
+                try:
+                    _ = case.call_and_validate(
+                        base_url=resolved_url,
+                        headers=resolved_headers,
+                        additional_checks=additional_checks,
+                    )
+                except failure_group_type as exc:
+                    # Avoid native curl diagnostics, which can contain credentials.
+                    failures = cast("Any", exc).exceptions
+                    details: list[str] = []
+                    for failure in failures:
+                        detail = f"{failure.title}: {failure.message}".rstrip(": ")
+                        if isinstance(failure, failures_module.ServerError):
+                            detail += f" (HTTP {failure.status_code})"
+                        details.append(detail)
+                    description = "\n".join(details)
+                    msg = f"{operation.label}\n{description}\nGenerated query:\n{case.body}"
+                    raise AssertionFailure(msg) from None
+
+            await asyncio.to_thread(
+                _run_hypothesis,
+                wrapper,
+                (operation.as_strategy(),),
+                run_one_example,
+            )
+
+        mark_test_function(wrapper, (operation_params,), markers)
+        # Collection injects the operation parameter, as for test_schema.
+        return cast("Callable[[], Coroutine[None]]", wrapper)
+
+    return decorator
 
 
 def test_schema(  # noqa: PLR0913

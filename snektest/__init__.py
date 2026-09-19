@@ -46,11 +46,14 @@ from snektest.models import Param as Param
 from snektest.models import SnektestError as SnektestError
 from snektest.models import TestTimeoutError as TestTimeoutError
 from snektest.schema import (
+    GraphQLFilter,
+    GraphQLOperationSelector,
     SchemaAuthProvider,
     SchemaCheck,
     SchemaFilter,
     SchemaGenerationError,
     SchemaOperationSelector,
+    test_graphql,
     test_schema,
     test_schema_workflow,
 )
@@ -62,6 +65,8 @@ __all__ = [
     "CollectionError",
     "Fixture",
     "FixtureError",
+    "GraphQLFilter",
+    "GraphQLOperationSelector",
     "Marker",
     "Param",
     "SchemaAuthProvider",
@@ -98,6 +103,7 @@ __all__ = [
     "load_fixture",
     "skip",
     "test",
+    "test_graphql",
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",

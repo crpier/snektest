@@ -210,6 +210,94 @@ def test_no_leak() -> None:
     _ = m.peak_bytes
 ```
 
+## GraphQL contracts
+
+Install `snektest[schema]` and pass local SDL or introspection JSON to
+`@test_graphql`.
+It collects one case per query root field, such as
+`test_graphql_contract[Query.greeting]`. Collection does not contact the endpoint.
+Use a disposable service: even queries can have application-specific side effects.
+
+For introspection, pass the saved JSON path instead of the SDL path, for example
+`test_graphql("introspection.json", url="http://127.0.0.1:8000/graphql")`.
+Both raw `{"__schema": ...}` exports and full `{"data": {"__schema": ...}}`
+responses are accepted, including UTF-8 files with a BOM. JSON is recognized by
+content; a `.json` suffix requires valid JSON. Responses containing non-empty
+`errors` are rejected even when they also contain schema data. Export a successful
+introspection response first; Snektest does not perform live introspection.
+
+<!-- snektest-doc: skip-run -->
+```python
+from hypothesis import settings
+
+from snektest import test_graphql
+
+
+@settings(max_examples=50, deadline=None)
+@test_graphql(
+    "schema.graphql",
+    url="http://127.0.0.1:8000/graphql",
+    request_timeout=5.0,
+    mark="slow",
+)
+async def test_graphql_contract() -> None:
+    ...
+```
+
+The body is metadata-only and is not called. `url` is the complete HTTP endpoint,
+including its path, and accepts a literal or sync/async fixture handle.
+`headers` likewise accepts a dictionary or sync/async fixture handle, resolved
+before generation starts. Pass a native Schemathesis auth provider class through
+`auth=` for cached login or token refresh. `checks=` accepts native Schemathesis
+checks in addition to the built-in checks; raise `AssertionError` for a contract
+violation. Other check exceptions remain errors. Auth providers and checks run
+in the Hypothesis worker thread, so resolve async resources through fixtures first.
+Hypothesis generates positive operations and shrinks failures. HTTP server errors,
+malformed JSON, non-object responses, and non-empty GraphQL `errors` fail,
+including HTTP 200 and partial-data responses. Transport and configuration
+exceptions remain errors. Failure messages include the root field, HTTP server-error status when applicable,
+and generated query. Generated values and server error messages may contain sensitive data;
+review diagnostics before sharing them.
+
+Queries are selected by default. Mutations require `allow_mutations=True`,
+which permits both kinds before filtering. A mutation filter alone never enables
+writes. Use a disposable service: generated mutations may delete or modify data,
+and Hypothesis can repeat requests while shrinking a failure.
+
+Pass `operations=GraphQLFilter(...)` to select exact root fields and kinds.
+Each `GraphQLOperationSelector` combines `kind` and `field` with AND; the include
+and exclude tuples are OR sets, and excludes win. An empty include tuple means
+all eligible fields. Names are case-sensitive GraphQL field names, not dotted
+labels or patterns. Kinds refer to query/mutation semantics even with custom
+root type names. Selection preserves schema order and rejects empty results.
+
+For example, opt into one mutation explicitly:
+
+<!-- snektest-doc: skip-run -->
+```python
+from snektest import GraphQLFilter, GraphQLOperationSelector, test_graphql
+
+
+@test_graphql(
+    "schema.graphql",
+    url="http://127.0.0.1:8000/graphql",
+    allow_mutations=True,
+    operations=GraphQLFilter(
+        include=(GraphQLOperationSelector(kind="mutation", field="createWidget"),),
+    ),
+    mark="slow",
+)
+async def test_create_widget_contract() -> None:
+    ...
+```
+
+With a default root type, this collects
+`test_create_widget_contract[Mutation.createWidget]`, independently selectable
+on the CLI. Subscriptions and stateful sequences remain unsupported. The adapter
+does not comprehensively validate returned field types against SDL; use ordinary
+Snektest tests for application-specific response assertions.
+Local and worker execution use the existing console, JSON, and JUnit reporters.
+
 ## OpenAPI contracts
 
 The schema integration is an optional extra. A target URL may be supplied by a
@@ -329,6 +417,7 @@ snektest --example memory
 snektest --example outcomes
 snektest --example parametrize
 snektest --example schema
+snektest --example graphql
 ```
 """
 
@@ -337,6 +426,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "basic": "basic_test.py",
     "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
+    "graphql": "graphql.py",
     "memory": "memory.py",
     "outcomes": "outcomes.py",
     "parametrize": "parametrize.py",
