@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Add pytest-style `-k EXPR` / `--keyword EXPR` selection for names, parameter cases, and markers, with case-insensitive substrings and boolean expressions. Selection works globally across positional paths in local, worker, and collect-only modes. Keyword-filtered benchmark updates preserve unobserved tests.
+
 - Preserve worker-local run-fixture copies when cross-loads race a publication batch's release, rather than crashing on a repeated commit.
 
 - Bound run-fixture descriptor restoration in replacement workers with the configured timeout and stop failed replacements before dispatch. Decoder exceptions with broken message formatters remain fixture publication failures rather than corrupting the worker protocol.

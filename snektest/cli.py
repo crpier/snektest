@@ -21,6 +21,7 @@ from snektest.configuration import ProjectConfig, load_project_config
 from snektest.diagnostics import snapshot_exception
 from snektest.execution import run_tests
 from snektest.junit import build_junit_xml
+from snektest.keywords import KeywordExpression
 from snektest.models import (
     ArgsError,
     BadRequestError,
@@ -102,6 +103,7 @@ class CliOptions:
     json_output: bool = False
     junit_output: str | None = None
     pdb_on_failure: bool = False
+    keyword: str | None = None
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
     update_benchmark_baseline: str | None = None
@@ -153,6 +155,8 @@ Options:
                     Compare opted-in benchmarks with a machine-bound baseline
   --update-benchmark-baseline PATH
                     Atomically update opted-in benchmarks after a passing run
+  -k, --keyword EXPR
+                    Select names and markers with and/or/not and parentheses
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   --no-mark         Run every marker, overriding a project default
   -n, --workers N   Run in N worker processes, or use auto
@@ -355,6 +359,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     json_option_seen = False
     junit_output = project_config.junit_output if project_config else None
     junit_option_seen = False
+    keyword: str | None = None
     mark = project_config.mark if project_config else None
     mark_option_seen = False
     pdb_on_failure = False
@@ -443,6 +448,17 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             durations_option_seen = True
         elif arg in {"-x", "--fail-fast"}:
             fail_fast = True
+        elif arg in {"-k", "--keyword"}:
+            if keyword is not None:
+                return ParseError("Only one -k or --keyword expression is supported")
+            consumed = _consume_flag_value(argv, index, arg)
+            if isinstance(consumed, ParseError):
+                return consumed
+            keyword, index = consumed
+            try:
+                KeywordExpression(keyword)
+            except BadRequestError as error:
+                return ParseError(str(error))
         elif arg == "--mark":
             parsed_mark = _parse_mark_flag(
                 argv, index, mark_option_seen=mark_option_seen
@@ -490,6 +506,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     if action is not None and (
         filters
         or benchmark_baseline is not None
+        or keyword is not None
         or junit_option_seen
         or update_benchmark_baseline is not None
     ):
@@ -520,6 +537,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         json_output=json_output,
         junit_output=junit_output,
         mark=mark,
+        keyword=keyword,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
         update_benchmark_baseline=update_benchmark_baseline,
@@ -534,6 +552,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
     capture_output: bool,
     fail_fast: bool,
     pdb_on_failure: bool,
+    keyword: str | None = None,
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
@@ -548,6 +567,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
             capture_output=capture_output,
             diagnostics=collection_diagnostics,
             mark=mark,
+            keyword=keyword,
         )
     except CollectionError as error:
         error.collection_output = collection_diagnostics.output
@@ -577,6 +597,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     capture_output: bool = True,
     fail_fast: bool = False,
     pdb_on_failure: bool = False,
+    keyword: str | None = None,
     mark: str | None = None,
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
@@ -596,6 +617,8 @@ async def run_tests_programmatic(  # noqa: PLR0913
     Returns:
         RunResult with test results and normalized counts
     """
+    if keyword is not None:
+        KeywordExpression(keyword)
     if mark is not None and not _is_valid_mark_value(mark):
         raise BadRequestError(_invalid_mark_message(mark))
     if workers is not None and (
@@ -615,6 +638,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             fail_fast=fail_fast,
             pdb_on_failure=pdb_on_failure,
             mark=mark,
+            keyword=keyword,
             timeout=timeout,
             reporter=selected_reporter,
             benchmark_baseline=benchmark_baseline,
@@ -628,6 +652,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         capture_output=capture_output,
         fail_fast=fail_fast,
         mark=mark,
+        keyword=keyword,
         reporter=selected_reporter,
         timeout=timeout,
         workers=workers,
@@ -711,6 +736,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     capture_output=options.capture_output,
                     diagnostics=collection_diagnostics,
                     mark=options.mark,
+                    keyword=options.keyword,
                 )
         except CollectionError as error:
             error.collection_output = collection_diagnostics.output
@@ -797,6 +823,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     fail_fast=options.fail_fast,
                     pdb_on_failure=options.pdb_on_failure,
                     mark=options.mark,
+                    keyword=options.keyword,
                     timeout=options.timeout,
                     reporter=reporter,
                     benchmark_baseline=benchmark_baseline,
@@ -919,6 +946,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     test_results=summary.test_results,
                     filter_items=filter_items,
                     mark=options.mark,
+                    keyword=options.keyword,
                 )
             except BadRequestError as error:
                 return _baseline_cli_error(error, json_output=options.json_output)

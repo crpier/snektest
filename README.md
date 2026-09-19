@@ -470,7 +470,7 @@ Only regions with `median_regression_below=` are stored. The identity combines
 the path relative to the nearest `pyproject.toml`, test function, parameter case,
 and region name. Changing rounds, warmup, or `disable_gc` requires an update.
 A filtered update replaces matching entries and preserves unselected entries;
-a `--mark` update conservatively replaces only tests it observed. Snektest never
+a `--mark` or `-k` update conservatively replaces only tests it observed. Snektest never
 writes a baseline when the run, fixture teardown, or collection fails.
 Comparison ignores stored entries outside the current run. A renamed opted-in
 region therefore fails as a missing current baseline; an update over the old and
@@ -618,6 +618,10 @@ snektest --durations 10
 # Run tests with a marker
 snektest --mark fast
 
+# Search names, parameter cases, and markers with pytest-style expressions
+snektest -k "fixture and not teardown"
+snektest tests/ -k "graphql or openapi" --collect-only
+
 # Empty files, directories, filters, and marker selections fail by default.
 # Opt in only when a zero-test command is intentional.
 snektest --allow-empty --mark fast
@@ -710,6 +714,37 @@ Owned-task cleanup re-scans cancellation-created descendants under one deadline.
 Human-readable summary lines are compact: exception details keep only the first
 line and long lines may be truncated with an ellipsis. Full failure details and
 tracebacks are printed earlier in the output.
+
+### Keyword selection
+
+`-k EXPR` / `--keyword EXPR` applies pytest-style, case-insensitive substring
+matching to function names, parameter-case IDs, marker names, and file/directory
+names relative to the nearest project `pyproject.toml`, or the working directory
+if none exists. Each path component is searched separately. The checkout's name
+and absolute parent directories are excluded; files outside the project expose
+only their basename. Function names include their bracketed parameter-case ID.
+
+Use lowercase `not`, `and`, `or`, in that precedence order, and parentheses.
+Quote the whole expression in your shell. Terms support letters, digits,
+underscores, Unicode word characters, and `: + - . [ ] / \`.
+This is substring matching, not regex or glob matching. Quotes inside the
+expression and marker keyword arguments are unsupported. Unlike pytest, arbitrary
+function attributes and extra keyword metadata are not searched. An empty expression
+matches everything. Repeating `-k` or `--keyword` is a usage error.
+
+`-k slow` matches both a `slow` marker and a name like `test_slow_connection`;
+`--mark slow` matches only the marker. Keyword selection intersects with `--mark`
+and positional selectors. Positional selectors are validated first, then keyword
+and marker filtering apply to their combined cases. A positional file may have
+no keyword matches if another contributes matches. Empty positional files and
+missing explicit functions/cases still fail under the usual selection rules.
+An empty final selection fails unless `--allow-empty` is set.
+
+Keyword selection preserves order and repeated selectors, works with workers
+and `--collect-only`, and validates syntax before imports. It does not avoid
+collection imports or schema generation; narrow positional paths to reduce that
+cost. There is no `pyproject.toml` keyword default. Programmatic runners accept
+`keyword=`. Use exact selectors for reruns and `-k` for discovery.
 
 `--collect-only` imports and lists the canonical test and parameter-case
 selectors without calling test bodies. Source and filter order remain stable.

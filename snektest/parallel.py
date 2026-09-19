@@ -139,12 +139,17 @@ def _manifest(test_cases: Sequence[TestCase]) -> tuple[CaseManifest, ...]:
 
 
 def _collect_child_plan(
-    raw_filters: tuple[str, ...], mark: str | None, *, allow_empty: bool = False
+    raw_filters: tuple[str, ...],
+    mark: str | None,
+    keyword: str | None,
+    *,
+    allow_empty: bool = False,
 ) -> list[TestCase]:
     return collect_tests_from_filters(
         [FilterItem(raw_filter) for raw_filter in raw_filters],
         allow_empty=allow_empty,
         mark=mark,
+        keyword=keyword,
     )
 
 
@@ -162,6 +167,7 @@ def _host_main(  # noqa: PLR0913
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
+    keyword: str | None,
     allow_empty: bool,  # noqa: FBT001
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
@@ -171,7 +177,9 @@ def _host_main(  # noqa: PLR0913
     warnings: list[str] = []
     try:
         with maybe_capture_output(capture_output) as (output, warnings):
-            test_cases = _collect_child_plan(raw_filters, mark, allow_empty=allow_empty)
+            test_cases = _collect_child_plan(
+                raw_filters, mark, keyword, allow_empty=allow_empty
+            )
         catalog = get_run_fixture_catalog()
         connection.send(
             _BootstrapReady(
@@ -270,6 +278,7 @@ def _worker_main(  # noqa: PLR0913
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
+    keyword: str | None,
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
     benchmark_baseline: BenchmarkBaseline | None,
@@ -281,6 +290,7 @@ def _worker_main(  # noqa: PLR0913
             connection,
             raw_filters,
             mark,
+            keyword,
             capture_output,
             timeout,
             benchmark_baseline,
@@ -291,6 +301,7 @@ def _run_worker(  # noqa: PLR0913
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
+    keyword: str | None,
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
     benchmark_baseline: BenchmarkBaseline | None,
@@ -298,7 +309,10 @@ def _run_worker(  # noqa: PLR0913
     """Import one local plan and execute assigned ordinals on one event loop."""
     try:
         with maybe_capture_output(capture_output):
-            test_cases = _collect_child_plan(raw_filters, mark)
+            # The host validates empty positional selections; workers verify its manifest.
+            test_cases = _collect_child_plan(
+                raw_filters, mark, keyword, allow_empty=True
+            )
         connection.send(
             _BootstrapReady(
                 manifest=_manifest(test_cases),
@@ -435,6 +449,7 @@ async def _start_worker(  # noqa: PLR0913
     benchmark_baseline: BenchmarkBaseline | None,
     identifier: int,
     mark: str | None,
+    keyword: str | None,
     publication: RunFixturePublication,
     raw_filters: tuple[str, ...],
     timeout: float | None,  # noqa: ASYNC109
@@ -443,7 +458,7 @@ async def _start_worker(  # noqa: PLR0913
     process, connection = _spawn_process(
         context,
         _worker_main,
-        (raw_filters, mark, capture_output, timeout, benchmark_baseline),
+        (raw_filters, mark, keyword, capture_output, timeout, benchmark_baseline),
         name=f"snektest-worker-{identifier + 1}",
     )
     try:
@@ -524,6 +539,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     benchmark_baseline: BenchmarkBaseline | None,
     fail_fast: bool = False,
     mark: str | None,
+    keyword: str | None = None,
     reporter: RunReporter,
     timeout: float | None,  # noqa: ASYNC109
     workers: int | Literal["auto"],
@@ -536,7 +552,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     host_process, host_connection = _spawn_process(
         context,
         _host_main,
-        (raw_filters, mark, allow_empty, capture_output, timeout),
+        (raw_filters, mark, keyword, allow_empty, capture_output, timeout),
         name="snektest-fixture-host",
     )
     worker_processes: list[_Worker] = []
@@ -563,6 +579,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     benchmark_baseline=benchmark_baseline,
                     identifier=identifier,
                     mark=mark,
+                    keyword=keyword,
                     publication=publication,
                     raw_filters=raw_filters,
                     timeout=timeout,
@@ -604,6 +621,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                             benchmark_baseline=benchmark_baseline,
                             identifier=next_worker_identifier,
                             mark=mark,
+                            keyword=keyword,
                             publication=publication,
                             raw_filters=raw_filters,
                             timeout=timeout,

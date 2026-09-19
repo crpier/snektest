@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from snektest.annotations import PyFilePath, validate_PyFilePath
 from snektest.decorators import reset_run_fixture_catalog
+from snektest.keywords import KeywordExpression
 from snektest.models import (
     BadRequestError,
     CollectionDiagnostics,
@@ -321,13 +322,57 @@ def _validate_nonempty_plan(
         raise EmptyCollectionError(msg)
 
 
+def _select_keyword_cases(
+    collected_cases: list[TestCase],
+    expression: KeywordExpression | None,
+    *,
+    keyword: str | None,
+    mark: str | None,
+    allow_empty: bool,
+) -> list[TestCase]:
+    """Apply keyword and marker selection globally after positional validation."""
+    if expression is None:
+        return collected_cases
+    working_directory = Path.cwd().resolve()
+    project_root = next(
+        (
+            directory
+            for directory in (working_directory, *working_directory.parents)
+            if (directory / "pyproject.toml").is_file()
+        ),
+        working_directory,
+    )
+    selected: list[TestCase] = []
+    for case in collected_cases:
+        path = case.name.resolved_file_path or case.name.file_path.resolve()
+        # External files expose their basename, not unrelated machine paths.
+        parts = (
+            path.relative_to(project_root).parts
+            if path.is_relative_to(project_root)
+            else (path.name,)
+        )
+        case_name = case.name.func_name
+        if case.name.params_part:
+            case_name += f"[{case.name.params_part}]"
+        if (mark is None or mark in case.markers) and expression.matches(
+            (*parts, case_name, *case.markers)
+        ):
+            selected.append(replace(case, ordinal=len(selected)))
+    if not selected and not allow_empty:
+        message = f"No tests selected by keyword expression {keyword!r}"
+        raise EmptyCollectionError(message)
+    return selected
+
+
 def collect_tests_from_filters(
     filter_items: list[FilterItem],
     *,
     allow_empty: bool = False,
     mark: str | None = None,
+    keyword: str | None = None,
 ) -> list[TestCase]:
     """Build one complete canonical plan before any selected test executes."""
+    expression = KeywordExpression(keyword) if keyword is not None else None
     collected_cases: list[TestCase] = []
     empty_filters: list[FilterItem] = []
     module_loader = _CollectionModuleLoader()
@@ -342,7 +387,7 @@ def collect_tests_from_filters(
                 collected_file = collect_tests_from_file(
                     file_path=file_path,
                     filter_item=filter_item,
-                    mark=mark,
+                    mark=mark if expression is None else None,
                     collection_root=Path.cwd().resolve(),
                     module_loader=module_loader,
                 )
@@ -388,16 +433,23 @@ def collect_tests_from_filters(
     except BaseException as exc:
         msg = f"Error during collection: {exc}"
         raise CollectionError(msg) from exc
-    return collected_cases
+    return _select_keyword_cases(
+        collected_cases,
+        expression,
+        keyword=keyword,
+        mark=mark,
+        allow_empty=allow_empty,
+    )
 
 
-def collect_test_plan(
+def collect_test_plan(  # noqa: PLR0913
     filter_items: list[FilterItem],
     *,
     allow_empty: bool = False,
     capture_output: bool = False,
     diagnostics: CollectionDiagnostics | None = None,
     mark: str | None = None,
+    keyword: str | None = None,
 ) -> list[TestCase]:
     """Collect one complete plan under process-global import/output guards."""
     output = StringIO()
@@ -409,6 +461,7 @@ def collect_test_plan(
                     filter_items,
                     allow_empty=allow_empty,
                     mark=mark,
+                    keyword=keyword,
                 )
         except BaseException:
             if diagnostics is not None:
