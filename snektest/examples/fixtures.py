@@ -1,7 +1,12 @@
 """Fixture examples for snektest.
 
 Concurrent async run loads share an in-flight request per identity. Workers drain
-outstanding loads after waiter cancellation before receiving another command.
+outstanding loads after waiter cancellation before returning a result or receiving
+another command. Replacement workers restore published copies and cached failures
+without repeating host setup. Cross-loads during batch release preserve existing
+worker-local copies. Each descriptor restoration uses --timeout, unless
+--no-timeout disables it; failed restoration aborts the run with an infrastructure
+error. Broken decoder exception formatters retain safe publication diagnostics.
 
 Run-fixture setup preserves interruption and cleans established dependencies.
 Workers stop new dispatch, drain active work and tear down before propagating it.

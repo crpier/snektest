@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import threading
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -15,10 +14,9 @@ from multiprocessing import get_context
 from multiprocessing.context import SpawnContext
 from multiprocessing.process import BaseProcess
 from pathlib import Path
-from pickle import loads
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, cast
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture
+from snektest.annotations import AsyncFixture, Coroutine
 from snektest.benchmark_baseline import BenchmarkBaseline
 from snektest.collection import collect_tests_from_filters
 from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
@@ -35,7 +33,6 @@ from snektest.models import (
     ErrorResult,
     ExceptionDiagnostic,
     FilterItem,
-    FixtureError,
     InvalidTestDefinitionError,
     RunInfrastructureError,
     RunResult,
@@ -47,16 +44,14 @@ from snektest.models import (
 )
 from snektest.output import maybe_capture_output
 from snektest.reporting import RunReporter, result_for_retention
-
-
-class _ProcessConnection(Protocol):
-    """Operations shared by Unix `Connection` and Windows `PipeConnection`."""
-
-    def close(self) -> None: ...
-
-    def recv(self) -> object: ...
-
-    def send(self, obj: Any) -> None: ...
+from snektest.run_fixture_publication import (
+    LoadRunFixture,
+    ProcessConnection,
+    RunFixtureFailed,
+    RunFixtureLoaded,
+    RunFixturePublication,
+    WorkerRunFixtures,
+)
 
 
 @dataclass(frozen=True)
@@ -100,60 +95,6 @@ class _ExecutionFinished:
 
 
 @dataclass(frozen=True)
-class _RunFixtureRequested:
-    identity: RunFixtureIdentity
-
-
-@dataclass(frozen=True)
-class _LoadRunFixture:
-    identity: RunFixtureIdentity
-
-
-@dataclass(frozen=True)
-class _RunFixtureLoaded:
-    identity: RunFixtureIdentity
-    output: str
-    payload: bytes
-
-
-@dataclass(frozen=True)
-class _RunFixtureFailed:
-    identity: RunFixtureIdentity
-    message: str
-    output: str = ""
-    interruption: str | None = None
-    exit_code: int | str | None = None
-
-
-@dataclass(frozen=True)
-class _StageRunFixture:
-    identity: RunFixtureIdentity
-    payload: bytes
-
-
-@dataclass(frozen=True)
-class _RunFixtureStageAck:
-    identity: RunFixtureIdentity
-    message: str | None = None
-
-
-@dataclass(frozen=True)
-class _CommitRunFixture:
-    identity: RunFixtureIdentity
-
-
-@dataclass(frozen=True)
-class _DiscardRunFixture:
-    identity: RunFixtureIdentity
-
-
-@dataclass(frozen=True)
-class _RunFixtureUnavailable:
-    identity: RunFixtureIdentity
-    message: str
-
-
-@dataclass(frozen=True)
 class _Shutdown: ...
 
 
@@ -171,25 +112,15 @@ class _HostStopped:
     run_teardown_warnings: tuple[str, ...]
 
 
-type _ParentToWorker = (
-    _CommitRunFixture
-    | _DiscardRunFixture
-    | _Execute
-    | _RunFixtureUnavailable
-    | _Shutdown
-    | _StageRunFixture
-)
-
-
 @dataclass
 class _Worker:
     """Coordinator-owned connection and lifecycle state for one process."""
 
-    connection: _ProcessConnection
+    connection: ProcessConnection
     identifier: int
     process: BaseProcess
     active_ordinal: int | None = None
-    waiting_for_run_fixture: RunFixtureIdentity | None = None
+    waiting_for_run_fixture: bool = False
 
 
 def _manifest(test_cases: Sequence[TestCase]) -> tuple[CaseManifest, ...]:
@@ -217,28 +148,18 @@ def _collect_child_plan(
     )
 
 
-async def _await_run_fixture_payload(
-    payload: Coroutine[bytes],
-    timeout: float | None,  # noqa: ASYNC109
-) -> bytes:
-    if timeout is None:
-        return await payload
-    # Reserve part of the transaction budget for serialization and fleet staging.
-    async with asyncio.timeout(timeout / 2):
-        return await payload
-
-
 async def _load_async_run_fixture_payload(
     registry: FixtureRegistry,
     handle: AsyncFixture[Any],
     timeout: float | None,  # noqa: ASYNC109
 ) -> bytes:
-    payload = cast("Coroutine[bytes]", registry.load_run_payload(handle))
-    return await _await_run_fixture_payload(payload, timeout)
+    """Await host setup within the publication module's allocated budget."""
+    async with asyncio.timeout(timeout):
+        return await cast("Coroutine[bytes]", registry.load_run_payload(handle))
 
 
 def _host_main(  # noqa: PLR0913
-    connection: _ProcessConnection,
+    connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     allow_empty: bool,  # noqa: FBT001
@@ -291,11 +212,11 @@ def _host_main(  # noqa: PLR0913
                     )
                 )
                 break
-            if not isinstance(message, _LoadRunFixture):
+            if not isinstance(message, LoadRunFixture):
                 msg = (
                     f"Fixture host received unexpected message {type(message).__name__}"
                 )
-                connection.send(_RunFixtureFailed(("", ""), msg))
+                connection.send(RunFixtureFailed(("", ""), msg))
                 continue
             output = None
             try:
@@ -306,7 +227,7 @@ def _host_main(  # noqa: PLR0913
                             _load_async_run_fixture_payload(
                                 registry,
                                 handle,
-                                timeout,
+                                message.setup_timeout,
                             )
                         )
                     else:
@@ -317,7 +238,7 @@ def _host_main(  # noqa: PLR0913
                     exc, (SystemExit, KeyboardInterrupt, asyncio.CancelledError)
                 )
                 connection.send(
-                    _RunFixtureFailed(
+                    RunFixtureFailed(
                         message.identity,
                         (
                             f"Run fixture {message.identity[0]}."
@@ -336,7 +257,7 @@ def _host_main(  # noqa: PLR0913
                 )
             else:
                 connection.send(
-                    _RunFixtureLoaded(
+                    RunFixtureLoaded(
                         message.identity,
                         output.getvalue(),
                         payload,
@@ -345,103 +266,8 @@ def _host_main(  # noqa: PLR0913
     connection.close()
 
 
-class _RemoteRunFixtureLoader:
-    """Worker-side descriptor cache driven by coordinator publication messages."""
-
-    def __init__(self, connection: _ProcessConnection) -> None:
-        self._committed: dict[RunFixtureIdentity, object] = {}
-        self._connection: _ProcessConnection = connection
-        self._failures: dict[RunFixtureIdentity, str] = {}
-        self._staged: dict[RunFixtureIdentity, object] = {}
-        self._load_lock: threading.Lock = threading.Lock()
-        self._pending: dict[RunFixtureIdentity, asyncio.Future[object]] = {}
-
-    def __call__[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
-        identity = (
-            cast("str", getattr(handle.key, "__module__", "")),
-            cast("str", getattr(handle.key, "__qualname__", "")),
-        )
-        if isinstance(handle, AsyncFixture):
-
-            async def load_async() -> R:
-                pending = self._pending.get(identity)
-                if pending is None:
-                    pending = asyncio.get_running_loop().run_in_executor(
-                        None, self._load, identity
-                    )
-                    self._pending[identity] = pending
-                # wait does not cancel the shared future or log abandoned shield errors.
-                _ = await asyncio.wait({pending})
-                return cast("R", pending.result())
-
-            return cast("Coroutine[R]", load_async())
-        return cast("R", self._load(identity))
-
-    async def drain(self) -> None:
-        """Finish remote readers before the worker main loop receives again.
-
-        Cancelling an async waiter cannot stop its executor thread. Keep the
-        underlying futures alive and retrieve their outcomes even without waiters.
-        """
-        if self._pending:
-            _ = await asyncio.gather(*self._pending.values(), return_exceptions=True)
-            self._pending.clear()
-
-    def process_control(self, message: _ParentToWorker) -> bool:
-        """Apply one publication message, returning whether it was recognized."""
-        if isinstance(message, _StageRunFixture):
-            try:
-                self._staged[message.identity] = loads(message.payload)  # noqa: S301
-            except BaseException as exc:
-                self._connection.send(
-                    _RunFixtureStageAck(
-                        message.identity,
-                        f"{type(exc).__name__}: {exc}",
-                    )
-                )
-            else:
-                self._connection.send(_RunFixtureStageAck(message.identity))
-            return True
-        if isinstance(message, _CommitRunFixture):
-            self._committed[message.identity] = self._staged.pop(message.identity)
-            self._failures.pop(message.identity, None)
-            return True
-        if isinstance(message, _DiscardRunFixture):
-            self._staged.pop(message.identity, None)
-            return True
-        if isinstance(message, _RunFixtureUnavailable):
-            self._staged.pop(message.identity, None)
-            self._failures[message.identity] = message.message
-            return True
-        return False
-
-    def _load(self, identity: RunFixtureIdentity) -> object:
-        with self._load_lock:
-            if identity in self._failures:
-                raise FixtureError(self._failures[identity])
-            if identity in self._committed:
-                return self._committed[identity]
-
-            self._connection.send(_RunFixtureRequested(identity))
-            while True:
-                message = cast("_ParentToWorker", self._connection.recv())
-                if not self.process_control(message):
-                    msg = f"Expected run fixture publication, got {type(message).__name__}"
-                    raise FixtureError(msg)
-                if (
-                    isinstance(message, _CommitRunFixture)
-                    and message.identity == identity
-                ):
-                    return self._committed[identity]
-                if (
-                    isinstance(message, _RunFixtureUnavailable)
-                    and message.identity == identity
-                ):
-                    raise FixtureError(message.message)
-
-
 def _worker_main(  # noqa: PLR0913
-    connection: _ProcessConnection,
+    connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     capture_output: bool,  # noqa: FBT001
@@ -462,7 +288,7 @@ def _worker_main(  # noqa: PLR0913
 
 
 def _run_worker(  # noqa: PLR0913
-    connection: _ProcessConnection,
+    connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
     capture_output: bool,  # noqa: FBT001
@@ -485,16 +311,14 @@ def _run_worker(  # noqa: PLR0913
         return
 
     registry = FixtureRegistry()
-    run_fixture_loader = _RemoteRunFixtureLoader(connection)
+    run_fixture_loader = WorkerRunFixtures(connection)
     with (
         use_registry(registry),
         use_run_fixture_loader(run_fixture_loader),
         asyncio.Runner() as runner,
     ):
         while True:
-            message = cast("_ParentToWorker", connection.recv())
-            if run_fixture_loader.process_control(message):
-                continue
+            message = runner.run(run_fixture_loader.receive_command())
             if isinstance(message, _Shutdown):
                 failures, output, warnings = runner.run(
                     teardown_session_fixtures(
@@ -513,8 +337,8 @@ def _run_worker(  # noqa: PLR0913
                 msg = f"Execution worker received unexpected {type(message).__name__}"
                 raise RunInfrastructureError(msg)
             test_case = test_cases[message.ordinal]
-            try:
-                result = runner.run(
+            result = runner.run(
+                run_fixture_loader.run_case(
                     execute_test(
                         test_case,
                         capture_output=capture_output,
@@ -522,8 +346,7 @@ def _run_worker(  # noqa: PLR0913
                         benchmark_baseline=benchmark_baseline,
                     )
                 )
-            finally:
-                runner.run(run_fixture_loader.drain())
+            )
             connection.send(_ExecutionFinished(result))
     connection.close()
 
@@ -534,7 +357,7 @@ def _spawn_process(
     args: tuple[object, ...],
     *,
     name: str,
-) -> tuple[BaseProcess, _ProcessConnection]:
+) -> tuple[BaseProcess, ProcessConnection]:
     parent_connection, child_connection = context.Pipe(duplex=True)
     process = context.Process(
         target=target,
@@ -548,7 +371,7 @@ def _spawn_process(
 
 
 async def _receive_bootstrap(
-    connection: _ProcessConnection,
+    connection: ProcessConnection,
     *,
     child_name: str,
     collection_owner: bool = False,
@@ -594,7 +417,7 @@ async def _receive_bootstrap(
     return message
 
 
-async def _stop_process(process: BaseProcess, connection: _ProcessConnection) -> None:
+async def _stop_process(process: BaseProcess, connection: ProcessConnection) -> None:
     connection.close()
     if process.is_alive():
         process.terminate()
@@ -612,8 +435,7 @@ async def _start_worker(  # noqa: PLR0913
     benchmark_baseline: BenchmarkBaseline | None,
     identifier: int,
     mark: str | None,
-    publication_failures: dict[RunFixtureIdentity, str],
-    published_descriptors: dict[RunFixtureIdentity, bytes],
+    publication: RunFixturePublication,
     raw_filters: tuple[str, ...],
     timeout: float | None,  # noqa: ASYNC109
 ) -> _Worker:
@@ -641,91 +463,16 @@ async def _start_worker(  # noqa: PLR0913
         await _stop_process(process, connection)
         msg = f"worker {identifier + 1} collected a different test manifest"
         raise RunInfrastructureError(msg)
-    for identity, payload in published_descriptors.items():
-        connection.send(_StageRunFixture(identity, payload))
-        acknowledgement = await asyncio.to_thread(connection.recv)
-        if not isinstance(acknowledgement, _RunFixtureStageAck):
-            await _stop_process(process, connection)
-            msg = f"worker {identifier + 1} failed to restore run fixture {identity}"
-            raise RunInfrastructureError(msg)
-        if acknowledgement.message is not None:
-            await _stop_process(process, connection)
-            msg = (
-                f"worker {identifier + 1} could not decode run fixture {identity}: "
-                f"{acknowledgement.message}"
-            )
-            raise RunInfrastructureError(msg)
-        connection.send(_CommitRunFixture(identity))
-    for identity, message in publication_failures.items():
-        connection.send(_RunFixtureUnavailable(identity, message))
+    try:
+        await publication.restore(connection, worker_name=f"worker {identifier + 1}")
+    except BaseException:
+        await _stop_process(process, connection)
+        raise
     return _Worker(
         connection=connection,
         identifier=identifier,
         process=process,
     )
-
-
-async def _publish_run_fixture(  # noqa: C901, PLR0913
-    identity: RunFixtureIdentity,
-    *,
-    host_connection: _ProcessConnection,
-    publication_failures: dict[RunFixtureIdentity, str],
-    published_descriptors: dict[RunFixtureIdentity, bytes],
-    lifecycle_outputs: list[str],
-    workers: list[_Worker],
-) -> _CommitRunFixture | _RunFixtureUnavailable | _RunFixtureFailed:
-    """Stage one host descriptor everywhere before making any copy visible."""
-    if identity in published_descriptors or identity in publication_failures:
-        if identity in published_descriptors:
-            return _CommitRunFixture(identity)
-        return _RunFixtureUnavailable(identity, publication_failures[identity])
-    host_connection.send(_LoadRunFixture(identity))
-    try:
-        host_message = await asyncio.to_thread(host_connection.recv)
-    except (EOFError, OSError) as exc:
-        msg = "fixture host exited during run fixture setup"
-        raise RunInfrastructureError(msg) from exc
-    if isinstance(host_message, _RunFixtureFailed):
-        if host_message.output:
-            lifecycle_outputs.append(host_message.output)
-        if host_message.interruption is not None:
-            return host_message
-        publication_failures[identity] = host_message.message
-        return _RunFixtureUnavailable(identity, host_message.message)
-    if not isinstance(host_message, _RunFixtureLoaded):
-        msg = "fixture host sent an invalid run fixture response"
-        raise RunInfrastructureError(msg)
-    if host_message.output:
-        lifecycle_outputs.append(host_message.output)
-
-    for worker in workers:
-        worker.connection.send(_StageRunFixture(identity, host_message.payload))
-    acknowledgements = await asyncio.gather(
-        *(asyncio.to_thread(worker.connection.recv) for worker in workers)
-    )
-    decode_errors = [
-        acknowledgement.message
-        for acknowledgement in acknowledgements
-        if isinstance(acknowledgement, _RunFixtureStageAck)
-        and acknowledgement.message is not None
-    ]
-    acknowledgements_valid = all(
-        isinstance(acknowledgement, _RunFixtureStageAck)
-        and acknowledgement.identity == identity
-        for acknowledgement in acknowledgements
-    )
-    if not acknowledgements_valid:
-        msg = f"Invalid staging acknowledgement for run fixture {identity}"
-        raise RunInfrastructureError(msg)
-    if decode_errors:
-        message = f"Run fixture {identity} publication failed: {decode_errors[0]}"
-        publication_failures[identity] = message
-        for worker in workers:
-            worker.connection.send(_DiscardRunFixture(identity))
-        return _RunFixtureUnavailable(identity, message)
-
-    published_descriptors[identity] = host_message.payload
-    return _CommitRunFixture(identity)
 
 
 def _next_runnable_ordinal(
@@ -806,9 +553,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if workers == "auto"
             else min(workers, len(canonical_manifest))
         )
-        publication_failures: dict[RunFixtureIdentity, str] = {}
-        published_descriptors: dict[RunFixtureIdentity, bytes] = {}
-        run_lifecycle_outputs: list[str] = []
+        publication = RunFixturePublication(host_connection, timeout=timeout)
         for identifier in range(requested_workers):
             worker_processes.append(  # noqa: PERF401
                 await _start_worker(
@@ -818,8 +563,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     benchmark_baseline=benchmark_baseline,
                     identifier=identifier,
                     mark=mark,
-                    publication_failures=publication_failures,
-                    published_descriptors=published_descriptors,
+                    publication=publication,
                     raw_filters=raw_filters,
                     timeout=timeout,
                 )
@@ -834,55 +578,17 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         next_worker_identifier = requested_workers
         replacements_needed = 0
         run_ahead_limit = 1 if fail_fast else requested_workers * 2
-        run_fixture_requests: list[RunFixtureIdentity] = []
-        run_interruption: _RunFixtureFailed | None = None
-
-        while pending or receive_tasks or run_fixture_requests:
-            if run_fixture_requests and not receive_tasks:
-                publication_releases: list[
-                    _CommitRunFixture | _RunFixtureUnavailable
-                ] = []
-                while run_fixture_requests:
-                    identity = run_fixture_requests.pop(0)
-                    if run_interruption is not None:
-                        publication_releases.append(
-                            _RunFixtureUnavailable(identity, run_interruption.message)
-                        )
-                        continue
-                    publication = _publish_run_fixture(
-                        identity,
-                        host_connection=host_connection,
-                        publication_failures=publication_failures,
-                        published_descriptors=published_descriptors,
-                        lifecycle_outputs=run_lifecycle_outputs,
-                        workers=worker_processes,
-                    )
-                    try:
-                        if timeout is None:
-                            release = await publication
-                        else:
-                            release = await asyncio.wait_for(
-                                publication,
-                                timeout=timeout,
-                            )
-                    except TimeoutError:
-                        msg = (
-                            f"Run fixture {identity} publication did not finish "
-                            f"within {timeout:g}s"
-                        )
-                        raise RunInfrastructureError(msg) from None
-                    if isinstance(release, _RunFixtureFailed):
-                        run_interruption = release
-                        pending.clear()
-                        release = _RunFixtureUnavailable(identity, release.message)
-                    publication_releases.append(release)
-                for release in publication_releases:
-                    for worker in worker_processes:
-                        worker.connection.send(release)
+        while pending or receive_tasks or publication.pending:
+            if publication.pending and not receive_tasks:
+                await publication.publish(
+                    [worker.connection for worker in worker_processes]
+                )
+                if publication.interrupted:
+                    pending.clear()
                 for worker in worker_processes:
-                    if worker.waiting_for_run_fixture is None:
+                    if not worker.waiting_for_run_fixture:
                         continue
-                    worker.waiting_for_run_fixture = None
+                    worker.waiting_for_run_fixture = False
                     receive_task = asyncio.create_task(
                         asyncio.to_thread(worker.connection.recv)
                     )
@@ -898,8 +604,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                             benchmark_baseline=benchmark_baseline,
                             identifier=next_worker_identifier,
                             mark=mark,
-                            publication_failures=publication_failures,
-                            published_descriptors=published_descriptors,
+                            publication=publication,
                             raw_filters=raw_filters,
                             timeout=timeout,
                         )
@@ -907,7 +612,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     next_worker_identifier += 1
                 replacements_needed = 0
 
-            if not replacements_needed and not run_fixture_requests:
+            if not replacements_needed and not publication.pending:
                 for worker in worker_processes:
                     unreported_case_count = len(results_by_ordinal) + sum(
                         active_worker.active_ordinal is not None
@@ -917,7 +622,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                         break
                     if (
                         worker.active_ordinal is not None
-                        or worker.waiting_for_run_fixture is not None
+                        or worker.waiting_for_run_fixture
                     ):
                         continue
                     ordinal = _next_runnable_ordinal(
@@ -963,10 +668,8 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     worker.connection.close()
                     replacements_needed += 1
                     continue
-                if isinstance(message, _RunFixtureRequested):
-                    worker.waiting_for_run_fixture = message.identity
-                    if message.identity not in run_fixture_requests:
-                        run_fixture_requests.append(message.identity)
+                if publication.request(message):
+                    worker.waiting_for_run_fixture = True
                     continue
                 if not isinstance(message, _ExecutionFinished):
                     msg = f"worker {worker.identifier + 1} sent invalid result message"
@@ -1017,19 +720,12 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.run_warnings = run_warnings
             teardown_diagnostics.session_output = session_output
             teardown_diagnostics.session_warnings = tuple(session_warnings)
-        if run_interruption is not None:
-            if run_interruption.interruption == "SystemExit":
-                raise SystemExit(run_interruption.exit_code)
-            if run_interruption.interruption == "KeyboardInterrupt":
-                raise KeyboardInterrupt
-            raise asyncio.CancelledError(run_interruption.message)
+        publication.raise_if_interrupted()
         completed_run = RunResult.from_execution(
             collection_output=canonical_bootstrap.collection_output,
             collection_warnings=canonical_bootstrap.collection_warnings,
             run_teardown_failures=run_failures,
-            run_teardown_output=(
-                "".join([*run_lifecycle_outputs, run_output or ""]) or None
-            ),
+            run_teardown_output=(publication.output + (run_output or "") or None),
             run_teardown_warnings=run_warnings,
             session_teardown_failures=session_failures,
             session_teardown_output=session_output,
