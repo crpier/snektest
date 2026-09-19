@@ -848,7 +848,14 @@ frames only until it stops on the first failure. See
 Teardown is dependency-first-in-reverse: function fixtures after each test,
 session fixtures when each worker exits, then run fixtures in the host. A worker
 replacement after a crash is a new process incarnation and may set up session
-fixtures again.
+fixtures again. It receives fresh copies of published run-fixture descriptors and
+cached publication failures before receiving work, without repeating host setup.
+Cross-loading descriptors while a publication batch is released preserves each
+worker's existing copies, including local mutations.
+Restoring each descriptor is bounded by `--timeout`; `--no-timeout` disables this
+limit too. Failed or timed-out restoration aborts the run with an infrastructure
+error. Decoder exceptions remain fixture publication failures even when their
+message formatter raises.
 
 ## Marking Tests
 

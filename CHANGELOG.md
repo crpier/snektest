@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Preserve worker-local run-fixture copies when cross-loads race a publication batch's release, rather than crashing on a repeated commit.
+
+- Bound run-fixture descriptor restoration in replacement workers with the configured timeout and stop failed replacements before dispatch. Decoder exceptions with broken message formatters remain fixture publication failures rather than corrupting the worker protocol.
+
 - Retain task ownership when fixture setup fails before yielding. Scope teardown reports abandoned tasks and finalizer failures without replacing the setup error; session retries preserve cleanup for every attempt. Pending shared async session setup also survives cancellation of a test's waiter across tests. Bound cancellation of unfinished setup at scope teardown and retain its cleanup errors as fixture diagnostics. Function setup left pending when its test returns is reported as abandoned fixture work and cleaned before the next test.
 
 - Add `test_graphql` contracts from local SDL or raw/data-wrapped introspection JSON through `snektest[schema]`, with fixture-backed endpoints and headers, native auth providers and custom checks, root-field filters, explicit mutation opt-in, and root-field-attributed generated failures with HTTP server-error status codes.
