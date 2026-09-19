@@ -2,6 +2,12 @@
 
 Cleanup follows cancellation-created descendants under one owner deadline, leaving
 unrelated tasks alone. Unreapable owned tasks stop the run before another test.
+Failed fixture setup retains its task owner until scope teardown, where cleanup
+failures accompany the original setup error. Retries retain each attempt's cleanup.
+Shared async session setup survives cancellation of a test's waiter. At scope
+teardown, unfinished setup receives bounded cancellation and retains cleanup
+errors as fixture teardown diagnostics. Function setup still pending when its
+test returns is abandoned fixture work, cleaned before the next test.
 
 Hypothesis cancellation stops new examples, releases cross-thread handoffs and
 bounds resistant async-example cleanup. Blocking thread work needs an outer timeout.
@@ -62,10 +68,14 @@ async def serve_until_cancelled() -> None:
 async def background_server() -> AsyncGenerator[asyncio.Task[None]]:
     """Keep background work alive until fixture teardown."""
     server_task = asyncio.create_task(serve_until_cancelled())
-    yield server_task
-    assert_false(server_task.done())
-    _ = server_task.cancel()
-    _ = await asyncio.gather(server_task, return_exceptions=True)
+    try:
+        # Protect setup before yielding as well as normal fixture teardown.
+        await asyncio.sleep(0)
+        yield server_task
+    finally:
+        assert_false(server_task.done())
+        _ = server_task.cancel()
+        _ = await asyncio.gather(server_task, return_exceptions=True)
 
 
 @test(mark="fast")

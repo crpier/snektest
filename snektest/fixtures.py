@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -22,7 +22,12 @@ from snektest.models import (
     TeardownFailure,
     UnreachableError,
 )
-from snektest.task_cleanup import cancel_tasks, defer_cancellation
+from snektest.task_cleanup import (
+    cancel_owned_tasks,
+    cancel_tasks,
+    defer_cancellation,
+    task_scope,
+)
 
 type _SessionSlot = tuple[AsyncGenerator[Any] | Generator[Any], object, str]
 type _RunFixtureHandle = Fixture[Any] | AsyncFixture[Any]
@@ -30,20 +35,6 @@ type _RunFixtureLoader = Callable[[_RunFixtureHandle], object]
 
 _MAX_RUN_DESCRIPTOR_BYTES = 1024 * 1024
 """Largest serialized descriptor published by a run fixture."""
-
-_fixture_task_owner: ContextVar[object | None] = ContextVar(
-    "snektest_fixture_task_owner", default=None
-)
-
-
-@contextmanager
-def _fixture_task_scope(owner: object) -> Generator[None]:
-    """Tag child tasks with the fixture generator that owns their lifetime."""
-    token = _fixture_task_owner.set(owner)
-    try:
-        yield
-    finally:
-        _fixture_task_owner.reset(token)
 
 
 def _ensure_session_fixture_has_no_parameters(function: object, name: str) -> None:
@@ -112,7 +103,7 @@ async def teardown_fixture(
 ) -> TeardownFailure | None:
     """Advance one fixture (sync or async) through teardown, capturing failure."""
     try:
-        with _fixture_task_scope(generator):
+        with task_scope(generator):
             if isasyncgen(generator):
                 await _teardown_async_fixture(fixture_name, generator, cleanup_timeout)
             elif isgenerator(generator):
@@ -144,18 +135,7 @@ async def _cleanup_fixture_tasks(
 ) -> list[TeardownFailure]:
     """Cancel tasks abandoned by one fixture and attribute the failure."""
 
-    def owned_tasks() -> set[asyncio.Task[Any]]:
-        return {
-            task
-            for task in asyncio.all_tasks()
-            if task.get_context().get(_fixture_task_owner) is owner
-            and task is not asyncio.current_task()
-            and not task.done()
-        }
-
-    cleanup = await cancel_tasks(
-        owned_tasks(), timeout=cleanup_timeout, discover=owned_tasks
-    )
+    cleanup = await cancel_owned_tasks(owner, timeout=cleanup_timeout)
     if not cleanup.total:
         return []
 
@@ -178,6 +158,52 @@ async def _cleanup_fixture_tasks(
         ]
 
 
+async def _cancel_pending_setups(
+    pending: Mapping[asyncio.Task[Any], str],
+    *,
+    cleanup_timeout: float,
+    abandoned: bool = False,
+) -> list[TeardownFailure]:
+    """Bound unfinished setup before tearing down its established dependencies.
+
+    Cancelling all setups first releases shared dependency waits. Cooperative
+    cancellation is normal shutdown for cached fixtures. Function setup left
+    pending when its test returns is abandoned work. Resistant setup and cleanup
+    errors are fixture teardown failures. Descendants are reaped with their fixture
+    after its setup has unwound and registered its teardown attempt.
+    """
+    setups = tuple((task, name) for task, name in pending.items() if not task.done())
+    for task, _ in setups:
+        _ = task.cancel()
+    failures: list[TeardownFailure] = []
+    for task, name in setups:
+        cleanup = await cancel_tasks({task}, timeout=cleanup_timeout)
+        cleanup_error: BaseException | None = None
+        if cleanup.resistant:
+            cleanup_error = FixtureTeardownTimeoutError(name, cleanup_timeout)
+        elif not task.cancelled():
+            cleanup_error = task.exception()
+        if cleanup_error is None and abandoned:
+            cleanup_error = FixtureTaskLeakError(name, 1)
+        if cleanup_error is not None:
+            try:
+                raise cleanup_error  # noqa: TRY301
+            except BaseException as error:
+                failures.append(
+                    TeardownFailure(
+                        exception=snapshot_exception(
+                            type(error), error, error.__traceback__
+                        ),
+                        fixture_name=name,
+                    )
+                )
+        failures.extend(
+            TeardownFailure(exception=diagnostic, fixture_name=name)
+            for diagnostic in cleanup.failures
+        )
+    return failures
+
+
 class FixtureRegistry:
     """Owns all fixture state and teardown for a single test run.
 
@@ -188,18 +214,17 @@ class FixtureRegistry:
     """
 
     def __init__(self) -> None:
-        self._function_task_owners: set[object] = set()
+        self._pending_function_tasks: dict[asyncio.Task[Any], str] = {}
         self._session: dict[object, _SessionSlot] = {}
-        self._session_order: list[object] = []
-        self._session_task_owners: set[object] = set()
-        self._pending_session_tasks: set[asyncio.Task[Any]] = set()
+        # Cache entries can be retried; every attempted generator retains cleanup.
+        self._session_stack: list[tuple[str, AsyncGenerator[Any] | Generator[Any]]] = []
+        self._pending_session_tasks: dict[asyncio.Task[Any], str] = {}
         self._run: dict[object, _SessionSlot] = {}
         self._run_copies: dict[object, object] = {}
         self._run_order: list[object] = []
-        self._run_task_owners: set[object] = set()
-        self._pending_run_tasks: set[asyncio.Task[bytes | _RunFixtureInterruption]] = (
-            set()
-        )
+        self._pending_run_tasks: dict[
+            asyncio.Task[bytes | _RunFixtureInterruption], str
+        ] = {}
         self._function_stack: list[
             tuple[str, AsyncGenerator[Any] | Generator[Any]]
         ] = []
@@ -266,8 +291,8 @@ class FixtureRegistry:
         """Set up a function-scoped fixture and register it for teardown.
 
         A fixture may depend on another by calling `load_fixture` in its body.
-        The dependency is registered for teardown only after its own setup
-        completes, so it lands below the depending fixture on the teardown stack
+        The dependency is registered for teardown after its own setup attempt
+        finishes, so it lands below the depending fixture on the teardown stack
         and is torn down *after* it (the depending fixture may use the dependency
         during teardown). A session fixture may not depend on a function fixture:
         the function fixture is torn down after each test while the session
@@ -293,22 +318,34 @@ class FixtureRegistry:
         gen = handle.make()
         with (
             self._fixture_setup_scope(handle.key, handle.name),
-            _fixture_task_scope(gen),
+            task_scope(gen),
         ):
-            value = next(gen)
-        self._function_task_owners.add(gen)
-        self._function_stack.append((handle.name, gen))
+            try:
+                value = next(gen)
+            finally:
+                self._function_stack.append((handle.name, gen))
         return value
 
     async def _setup_async_function[R](
         self, key: object, name: str, agen: AsyncGenerator[R]
     ) -> R:
-        """Await an async function fixture's setup, then register its teardown."""
-        with self._fixture_setup_scope(key, name), _fixture_task_scope(agen):
-            value = await agen.__anext__()
-        self._function_task_owners.add(agen)
-        self._function_stack.append((name, agen))
-        return value
+        """Retain unfinished setup and each attempted generator for cleanup."""
+        with self._fixture_setup_scope(key, name), task_scope(agen):
+            task = asyncio.current_task()
+            if task is None:
+                msg = "Async fixture setup requires a running task"
+                raise UnreachableError(msg)
+            parent_setup = self._pending_function_tasks.get(task)
+            self._pending_function_tasks[task] = name
+            try:
+                return await anext(agen)
+            finally:
+                self._function_stack.append((name, agen))
+                # Nested function dependencies execute in the same caller task.
+                if parent_setup is None:
+                    _ = self._pending_function_tasks.pop(task, None)
+                else:
+                    self._pending_function_tasks[task] = parent_setup
 
     def load_session[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
         """Set up a session-scoped fixture once and reuse it thereafter."""
@@ -374,7 +411,7 @@ class FixtureRegistry:
             with (
                 self._fixture_setup_scope(handle.key, handle.name),
                 self._run_setup_scope(handle.name),
-                _fixture_task_scope(generator),
+                task_scope(generator),
             ):
                 descriptor = next(generator)
             payload = self._serialize_run_descriptor(handle.name, descriptor)
@@ -385,7 +422,6 @@ class FixtureRegistry:
             raise FixtureError(failure.message) from None
         self._run[handle.key] = (generator, payload, handle.name)
         self._run_order.append(handle.key)
-        self._run_task_owners.add(generator)
         return payload
 
     def _create_async_run_setup(self, handle: AsyncFixture[Any]) -> Coroutine[bytes]:
@@ -397,22 +433,25 @@ class FixtureRegistry:
                 with (
                     self._fixture_setup_scope(handle.key, handle.name),
                     self._run_setup_scope(handle.name),
-                    _fixture_task_scope(generator),
+                    task_scope(generator),
                 ):
                     descriptor = await anext(generator)
                 payload = self._serialize_run_descriptor(handle.name, descriptor)
             except BaseException as exc:
                 failure = self._record_run_setup_failure(handle, generator, exc)
+                if isinstance(exc, GeneratorExit):
+                    # Forced cleanup must retain teardown without inventing a
+                    # publication error for the normal coroutine-close signal.
+                    raise
                 if isinstance(failure, _RunFixtureInterruption):
                     return failure
                 raise FixtureError(failure.message) from None
             self._run[handle.key] = (generator, payload, handle.name)
             self._run_order.append(handle.key)
-            self._run_task_owners.add(generator)
             return payload
 
         task = asyncio.create_task(setup())
-        self._pending_run_tasks.add(task)
+        self._pending_run_tasks[task] = handle.name
         task.add_done_callback(self._run_setup_finished)
         self._run[handle.key] = (
             generator,
@@ -439,7 +478,6 @@ class FixtureRegistry:
             )
         self._run[handle.key] = (generator, failure, handle.name)
         self._run_order.append(handle.key)
-        self._run_task_owners.add(generator)
         return failure
 
     @staticmethod
@@ -456,7 +494,7 @@ class FixtureRegistry:
     def _run_setup_finished(
         self, task: asyncio.Task[bytes | _RunFixtureInterruption]
     ) -> None:
-        self._pending_run_tasks.discard(task)
+        _ = self._pending_run_tasks.pop(task, None)
         if not task.cancelled():
             _ = task.exception()
 
@@ -477,12 +515,13 @@ class FixtureRegistry:
         with (
             self._fixture_setup_scope(handle.key, handle.name),
             self._session_setup_scope(handle.name),
-            _fixture_task_scope(gen),
+            task_scope(gen),
         ):
-            value = next(gen)
+            try:
+                value = next(gen)
+            finally:
+                self._session_stack.append((handle.name, gen))
         self._session[handle.key] = (gen, value, handle.name)
-        self._session_order.append(handle.key)
-        self._session_task_owners.add(gen)
         return value
 
     def _load_session_async[R](self, handle: AsyncFixture[R]) -> Coroutine[R]:
@@ -505,28 +544,27 @@ class FixtureRegistry:
                 with (
                     self._fixture_setup_scope(key, name),
                     self._session_setup_scope(name),
-                    _fixture_task_scope(agen),
+                    task_scope(agen),
                 ):
                     result = await anext(agen)
                 setup_completed = True
             finally:
+                self._session_stack.append((name, agen))
                 if not setup_completed:
                     self._session.pop(key, None)
 
             self._session[key] = (agen, result, name)
-            self._session_order.append(key)
-            self._session_task_owners.add(agen)
             return result
 
         task = asyncio.create_task(result_updater())
-        self._pending_session_tasks.add(task)
+        self._pending_session_tasks[task] = name
         task.add_done_callback(self._session_setup_finished)
         self._session[key] = (agen, _PendingAsyncSessionFixtureSetup(task), name)
         return cast("Coroutine[R]", self._await_async_session_setup(task))
 
     def _session_setup_finished(self, task: asyncio.Task[Any]) -> None:
         """Consume unobserved setup errors while preserving them for awaiters."""
-        self._pending_session_tasks.discard(task)
+        _ = self._pending_session_tasks.pop(task, None)
         if not task.cancelled():
             _ = task.exception()
 
@@ -540,15 +578,6 @@ class FixtureRegistry:
 
         return cast("Coroutine[R]", wrapper())
 
-    def owns_task(self, task: asyncio.Task[Any]) -> bool:
-        """Whether an active fixture owns the task through its current context."""
-        owner = task.get_context().get(_fixture_task_owner)
-        return owner is not None and (
-            owner in self._function_task_owners
-            or owner in self._session_task_owners
-            or owner in self._run_task_owners
-        )
-
     @defer_cancellation
     async def teardown_function_fixtures(
         self, *, cleanup_timeout: float | None = None
@@ -561,22 +590,21 @@ class FixtureRegistry:
         )
         self._tearing_down = True
         try:
-            failures: list[TeardownFailure] = []
+            failures = await _cancel_pending_setups(
+                self._pending_function_tasks, cleanup_timeout=timeout, abandoned=True
+            )
             for fixture_name, generator in reversed(self._function_stack):
-                try:
-                    failure = await teardown_fixture(
-                        fixture_name, generator, cleanup_timeout=timeout
-                    )
-                    if failure is not None:
-                        failures.append(failure)
-                    task_failure = await _cleanup_fixture_tasks(
-                        fixture_name,
-                        generator,
-                        cleanup_timeout=timeout,
-                    )
-                    failures.extend(task_failure)
-                finally:
-                    self._function_task_owners.discard(generator)
+                failure = await teardown_fixture(
+                    fixture_name, generator, cleanup_timeout=timeout
+                )
+                if failure is not None:
+                    failures.append(failure)
+                task_failure = await _cleanup_fixture_tasks(
+                    fixture_name,
+                    generator,
+                    cleanup_timeout=timeout,
+                )
+                failures.extend(task_failure)
             self._function_stack.clear()
             return failures
         finally:
@@ -594,33 +622,23 @@ class FixtureRegistry:
         )
         self._tearing_down = True
         try:
-            pending_tasks = tuple(self._pending_session_tasks)
-            for task in pending_tasks:
-                _ = task.cancel()
-            if pending_tasks:
-                _ = await asyncio.gather(*pending_tasks, return_exceptions=True)
-
-            failures: list[TeardownFailure] = []
-            for key in reversed(self._session_order):
-                generator, cached, name = self._session[key]
-                if isinstance(cached, _PendingAsyncSessionFixtureSetup):
-                    continue
-                try:
-                    failure = await teardown_fixture(
-                        name, generator, cleanup_timeout=timeout
-                    )
-                    if failure is not None:
-                        failures.append(failure)
-                    task_failure = await _cleanup_fixture_tasks(
-                        name,
-                        generator,
-                        cleanup_timeout=timeout,
-                    )
-                    failures.extend(task_failure)
-                finally:
-                    self._session_task_owners.discard(generator)
+            failures = await _cancel_pending_setups(
+                self._pending_session_tasks, cleanup_timeout=timeout
+            )
+            for name, generator in reversed(self._session_stack):
+                failure = await teardown_fixture(
+                    name, generator, cleanup_timeout=timeout
+                )
+                if failure is not None:
+                    failures.append(failure)
+                task_failure = await _cleanup_fixture_tasks(
+                    name,
+                    generator,
+                    cleanup_timeout=timeout,
+                )
+                failures.extend(task_failure)
             self._session.clear()
-            self._session_order.clear()
+            self._session_stack.clear()
             return failures
         finally:
             self._tearing_down = False
@@ -637,31 +655,24 @@ class FixtureRegistry:
         )
         self._tearing_down = True
         try:
-            pending_tasks = tuple(self._pending_run_tasks)
-            for task in pending_tasks:
-                _ = task.cancel()
-            if pending_tasks:
-                _ = await asyncio.gather(*pending_tasks, return_exceptions=True)
-
-            failures: list[TeardownFailure] = []
+            failures = await _cancel_pending_setups(
+                self._pending_run_tasks, cleanup_timeout=timeout
+            )
             for key in reversed(self._run_order):
                 generator, cached, name = self._run[key]
                 if isinstance(cached, _PendingAsyncRunFixtureSetup):
                     continue
-                try:
-                    failure = await teardown_fixture(
-                        name, generator, cleanup_timeout=timeout
-                    )
-                    if failure is not None:
-                        failures.append(failure)
-                    task_failure = await _cleanup_fixture_tasks(
-                        name,
-                        generator,
-                        cleanup_timeout=timeout,
-                    )
-                    failures.extend(task_failure)
-                finally:
-                    self._run_task_owners.discard(generator)
+                failure = await teardown_fixture(
+                    name, generator, cleanup_timeout=timeout
+                )
+                if failure is not None:
+                    failures.append(failure)
+                task_failure = await _cleanup_fixture_tasks(
+                    name,
+                    generator,
+                    cleanup_timeout=timeout,
+                )
+                failures.extend(task_failure)
             self._run.clear()
             self._run_copies.clear()
             self._run_order.clear()

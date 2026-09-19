@@ -138,7 +138,7 @@ current registry — tests take no context parameter.
   descriptor-copy contract. Run-fixture setup preserves interruption instead of converting it to a publication error. Established dependencies still tear down. Worker mode stops further dispatch, drains active work, tears down worker sessions and host fixtures, then propagates the interruption.
 - **Fixtures depending on fixtures**: a fixture may `load_fixture()` another in
   its body (resolved through the ambient registry). The dependency is registered
-  for teardown only after its own setup completes, so it lands below the
+  for teardown after its own setup attempt finishes, so it lands below the
   depending fixture on the teardown stack and is torn down *after* it — a
   depending fixture may use its dependency during teardown. This holds for both
   scopes. Function may depend on function, session, or run; session on session or
@@ -195,10 +195,28 @@ uses children. `--pdb` with workers or `--json-output` is a usage error. `-s --j
 
 ### Async Hygiene
 
-`execute_test` tags child tasks by execution context instead of comparing global
-event-loop snapshots. Function fixtures tear down before test-owned tasks are
-classified. Tasks created during fixture setup inherit that fixture's owner and
-remain alive through its teardown; session-owned tasks may survive between tests.
+`task_cleanup.py` owns task tagging, descendant discovery, and bounded cancellation.
+`task_scope(owner)` assigns the innermost test or fixture identity through one
+context variable; `cancel_owned_tasks` discovers and reaps only that owner.
+Execution and fixtures retain result attribution and lifetime ordering, without
+separate ownership sets or cross-module task-exclusion checks. Hypothesis retains
+its thread handoffs and uses the same cancellation machinery for active examples.
+Function fixtures tear down before test-owned tasks are classified. Tasks created
+during fixture setup inherit that fixture's owner and remain alive through its
+teardown; session-owned tasks may survive between tests.
+Failed setup retains ownership before its first yield. Each attempted function
+or session generator stays on its scope's teardown stack, independently of the
+session cache, so retries cannot discard earlier cleanup. At scope teardown,
+abandoned tasks produce fixture-attributed diagnostics alongside the original
+setup error. Shared async session setup remains fixture-owned after a test cancels
+its waiter, including between tests. Scope teardown cancels unfinished setup under
+the cleanup budget before tearing down dependencies. Function setup still pending
+when its test returns counts as abandoned fixture work; cooperative cancellation
+of unfinished cached setup is normal scope shutdown. Resistant
+setup and cancellation/finalizer errors receive fixture-attributed teardown
+diagnostics. Descendants created during forced setup finalization retain their
+fixture owner. Fixture authors should protect background-task setup and the yield
+with `try`/`finally`.
 A fixture that returns while its tasks remain pending receives an attributed
 teardown failure. Test-owned leaks are cancelled after function teardown. Owned-task cleanup re-scans cancellation-created descendants under one deadline. Forced finalizers run in their original task context so descendants retain ownership. If tasks survive the final close/reap attempt, the command stops rather than starting another test. Unrelated embedding tasks are left alone. New
 tasks from an unrelated embedding application have no test owner and are left
