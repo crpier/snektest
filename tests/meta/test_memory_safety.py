@@ -50,9 +50,18 @@ def test_parameter_matrix_collection_stays_within_allocation_budget(
     assert_eq(len(test_cases), first_axis_size * second_axis_size)
 
 
-@test(mark="slow")
-def test_noisy_passing_console_run_stays_within_allocation_budget() -> None:
-    """Discarded pass output does not accumulate across a large run."""
+@test(
+    [
+        Param(value=(False, 16 * _MB), name="cold-start"),
+        Param(value=(True, 8 * _MB), name="warm-run"),
+    ],
+    mark="slow",
+)
+def test_noisy_passing_console_run_stays_within_allocation_budget(
+    scenario: tuple[bool, int],
+) -> None:
+    """Bound cold initialization separately without relaxing warm-run retention."""
+    warm_up, peak_budget = scenario
     tmp_dir = load_fixture(tmp_dir_fixture())
     test_file = create_test_file(
         tmp_dir,
@@ -68,7 +77,11 @@ def test_noisy_passing_console_run_stays_within_allocation_budget() -> None:
         """),
         name="test_noisy_passes",
     )
-    environment = {**os.environ, "SNEKTEST_MEMORY_SUITE": str(test_file)}
+    environment = {
+        **os.environ,
+        "SNEKTEST_MEMORY_SUITE": str(test_file),
+        "SNEKTEST_MEMORY_WARMUP": str(int(warm_up)),
+    }
     process = subprocess.run(
         [
             sys.executable,
@@ -83,6 +96,11 @@ from snektest.models import FilterItem
 from snektest.reporting import NullRunReporter
 
 async def main() -> None:
+    if os.environ["SNEKTEST_MEMORY_WARMUP"] == "1":
+        await run_tests_programmatic(
+            [FilterItem(os.environ["SNEKTEST_MEMORY_SUITE"] + "::test_noisy[0]")],
+            reporter=NullRunReporter(retain_passed_output=False),
+        )
     tracemalloc.start()
     summary = await run_tests_programmatic(
         [FilterItem(os.environ["SNEKTEST_MEMORY_SUITE"])],
@@ -102,7 +120,7 @@ asyncio.run(main())
     total_tests, peak_bytes = (int(value) for value in process.stdout.split())
 
     assert_eq(total_tests, 1000)
-    assert_lt(peak_bytes, 8 * _MB)
+    assert_lt(peak_bytes, peak_budget)
 
 
 @test(mark="slow")

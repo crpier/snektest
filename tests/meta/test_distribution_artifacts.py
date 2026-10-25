@@ -117,19 +117,42 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
         "import snektest; "
         "print(json.dumps({'version': snektest.__version__}))"
     )
-    imported = _run([sys.executable, "-I", "-c", script], cwd=cwd)
-    assert_eq(imported.returncode, 0, msg=imported.stderr)
-    assert_eq(json.loads(imported.stdout), {"version": _VERSION})
-
     cli_script = (
         "import runpy, sys; "
         f"sys.path.insert(0, {str(target)!r}); "
         "sys.argv = ['snektest', '--version']; "
         "runpy.run_module('snektest', run_name='__main__')"
     )
-    invoked = _run([sys.executable, "-I", "-c", cli_script], cwd=cwd)
-    assert_eq(invoked.returncode, 0, msg=invoked.stderr)
-    assert_eq(invoked.stdout, f"snektest {_VERSION}\n")
+    test_path = cwd / f"test_{target.name.replace('-', '_')}.py"
+    test_path.write_text(
+        "from collections.abc import Generator\n"
+        "from hypothesis import settings, strategies as st\n"
+        "from snektest import assert_eq, fixture, load_fixture, test_hypothesis\n"
+        "@fixture(scope='run')\n"
+        "def descriptor() -> Generator[int]:\n"
+        "    yield 7\n"
+        "@settings(max_examples=1, database=None, deadline=None)\n"
+        "@test_hypothesis(st.just(7), mark='fast')\n"
+        "async def property_case(expected: int) -> None:\n"
+        "    assert_eq(load_fixture(descriptor()), expected)\n"
+    )
+    property_script = (
+        "import runpy, sys; "
+        f"sys.path.insert(0, {str(target)!r}); "
+        f"sys.argv = ['snektest', '--json-output', '--workers', '1', {str(test_path)!r}]; "
+        "runpy.run_module('snektest', run_name='__main__')"
+    )
+    for mode in ("normal", "all"):
+        arguments = [sys.executable, "-I", "-X", f"lazy_imports={mode}", "-c"]
+        imported = _run([*arguments, script], cwd=cwd)
+        assert_eq(imported.returncode, 0, msg=imported.stderr)
+        assert_eq(json.loads(imported.stdout), {"version": _VERSION})
+        invoked = _run([*arguments, cli_script], cwd=cwd)
+        assert_eq(invoked.returncode, 0, msg=invoked.stderr)
+        assert_eq(invoked.stdout, f"snektest {_VERSION}\n")
+        executed = _run([*arguments, property_script], cwd=cwd)
+        assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+        assert_eq(json.loads(executed.stdout)["passed"], 1)
 
 
 def _assert_wheel_manifest_and_metadata(

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from snektest._version import __version__
-from snektest.models import (
+lazy from snektest._version import __version__
+lazy from snektest.models import (
     BenchmarkBaselineRun,
     CollectionDiagnostics,
     ErrorResult,

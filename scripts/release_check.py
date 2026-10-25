@@ -17,6 +17,7 @@ _RELEASE_STAGES = (
     "dependency-audit",
     "tests-with-coverage",
     "coverage-threshold",
+    "tests-forced-lazy-imports",
 )
 _ROOT = Path(__file__).resolve().parent.parent
 
@@ -119,7 +120,21 @@ async def _run_release_gate() -> int:
             environment=coverage_environment,
         ):
             return exit_code
-    return 0
+    return await _run_command(
+        "tests-forced-lazy-imports",
+        (
+            "uv",
+            "run",
+            "--locked",
+            "python",
+            "-X",
+            "lazy_imports=all",
+            "-m",
+            "snektest",
+            "tests",
+        ),
+        environment={**os.environ, "PYTHON_LAZY_IMPORTS": "all"},
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

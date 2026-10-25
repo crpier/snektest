@@ -36,6 +36,31 @@ OpenAPI contract testing is optional:
 uv add 'snektest[schema]'
 ```
 
+### Lazy imports
+
+Snektest's runtime and bundled examples use Python 3.15's explicit lazy imports.
+Importing `snektest`, decorating an ordinary test, and requesting CLI help or
+version information do not initialize Hypothesis or the optional schema engines.
+Module-level definitions can still resolve individual imports immediately.
+One-time initialization moves to first use; [memory budgets](docs/large-suite-memory.md)
+distinguish cold-start costs from warmed-run output retention.
+
+Forced-lazy execution is also checked by the release gate:
+
+```bash
+uv run python -X lazy_imports=all -m snektest tests
+```
+
+Collection eagerly completes top-level imports in selected test modules and their
+synthetic package namespace, even explicitly lazy imports. Import errors, output,
+and warnings therefore remain collection diagnostics, not deferred test-body
+failures. Function-local imports still happen when their function executes.
+Snektest temporarily scopes eager registration to its supported property/schema
+engines during initialization, restores the caller's import filter on every exit,
+and never changes the interpreter's lazy-import mode. Unrelated dependency
+compatibility under forced-lazy mode remains the application's responsibility;
+see [import policy and validation](docs/lazy-imports.md).
+
 ## Type checking is part of the contract
 
 snektest expects your test code to pass the strict `ty` type checker before
@@ -588,8 +613,8 @@ uv run --locked python scripts/release_check.py
 
 GitHub Actions runs this exact command on Python 3.15 under Linux, macOS, and
 Windows with a 15-minute job timeout. It checks the lock, formatting, lint, ty,
-production dependency advisories, all tests, 90% core-package coverage, release
-artifact manifests, and independent wheel and source-archive installations.
+production dependency advisories, all tests in normal and forced-lazy modes,
+90% core-package coverage, release artifact manifests, and independent wheel and source-archive installations.
 
 A release tag must exactly match `v` plus `snektest.__version__` and point to a
 pull request merged into `main`. Repository rules prevent updates or deletion of

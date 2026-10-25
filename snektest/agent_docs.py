@@ -1,12 +1,27 @@
 """Embedded documentation and examples for coding agents."""
 
-from importlib.resources import files
+lazy from importlib.resources import files
 
-from snektest.models import BadRequestError
+lazy from snektest.models import BadRequestError
 
 AGENT_DOCS = """# snektest agent guide
 
 Snektest requires Python 3.15 or newer. The verified release matrix is GIL-enabled CPython 3.15 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are not supported; newer CPython versions are not yet verified.
+
+## Import behavior
+
+The runtime and bundled examples use explicit lazy imports. Importing the package,
+ordinary test decorators, and CLI help/version defer property/schema engines.
+Definitions may still immediately resolve individual imports. One-time loading
+costs move to first use; memory regressions separately bound cold and warmed runs.
+The release gate also runs `python -X lazy_imports=all -m snektest tests`.
+Collection eagerly
+completes top-level imports in selected test modules and their synthetic package
+namespace, including explicitly lazy imports, so import failures/output/warnings
+stay collection diagnostics. Function-local imports remain execution-time work.
+Engine registration uses a scoped filter that preserves unrelated import policy
+and restores the caller's filter on exit; the interpreter mode is unchanged.
+Unrelated third-party lazy-import compatibility remains application-owned.
 
 ## Quick start
 

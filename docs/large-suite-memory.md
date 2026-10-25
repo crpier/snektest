@@ -71,3 +71,17 @@ checks use explicit, looser allocation budgets: 4 MiB for 1,000-case collection,
 24 MiB for 10,000-case collection, 8 MiB for noisy passes, and 16 MiB for the
 large failing suite. The worker regression separately proves that two workers
 complete no more than three later cases before a blocked first case finishes.
+
+## Lazy initialization on Python 3.15
+
+Explicit lazy imports move one-time runner initialization from importing the CLI
+into its first execution. The original 8 MiB noisy-pass budget excluded those
+imports before this change; applying it unchanged to a cold runner measured
+12,578,766 bytes on Linux and failed.
+
+The regression now checks two explicit scenarios: a cold 1,000-case run below
+16 MiB, including initialization, and a warmed 1,000-case run below the unchanged
+8 MiB retention budget. Warmup executes one selected passing case before tracing,
+not the full measured run. Collection and large-failure budgets are unchanged.
+This distinguishes a first-use loading cost from accumulated test output rather
+than hiding initialization or relaxing the steady-state allocation limit.

@@ -1,13 +1,13 @@
 """Load typed Snektest defaults from the nearest project configuration."""
 
-import os
-from dataclasses import dataclass
-from math import isfinite
-from pathlib import Path
-from tomllib import TOMLDecodeError, load
-from typing import Any, Literal, cast
+lazy import os
+lazy from dataclasses import dataclass
+lazy from math import isfinite
+lazy from pathlib import Path
+lazy from tomllib import TOMLDecodeError, load
+lazy from typing import Any, Literal, cast
 
-from snektest.models import BadRequestError
+lazy from snektest.models import BadRequestError
 
 _CONFIG_KEYS = {
     "capture_output",

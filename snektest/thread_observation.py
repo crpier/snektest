@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
-import sys
-import threading
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from dataclasses import dataclass, replace
-from types import TracebackType
-from typing import Literal, Protocol, cast
+lazy import asyncio
+lazy import sys
+lazy import threading
+lazy from collections.abc import Callable, Generator
+lazy from contextlib import contextmanager
+lazy from dataclasses import dataclass, replace
+lazy from types import TracebackType
+lazy from typing import Literal, Protocol, cast
 
-from snektest.diagnostics import snapshot_exception
-from snektest.models import AssertionFailure, BackgroundFailure
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.models import AssertionFailure, BackgroundFailure
 
 
 class _UnraisableArgs(Protocol):
