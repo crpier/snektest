@@ -1,11 +1,11 @@
-import difflib
-import pprint
-from collections.abc import Callable
-from typing import Any, cast
+lazy import difflib
+lazy import pprint
+lazy from collections.abc import Callable
+lazy from typing import Any, cast
 
-from rich.console import Console
+lazy from rich.console import Console
 
-from snektest.models import (
+lazy from snektest.models import (
     AssertionDiagnostic,
     AssertionFailure,
     DiagnosticDict,

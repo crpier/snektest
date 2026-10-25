@@ -1,18 +1,18 @@
 """Timing-budget assertions and result collection."""
 
-import gc
-import threading
-import time
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from contextvars import ContextVar, Token
-from dataclasses import dataclass, field, replace
-from math import ceil, isfinite
-from statistics import fmean, median, pstdev
-from types import TracebackType
-from typing import Self, overload
+lazy import gc
+lazy import threading
+lazy import time
+lazy from collections.abc import Callable, Generator
+lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar, Token
+lazy from dataclasses import dataclass, field, replace
+lazy from math import ceil, isfinite
+lazy from statistics import fmean, median, pstdev
+lazy from types import TracebackType
+lazy from typing import Self, overload
 
-from snektest.models import (
+lazy from snektest.models import (
     AssertionFailure,
     BadRequestError,
     BenchmarkComparison,

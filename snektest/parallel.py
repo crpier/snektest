@@ -2,32 +2,32 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-import sys
-import time
-from collections.abc import Callable, Sequence
-from contextlib import suppress
-from dataclasses import dataclass
-from io import StringIO
-from multiprocessing import get_context
-from multiprocessing.context import SpawnContext
-from multiprocessing.process import BaseProcess
-from pathlib import Path
-from typing import Any, Literal, cast
+lazy import asyncio
+lazy import os
+lazy import sys
+lazy import time
+lazy from collections.abc import Callable, Sequence
+lazy from contextlib import suppress
+lazy from dataclasses import dataclass
+lazy from io import StringIO
+lazy from multiprocessing import get_context
+lazy from multiprocessing.context import SpawnContext
+lazy from multiprocessing.process import BaseProcess
+lazy from pathlib import Path
+lazy from typing import Any, Literal, cast
 
-from snektest.annotations import AsyncFixture, Coroutine
-from snektest.benchmark_baseline import BenchmarkBaseline
-from snektest.collection import collect_tests_from_filters
-from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
-from snektest.diagnostics import snapshot_exception
-from snektest.execution import execute_test, teardown_session_fixtures
-from snektest.fixtures import (
+lazy from snektest.annotations import AsyncFixture, Coroutine
+lazy from snektest.benchmark_baseline import BenchmarkBaseline
+lazy from snektest.collection import collect_tests_from_filters
+lazy from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.execution import execute_test, teardown_session_fixtures
+lazy from snektest.fixtures import (
     FixtureRegistry,
     use_registry,
     use_run_fixture_loader,
 )
-from snektest.models import (
+lazy from snektest.models import (
     CollectionError,
     EmptyCollectionError,
     ErrorResult,
@@ -42,9 +42,9 @@ from snektest.models import (
     TestName,
     TestResult,
 )
-from snektest.output import maybe_capture_output
-from snektest.reporting import RunReporter, result_for_retention
-from snektest.run_fixture_publication import (
+lazy from snektest.output import maybe_capture_output
+lazy from snektest.reporting import RunReporter, result_for_retention
+lazy from snektest.run_fixture_publication import (
     LoadRunFixture,
     ProcessConnection,
     RunFixtureFailed,

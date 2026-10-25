@@ -12,15 +12,15 @@ success. Ownership rejects overlapping tasks or threads before either can reset
 the process-global tracer.
 """
 
-import tracemalloc
-from collections.abc import Generator
-from contextlib import contextmanager
-from contextvars import ContextVar, Token
-from dataclasses import dataclass
-from threading import Lock
-from typing import Literal, Protocol
+lazy import tracemalloc
+lazy from collections.abc import Generator
+lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar, Token
+lazy from dataclasses import dataclass
+lazy from threading import Lock
+lazy from typing import Literal, Protocol
 
-from snektest.models import BadRequestError, MemoryMeasurement
+lazy from snektest.models import BadRequestError, MemoryMeasurement
 
 type BackendName = Literal["tracemalloc"]
 

@@ -1,10 +1,10 @@
 """OpenAPI operation and linked-workflow contract testing."""
 
-from typing import Any
+lazy from typing import Any
 
-from hypothesis import settings
+lazy from hypothesis import settings
 
-from snektest import (
+lazy from snektest import (
     SchemaFilter,
     SchemaOperationSelector,
     test_schema,

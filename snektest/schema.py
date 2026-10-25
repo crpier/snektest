@@ -2,29 +2,30 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
-from functools import wraps
-from importlib import import_module
-from json import JSONDecodeError, loads
-from pathlib import Path
-from re import fullmatch
-from types import ModuleType
-from typing import Any, Literal, Protocol, cast
-from urllib.parse import urlsplit
+lazy import asyncio
+lazy from collections.abc import Callable, Collection, Sequence
+lazy from dataclasses import dataclass
+lazy from functools import wraps
+lazy from importlib import import_module
+lazy from json import JSONDecodeError, loads
+lazy from pathlib import Path
+lazy from re import fullmatch
+lazy from types import ModuleType
+lazy from typing import Any, Literal, Protocol, cast
+lazy from urllib.parse import urlsplit
 
-from hypothesis.errors import Unsatisfiable
+lazy from hypothesis.errors import Unsatisfiable
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture
-from snektest.decorators import (
+lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
+lazy from snektest.decorators import (
     Marker,
     _normalize_markers,  # pyright: ignore[reportPrivateUsage]
     _run_hypothesis,  # pyright: ignore[reportPrivateUsage]
     load_fixture,
 )
-from snektest.models import AssertionFailure, BadRequestError, Param, SnektestError
-from snektest.utils import mark_test_function
+lazy from snektest.import_policy import initializing_imports
+lazy from snektest.models import AssertionFailure, BadRequestError, Param, SnektestError
+lazy from snektest.utils import mark_test_function
 
 
 class SchemaAuthProvider(Protocol):
@@ -304,6 +305,7 @@ async def _resolve_runtime_value[T](
     return value
 
 
+@initializing_imports()
 def test_graphql(  # noqa: PLR0913
     schema_path: str | Path,
     *,
@@ -419,6 +421,7 @@ def test_graphql(  # noqa: PLR0913
     return decorator
 
 
+@initializing_imports()
 def test_schema(  # noqa: PLR0913
     schema_path: str | Path,
     *,
@@ -531,6 +534,7 @@ def test_schema(  # noqa: PLR0913
     return decorator
 
 
+@initializing_imports()
 def test_schema_workflow(  # noqa: C901, PLR0913
     schema_path: str | Path,
     *,

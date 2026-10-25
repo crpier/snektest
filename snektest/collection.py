@@ -1,28 +1,29 @@
 """Test discovery and collection into executable test cases."""
 
-import os
-import subprocess
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
-from hashlib import sha256
-from importlib import import_module
-from importlib.machinery import ModuleSpec
-from importlib.util import module_from_spec, spec_from_file_location
-from inspect import isfunction
-from io import StringIO
-from pathlib import Path
-from shutil import which
-from sys import modules
-from threading import Lock
-from types import ModuleType
-from typing import TypeGuard, cast
+lazy import os
+lazy import subprocess
+lazy from collections.abc import Callable, Sequence
+lazy from dataclasses import dataclass, field, replace
+lazy from hashlib import sha256
+lazy from importlib import import_module
+lazy from importlib.machinery import ModuleSpec
+lazy from importlib.util import module_from_spec, spec_from_file_location
+lazy from inspect import isfunction
+lazy from io import StringIO
+lazy from pathlib import Path
+lazy from shutil import which
+lazy from sys import modules
+lazy from threading import Lock
+lazy from types import ModuleType
+lazy from typing import TypeGuard, cast
 
-from pydantic import ValidationError
+lazy from pydantic import ValidationError
 
-from snektest.annotations import PyFilePath, validate_PyFilePath
-from snektest.decorators import reset_run_fixture_catalog
-from snektest.keywords import KeywordExpression
-from snektest.models import (
+lazy from snektest.annotations import PyFilePath, validate_PyFilePath
+lazy from snektest.decorators import reset_run_fixture_catalog
+lazy from snektest.import_policy import initializing_imports
+lazy from snektest.keywords import KeywordExpression
+lazy from snektest.models import (
     BadRequestError,
     CollectionDiagnostics,
     CollectionError,
@@ -32,8 +33,8 @@ from snektest.models import (
     TestCase,
     TestName,
 )
-from snektest.output import maybe_capture_output
-from snektest.utils import (
+lazy from snektest.output import maybe_capture_output
+lazy from snektest.utils import (
     get_test_function_markers,
     get_test_function_mutex,
     get_test_function_params,
@@ -198,10 +199,11 @@ def collect_tests_from_file(  # noqa: PLR0913
         else (path_root / file_path).resolve()
     )
     active_module_loader = module_loader or _CollectionModuleLoader()
-    module = active_module_loader.load(
-        canonical_file_path,
-        spec_loader=spec_loader,
-    )
+    with initializing_imports():
+        module = active_module_loader.load(
+            canonical_file_path,
+            spec_loader=spec_loader,
+        )
 
     test_functions = [
         func

@@ -14,7 +14,7 @@ final selection needs `--allow-empty`. Syntax errors precede imports, but matchi
 still requires collection. Exact selectors remain the precise rerun interface.
 """
 
-from snektest import Param, assert_eq, test
+lazy from snektest import Param, assert_eq, test
 
 
 @test(

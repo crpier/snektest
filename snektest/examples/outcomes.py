@@ -4,9 +4,9 @@ JUnit replaces XML-forbidden characters with U+FFFD in text and attributes.
 JSON and programmatic outcomes retain the original strings.
 """
 
-import os
+lazy import os
 
-from snektest import assert_eq, skip, test
+lazy from snektest import assert_eq, skip, test
 
 
 @test(mark="fast")

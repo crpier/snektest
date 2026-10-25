@@ -18,13 +18,13 @@ Forced task-finalizer errors become task_cleanup background diagnostics or
 fixture teardown failures; they do not abort later cleanup or test execution.
 """
 
-import asyncio
-from collections.abc import AsyncGenerator
+lazy import asyncio
+lazy from collections.abc import AsyncGenerator
 
-from hypothesis import Phase, settings
-from hypothesis import strategies as st
+lazy from hypothesis import Phase, settings
+lazy from hypothesis import strategies as st
 
-from snektest import (
+lazy from snektest import (
     assert_eq,
     assert_false,
     fixture,

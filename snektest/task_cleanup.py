@@ -1,15 +1,15 @@
 """Task ownership and bounded cleanup shared by tests and fixtures."""
 
-import asyncio
-from collections.abc import Callable, Coroutine, Generator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass
-from functools import wraps
-from typing import Any
+lazy import asyncio
+lazy from collections.abc import Callable, Coroutine, Generator
+lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar
+lazy from dataclasses import dataclass
+lazy from functools import wraps
+lazy from typing import Any
 
-from snektest.diagnostics import snapshot_exception
-from snektest.models import (
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.models import (
     DEFAULT_CLEANUP_TIMEOUT_SECONDS,
     ExceptionDiagnostic,
     RunInfrastructureError,

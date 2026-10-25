@@ -4,7 +4,7 @@ Each measurement context is single-use. Create a fresh context for each region,
 and access or advance its rounds iterator only inside that active context.
 """
 
-from snektest import assert_memory, test
+lazy from snektest import assert_memory, test
 
 
 @test(mark="fast")

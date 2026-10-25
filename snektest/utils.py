@@ -1,9 +1,9 @@
 """Metadata helpers for decorated test functions."""
 
-from collections.abc import Callable
-from typing import Any, cast
+lazy from collections.abc import Callable
+lazy from typing import Any, cast
 
-from snektest.models import Param
+lazy from snektest.models import Param
 
 TEST_ATTR_NAME = "__is_snektest__test__"
 TEST_ATTR_VALUE = object()
