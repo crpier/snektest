@@ -1,7 +1,6 @@
 """Subprocess regressions for deterministic, import-safe collection."""
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -96,7 +95,7 @@ async def test_package_relative_imports_work_for_absolute_and_relative_filters()
             """),
             name="test_relative_import",
         )
-        relative_file = os.path.relpath(test_file, start=Path.cwd())
+        relative_file = str(test_file.relative_to(Path.cwd(), walk_up=True))
 
         try:
             absolute_run = await run_tests_programmatic([FilterItem(str(test_file))])

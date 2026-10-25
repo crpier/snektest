@@ -221,7 +221,7 @@ def _print_run_teardown_failures(
         console.print()
 
 
-def print_failures(  # noqa: PLR0913
+def print_failures(  # noqa: PLR0913, PLR0917
     console: Console,
     test_results: list[TestResult],
     run_teardown_failures: list[TeardownFailure] | None = None,

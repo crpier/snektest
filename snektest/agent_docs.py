@@ -6,7 +6,7 @@ from snektest.models import BadRequestError
 
 AGENT_DOCS = """# snektest agent guide
 
-Snektest requires Python 3.14 or newer. The verified release matrix is GIL-enabled CPython 3.14 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are not supported; newer CPython versions are not yet verified.
+Snektest requires Python 3.15 or newer. The verified release matrix is GIL-enabled CPython 3.15 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are not supported; newer CPython versions are not yet verified.
 
 ## Quick start
 
@@ -65,6 +65,9 @@ def test_needs_parentheses() -> None:
 ```
 
 ## Migrating from 0.16 to 0.17
+
+Python 3.15 or newer is required; Python 3.14 is no longer supported. Recreate
+existing virtual environments with Python 3.15 before upgrading.
 
 Import public errors, `Scope`, decorators, assertions, and fixtures from the
 `snektest` package. Exported errors now share `SnektestError`, `Scope` is the

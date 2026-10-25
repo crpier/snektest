@@ -383,7 +383,7 @@ def test_unrelated() -> None:
 def test_worker_crash_is_reported_and_replaced_for_remaining_cases() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
-        sentinel = directory / "crashed"
+        crash_file = directory / "crashed"
         test_file = directory / "test_crash.py"
         _ = test_file.write_text(
             f"""
@@ -392,7 +392,7 @@ from pathlib import Path
 
 from snektest import test
 
-SENTINEL = Path({str(sentinel)!r})
+SENTINEL = Path({str(crash_file)!r})
 
 @test()
 def test_crash() -> None:

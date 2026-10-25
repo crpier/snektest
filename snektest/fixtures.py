@@ -112,7 +112,7 @@ async def teardown_fixture(
         raise BadRequestError(msg)  # noqa: TRY301
     except StopAsyncIteration, StopIteration:
         return None
-    except (Exception, BadRequestError):
+    except Exception, BadRequestError:
         exc_type, exc_value, traceback = exc_info_provider()
         if exc_type is None or exc_value is None or traceback is None:
             msg = "Invalid exception info gathered during teardown. This shouldn't be possible!"
@@ -358,7 +358,7 @@ class FixtureRegistry:
             )
             raise FixtureError(msg)
         if isinstance(handle, AsyncFixture):
-            return self._load_session_async(handle)
+            return self._load_session_async(cast("AsyncFixture[R]", handle))
         return self._load_session_sync(handle)
 
     def load_run[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
