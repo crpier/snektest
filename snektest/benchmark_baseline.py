@@ -138,7 +138,6 @@ def discover_project_root(start: Path | None = None) -> Path:
 def _baseline_update_lock(path: Path) -> Generator[None]:
     """Serialize baseline read/merge/write cycles across processes."""
     lock_path = path.with_name(f".{path.name}.lock")
-    file_descriptor: int | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         file_descriptor = os_open(lock_path, O_CREAT | O_EXCL | O_WRONLY, 0o600)
@@ -154,9 +153,8 @@ def _baseline_update_lock(path: Path) -> Generator[None]:
     try:
         yield
     finally:
-        if file_descriptor is not None:
-            with suppress(OSError):
-                close(file_descriptor)
+        with suppress(OSError):
+            close(file_descriptor)
         with suppress(OSError):
             lock_path.unlink(missing_ok=True)
 

@@ -110,9 +110,7 @@ def test_unmarked() -> None:
 """.lstrip()
         )
 
-        file_path = cast(
-            "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
-        )
+        file_path = TypeAdapter(PyFilePath).validate_python(test_file)
         filter_item = FilterItem(str(test_file))
 
         fast = collect_tests_from_file(file_path, filter_item, mark="fast")

@@ -298,7 +298,7 @@ async def _resolve_runtime_value[T](
 ) -> T:
     """Resolve a literal or fixture-backed decorator argument on the test loop."""
     if isinstance(value, AsyncFixture):
-        return await load_fixture(value)
+        return await load_fixture(cast("AsyncFixture[T]", value))
     if isinstance(value, Fixture):
         return load_fixture(cast("Fixture[T]", value))
     return value

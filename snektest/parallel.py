@@ -163,7 +163,7 @@ async def _load_async_run_fixture_payload(
         return await cast("Coroutine[bytes]", registry.load_run_payload(handle))
 
 
-def _host_main(  # noqa: PLR0913
+def _host_main(  # noqa: PLR0913, PLR0917
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
@@ -255,10 +255,13 @@ def _host_main(  # noqa: PLR0913
                         ),
                         output.getvalue() if output is not None else "",
                         interruption=type(exc).__name__ if interrupted else None,
+                        # SystemExit accepts arbitrary objects despite its code annotation.
                         exit_code=(
                             exc.code
                             if isinstance(exc, SystemExit)
-                            and isinstance(exc.code, (int, str, type(None)))
+                            and isinstance(
+                                getattr(exc, "code", 1), (int, str, type(None))
+                            )
                             else 1
                         ),
                     )
@@ -274,7 +277,7 @@ def _host_main(  # noqa: PLR0913
     connection.close()
 
 
-def _worker_main(  # noqa: PLR0913
+def _worker_main(  # noqa: PLR0913, PLR0917
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
@@ -297,7 +300,7 @@ def _worker_main(  # noqa: PLR0913
         )
 
 
-def _run_worker(  # noqa: PLR0913
+def _run_worker(  # noqa: PLR0913, PLR0917
     connection: ProcessConnection,
     raw_filters: tuple[str, ...],
     mark: str | None,
@@ -673,7 +676,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 ordinal = cast("int", worker.active_ordinal)
                 try:
                     message = receive_task.result()
-                except (EOFError, OSError):
+                except EOFError, OSError:
                     worker.active_ordinal = None
                     if (mutex := canonical_manifest[ordinal].mutex) is not None:
                         active_mutexes.remove(mutex)

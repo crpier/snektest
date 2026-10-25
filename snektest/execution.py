@@ -585,7 +585,7 @@ async def run_tests(  # noqa: PLR0913
                 )
                 reporter.test_finished(test_result)
                 test_results.append(result_for_retention(reporter, test_result))
-                if not pdb_triggered and _maybe_debug_test_result(
+                if _maybe_debug_test_result(
                     test_result,
                     live_diagnostics=live_diagnostics,
                     pdb_on_failure=pdb_on_failure,

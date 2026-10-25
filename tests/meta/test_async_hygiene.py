@@ -247,7 +247,6 @@ async def test_embedded_run_does_not_cancel_new_host_task() -> None:
         _ = await asyncio.to_thread(child_started_file.write_text, "")
 
     host_task = asyncio.create_task(create_host_child())
-    child: asyncio.Task[None] | None = None
     try:
         summary = await run_tests_programmatic([FilterItem(str(test_file))])
         await host_task
@@ -256,9 +255,10 @@ async def test_embedded_run_does_not_cancel_new_host_task() -> None:
         assert_eq(summary.passed, 1)
         assert_false(child.cancelled())
     finally:
-        if child is not None and not child.done():
-            _ = child.cancel()
-            _ = await asyncio.gather(child, return_exceptions=True)
+        for child in host_children:
+            if not child.done():
+                _ = child.cancel()
+                _ = await asyncio.gather(child, return_exceptions=True)
         if not host_task.done():
             _ = host_task.cancel()
             _ = await asyncio.gather(host_task, return_exceptions=True)

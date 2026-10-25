@@ -396,8 +396,7 @@ class DiagnosticDict:
 
 
 type DiagnosticValue = (
-    None
-    | bool
+    bool
     | int
     | float
     | str
@@ -405,6 +404,7 @@ type DiagnosticValue = (
     | DiagnosticRepr
     | DiagnosticList
     | DiagnosticDict
+    | None
 )
 
 

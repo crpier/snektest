@@ -4,7 +4,7 @@ A type-safe, async-native Python testing framework.
 
 ## Installation
 
-Snektest requires Python 3.14 or newer.
+Snektest requires Python 3.15 or newer.
 
 ```bash
 uv add snektest
@@ -15,15 +15,15 @@ Inspect the installed version with `snektest --version` or
 
 ### Compatibility
 
-The release gate defines supported environments. `requires-python = ">=3.14"`
+The release gate defines supported environments. `requires-python = ">=3.15"`
 allows installation on newer Python versions, but the tested support guarantee
 is narrower:
 
 | Runtime | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| CPython 3.14 (GIL-enabled) | Supported | Supported | Supported |
-| CPython 3.14 (free-threaded) | Not supported | Not supported | Not supported |
-| CPython 3.15+ | Not yet verified | Not yet verified | Not yet verified |
+| CPython 3.15 (GIL-enabled) | Supported | Supported | Supported |
+| CPython 3.15 (free-threaded) | Not supported | Not supported | Not supported |
+| CPython 3.16+ | Not yet verified | Not yet verified | Not yet verified |
 | Other Python implementations | Not supported | Not supported | Not supported |
 
 Every supported cell runs the same release-health command on GitHub's current
@@ -77,9 +77,11 @@ from collections.abc import AsyncGenerator
 
 from snektest import assert_eq, fixture, load_fixture, test
 
+
 @fixture
 async def provide_number() -> AsyncGenerator[int]:
     yield 2
+
 
 @test(mark="fast")
 async def test_basic_math() -> None:
@@ -87,6 +89,7 @@ async def test_basic_math() -> None:
 
     result = given_number * 2
     assert_eq(result, 4)
+
 
 @test(mark="fast")
 def test_strings() -> None:
@@ -112,6 +115,9 @@ Snektest is distributed under the [MIT License](LICENSE). See
 using the instructions in [SECURITY.md](SECURITY.md).
 
 ## Migrating from 0.16 to 0.17
+
+Version 0.17 requires Python 3.15 or newer; Python 3.14 is no longer supported.
+Recreate existing virtual environments with Python 3.15 before upgrading.
 
 Version 0.17 made the runtime and typed interfaces match. Import public errors,
 `Scope`, decorators, assertions, and fixtures from `snektest`, not implementation
@@ -160,6 +166,7 @@ from collections.abc import AsyncGenerator
 
 from snektest import assert_eq, fixture, load_fixture, test
 
+
 @fixture(scope="session")
 async def connection_pool() -> AsyncGenerator[dict[str, str]]:
     # Setup: runs once for all tests
@@ -167,6 +174,7 @@ async def connection_pool() -> AsyncGenerator[dict[str, str]]:
     yield pool
     # Teardown: runs after all tests
     pool["status"] = "disconnected"
+
 
 @test(mark="fast")
 async def test_connection() -> None:
@@ -528,6 +536,7 @@ raise `BadRequestError` during collection. Split exhaustive matrices or use
 ```python
 from snektest import Param, assert_eq, test
 
+
 @test(
     [
         Param(value="hello", name="lowercase"),
@@ -538,6 +547,7 @@ from snektest import Param, assert_eq, test
 )
 def test_string_length(value: str) -> None:
     assert_eq(len(value), 5)
+
 
 # Test with multiple parameter combinations (cartesian product)
 @test(
@@ -576,7 +586,7 @@ Run the complete release gate before opening a pull request:
 uv run --locked python scripts/release_check.py
 ```
 
-GitHub Actions runs this exact command on Python 3.14 under Linux, macOS, and
+GitHub Actions runs this exact command on Python 3.15 under Linux, macOS, and
 Windows with a 15-minute job timeout. It checks the lock, formatting, lint, ty,
 production dependency advisories, all tests, 90% core-package coverage, release
 artifact manifests, and independent wheel and source-archive installations.
@@ -913,9 +923,11 @@ external resources.
 ```python
 from snektest import test
 
+
 @test(mark="slow")
 def test_integration() -> None:
     pass
+
 
 @test(mark="fast")
 def test_unit() -> None:
@@ -936,6 +948,7 @@ Use the `@test_hypothesis(..., mark=...)` decorator with Hypothesis strategies t
 from hypothesis import strategies as st
 from snektest import assert_ge, test_hypothesis
 
+
 @test_hypothesis(st.integers(), mark="fast")
 async def test_absolute_value_is_non_negative(x: int) -> None:
     result = abs(x)
@@ -949,6 +962,7 @@ Pass multiple strategies for functions with multiple parameters:
 ```python
 from hypothesis import strategies as st
 from snektest import assert_eq, test_hypothesis
+
 
 @test_hypothesis(st.text(), st.text(), mark="fast")
 async def test_string_concatenation_length(s1: str, s2: str) -> None:
@@ -964,6 +978,7 @@ Property-based tests work seamlessly with async functions. Snektest automaticall
 import asyncio
 from hypothesis import strategies as st
 from snektest import assert_eq, assert_true, test_hypothesis
+
 
 @test_hypothesis(st.integers(min_value=0, max_value=100), mark="fast")
 async def test_async_computation(n: int) -> None:
@@ -982,6 +997,7 @@ Use Hypothesis's `@settings()` decorator to configure test behavior. Apply it ab
 from hypothesis import settings, strategies as st
 from snektest import assert_eq, test_hypothesis
 
+
 @settings(max_examples=500, deadline=None)
 @test_hypothesis(st.lists(st.integers()), mark="fast")
 async def test_list_operations(numbers: list[int]) -> None:
@@ -994,15 +1010,17 @@ async def test_list_operations(numbers: list[int]) -> None:
 For up to five strategies, strategy types are checked against function parameters.
 Calls with six or more strategies use the documented variadic `Any` fallback:
 
-<!-- snektest-doc: expect-type-error=invalid-argument-type@10, skip-run -->
+<!-- snektest-doc: expect-type-error=invalid-argument-type@12, skip-run -->
 ```python
 from hypothesis import strategies as st
 from snektest import test_hypothesis
+
 
 # ✓ This type-checks correctly
 @test_hypothesis(st.integers(), st.text(), mark="fast")
 async def test_correct_types(x: int, s: str) -> None:
     pass
+
 
 # ✗ This will fail type checking - int strategy doesn't match str parameter
 @test_hypothesis(st.integers(), mark="fast")
@@ -1018,10 +1036,12 @@ You can mix property-based tests with traditional example-based tests in the sam
 from hypothesis import strategies as st
 from snektest import Param, assert_eq, test, test_hypothesis
 
+
 # Property-based test
 @test_hypothesis(st.integers(), st.integers(), mark="fast")
 async def test_addition_commutative(a: int, b: int) -> None:
     assert_eq(a + b, b + a)
+
 
 # Traditional parameterized test
 @test(
@@ -1066,8 +1086,7 @@ from snektest import test_graphql
     request_timeout=5.0,
     mark="slow",
 )
-async def test_graphql_contract() -> None:
-    ...
+async def test_graphql_contract() -> None: ...
 ```
 
 The body is metadata-only and is not called. `url` is the complete HTTP endpoint,
@@ -1113,8 +1132,7 @@ from snektest import GraphQLFilter, GraphQLOperationSelector, test_graphql
     ),
     mark="slow",
 )
-async def test_create_widget_contract() -> None:
-    ...
+async def test_create_widget_contract() -> None: ...
 ```
 
 With a default root type, this collects
@@ -1150,8 +1168,7 @@ from snektest import test_schema
     request_timeout=5.0,
     mark="slow",
 )
-async def test_api_contract() -> None:
-    ...
+async def test_api_contract() -> None: ...
 ```
 
 `base_url` and `headers` may also be fixture handles. This lets a session fixture
@@ -1171,8 +1188,7 @@ async def api_url() -> AsyncGenerator[str]:
 
 
 @test_schema("openapi.json", base_url=api_url(), mark="slow")
-async def test_api_contract() -> None:
-    ...
+async def test_api_contract() -> None: ...
 ```
 
 Operation names are regular parameter-case names, such as
@@ -1230,8 +1246,7 @@ def require_request_id(
     checks=[require_request_id],
     mark="slow",
 )
-async def test_authenticated_contract() -> None:
-    ...
+async def test_authenticated_contract() -> None: ...
 ```
 
 Use `@test_schema_workflow` to exercise explicit OpenAPI links and inferred
@@ -1251,8 +1266,7 @@ from snektest import test_schema_workflow
     base_url="http://127.0.0.1:8000",
     mark="slow",
 )
-async def test_api_workflows() -> None:
-    ...
+async def test_api_workflows() -> None: ...
 ```
 
 Stateful workflows accept the same `headers`, `auth`, `checks`, timeout, fixture,
@@ -1284,13 +1298,10 @@ from snektest import SchemaFilter, SchemaOperationSelector, test_schema
     base_url="http://127.0.0.1:8000",
     generation="negative",
     expected_statuses={400, 422},
-    operations=SchemaFilter(
-        exclude=(SchemaOperationSelector(path="/health"),)
-    ),
+    operations=SchemaFilter(exclude=(SchemaOperationSelector(path="/health"),)),
     mark="slow",
 )
-async def test_invalid_requests() -> None:
-    ...
+async def test_invalid_requests() -> None: ...
 ```
 
 `expected_statuses` defaults to every 4xx status and must be a non-empty
@@ -1318,9 +1329,7 @@ public_operations = SchemaFilter(
         SchemaOperationSelector(tag="public"),
         SchemaOperationSelector(path="/health", method="GET"),
     ),
-    exclude=(
-        SchemaOperationSelector(operation_id="deleteAllUsers"),
-    ),
+    exclude=(SchemaOperationSelector(operation_id="deleteAllUsers"),),
     exclude_deprecated=True,
 )
 
@@ -1331,8 +1340,7 @@ public_operations = SchemaFilter(
     operations=public_operations,
     mark="slow",
 )
-async def test_public_contract() -> None:
-    ...
+async def test_public_contract() -> None: ...
 ```
 
 The same `operations=` filter works with `@test_schema_workflow`. Both the
@@ -1379,16 +1387,19 @@ Use as a context manager to verify that a specific exception is raised:
 ```python
 from snektest import assert_eq, assert_raises, test
 
+
 @test(mark="fast")
 def test_division_by_zero() -> None:
     with assert_raises(ZeroDivisionError):
         _ = 1 / 0  # ty: ignore[division-by-zero]
+
 
 @test(mark="fast")
 def test_multiple_exception_types() -> None:
     # Can accept multiple exception types
     with assert_raises(ValueError, TypeError):
         _ = int("not a number")
+
 
 @test(mark="fast")
 def test_access_exception() -> None:
@@ -1469,6 +1480,7 @@ def test_needs_a_budget() -> None:
 <!-- snektest-doc: expect-fail -->
 ```python
 from snektest import fail, test
+
 
 @test(mark="fast")
 def test_unreachable() -> None:

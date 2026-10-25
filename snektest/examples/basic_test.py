@@ -1,5 +1,7 @@
 """Basic tests for `--collect-only`, `--fail-fast`, and `--durations` workflows.
 
+Requires Python 3.15 or newer; Python 3.14 is no longer supported.
+
 Directory discovery applies Git ignore rules to symlink names, not targets.
 Explicit file selection bypasses ignores; unexpected Git filtering failures in a
 worktree are collection errors.

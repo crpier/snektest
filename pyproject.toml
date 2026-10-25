@@ -3,7 +3,7 @@ name = "snektest"
 dynamic = ["version"]
 description = "An async-native, type-safe Python testing framework"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -18,13 +18,13 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation :: CPython",
     "Typing :: Typed",
 ]
 dependencies = [
     "hypothesis>=6.0.0",
-    "pydantic>=2.12.4",
+    "pydantic>=2.14.0",
     "rich>=14.2.0",
 ]
 
@@ -35,11 +35,12 @@ schema = [
 
 [dependency-groups]
 dev = [
-    "coverage>=7.13.1",
+    "coverage>=7.17.0",
     "pip-audit>=2.10.1,<2.11",
-    "ruff>=0.14.5",
+    "pip-api>=0.0.35", # Older vendored parsers import sre_constants, removed in Python 3.15.
+    "ruff>=0.17.2",
     "schemathesis>=4.25.2,<4.26",
-    "ty>=0.0.75",
+    "ty==0.0.84",
 ]
 
 [project.scripts]
@@ -56,7 +57,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-required-version = "==0.9.26"
+required-version = "==0.13.4"
 
 [tool.hatch.version]
 path = "snektest/_version.py"
@@ -93,6 +94,7 @@ fail_under = 90
 
 ### Formatting and static checking tools ###
 [tool.ruff]
+target-version = "py315"
 line-length = 88
 
 [tool.ruff.lint]

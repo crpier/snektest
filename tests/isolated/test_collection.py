@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import cast
 
 from pydantic import TypeAdapter
 
@@ -187,9 +186,7 @@ def test_one() -> None:
 """.lstrip()
         )
 
-        file_path = cast(
-            "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
-        )
+        file_path = TypeAdapter(PyFilePath).validate_python(test_file)
         filter_item = FilterItem(str(test_file))
 
         first = collect_tests_from_file(file_path, filter_item)
@@ -219,9 +216,7 @@ def test_other() -> None:
 """.lstrip()
         )
 
-        file_path = cast(
-            "PyFilePath", TypeAdapter(PyFilePath).validate_python(test_file)
-        )
+        file_path = TypeAdapter(PyFilePath).validate_python(test_file)
         selected = collect_tests_from_file(
             file_path,
             FilterItem(f"{test_file}::test_other"),
@@ -248,10 +243,7 @@ def test_collect_tests_from_file_spec_loader_failure_raises_collection_error() -
 
     with assert_raises(CollectionError):
         _ = collect_tests_from_file(
-            cast(
-                "PyFilePath",
-                TypeAdapter(PyFilePath).validate_python(Path(__file__)),
-            ),
+            TypeAdapter(PyFilePath).validate_python(Path(__file__)),
             FilterItem(str(Path(__file__))),
             spec_loader=fake_spec,
         )

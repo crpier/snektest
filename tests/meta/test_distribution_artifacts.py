@@ -12,7 +12,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-from snektest import assert_eq, assert_in, assert_true, load_fixture, test
+from snektest import assert_eq, assert_in, assert_ne, assert_true, load_fixture, test
 from testutils.fixtures import tmp_dir_fixture
 
 _VERSION = "0.17.0.dev0"
@@ -80,6 +80,8 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
             "uv",
             "pip",
             "install",
+            "--python",
+            sys.executable,
             "--target",
             str(target),
             "--no-deps",
@@ -88,6 +90,26 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
         cwd=cwd,
     )
     assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
+
+    rejected = _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "--python-version",
+            "3.14",
+            "--target",
+            str(target.with_name(f"{target.name}-python314")),
+            "--no-deps",
+            "--dry-run",
+            str(artifact),
+        ],
+        cwd=cwd,
+    )
+    assert_ne(rejected.returncode, 0, msg=rejected.stdout + rejected.stderr)
+    assert_in("does not satisfy Python>=3.15", rejected.stderr)
 
     script = (
         "import json, sys; "
@@ -145,7 +167,7 @@ def _assert_wheel_manifest_and_metadata(
     assert_eq(metadata["Author"], None)
     assert_eq(metadata["Author-email"], "crpier42@gmail.com")
     assert_eq(metadata["License-Expression"], "MIT")
-    assert_eq(metadata["Requires-Python"], ">=3.14")
+    assert_eq(metadata["Requires-Python"], ">=3.15")
     project_urls = metadata.get_all("Project-URL")
     assert_in("Repository, https://github.com/crpier/snektest", project_urls)
     assert_in("Issues, https://github.com/crpier/snektest/issues", project_urls)
@@ -154,7 +176,7 @@ def _assert_wheel_manifest_and_metadata(
         "Operating System :: MacOS",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: POSIX :: Linux",
-        "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: 3.15",
         "Programming Language :: Python :: Implementation :: CPython",
     ):
         assert_in(classifier, classifiers)

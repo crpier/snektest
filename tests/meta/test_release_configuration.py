@@ -48,7 +48,7 @@ def test_release_gate_uses_only_declared_tools() -> None:
         pyproject = tomllib.load(pyproject_file)
 
     development_dependencies = pyproject["dependency-groups"]["dev"]
-    assert_eq(pyproject["tool"]["uv"]["required-version"], "==0.9.26")
+    assert_eq(pyproject["tool"]["uv"]["required-version"], "==0.13.4")
     assert_true(
         any(
             dependency.startswith("pip-audit")
@@ -97,7 +97,8 @@ def test_pull_requests_run_the_same_bounded_cross_platform_gate() -> None:
     assert_true("ubuntu-latest" in workflow)
     assert_true("macos-latest" in workflow)
     assert_true("windows-latest" in workflow)
-    assert_true('python-version: "3.14"' in workflow)
+    assert_true('python-version: "3.15"' in workflow)
+    assert_true('version: "0.13.4"' in workflow)
     assert_true('PYTHONUTF8: "1"' in workflow)
     assert_true("timeout-minutes: 15" in workflow)
     assert_true("uv run --locked python scripts/release_check.py" in workflow)
@@ -112,6 +113,8 @@ def test_tag_release_requires_the_gate_before_trusted_publication() -> None:
     workflow = Path(".github/workflows/release.yml").read_text()
 
     assert_true("tags:" in workflow)
+    assert_true('python-version: "3.15"' in workflow)
+    assert_true('version: "0.13.4"' in workflow)
     assert_true("uses: $/.github/workflows/quality.yml" in workflow)
     assert_true("needs: gate" in workflow)
     assert_true("git merge-base --is-ancestor" in workflow)

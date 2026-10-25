@@ -16,7 +16,7 @@ This is the one release-health command locally and in GitHub Actions. It checks
 the lock, Ruff formatting and lint, ty, production dependency advisories, the
 complete canonical `tests/` suite under coverage, the 90% core-package threshold,
 and independently built and installed wheel and source archives. CI runs it on
-Python 3.14 under Linux, macOS, and Windows with a 15-minute outer timeout.
+Python 3.15 under Linux, macOS, and Windows with a 15-minute outer timeout.
 
 ### Guidelines for writing tests
 - Do not use monkeypatching or mocking.
@@ -76,7 +76,10 @@ uv run ruff format .
 ```
 
 ### Package Management
-This project uses `uv` for dependency management. Install all locked development dependencies with `uv sync --locked --group dev`; this includes the required strict `ty` checker. The project requires Python >=3.14. The verified support matrix is GIL-enabled CPython 3.14 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are unsupported; newer CPython versions are not yet verified.
+This project uses `uv` for dependency management. Install all locked development dependencies with `uv sync --locked --group dev`; this includes the required strict `ty` checker. The project requires Python >=3.15. The verified support matrix is GIL-enabled CPython 3.15 on Linux, macOS, and Windows. Free-threaded CPython and other implementations are unsupported; newer CPython versions are not yet verified.
+
+Migration toolchain rationale and local/downstream validation for Python 3.15
+are recorded in `docs/python315-migration.md`.
 
 ### Distribution Metadata
 
@@ -168,6 +171,7 @@ current registry — tests take no context parameter.
 from collections.abc import AsyncGenerator
 
 from snektest import fixture
+
 
 @fixture
 async def my_fixture() -> AsyncGenerator[str]:
@@ -598,8 +602,8 @@ expect to fully annotate it and run `uv run ty check`.
 
 ## Migration contract
 
-The 0.16 to 0.17 notes must cover the canonical `SnektestError` hierarchy and
-`Scope`, SKIP/XFAIL/XPASS semantics, normalized `RunResult`, JSON schema version
+The 0.16 to 0.17 notes must cover the Python 3.15 minimum (dropping Python 3.14),
+the canonical `SnektestError` hierarchy and `Scope`, SKIP/XFAIL/XPASS semantics, normalized `RunResult`, JSON schema version
 1, JUnit output, and per-fixture teardown counts. Keep the README and embedded
 agent guide synchronized when this contract changes.
 
