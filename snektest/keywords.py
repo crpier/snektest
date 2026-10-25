@@ -1,9 +1,9 @@
 """Compile pytest-style keyword expressions without evaluating Python code."""
 
-from collections.abc import Iterable
-from re import compile  # noqa: A004 - this module only compiles regular expressions
+lazy from collections.abc import Iterable
+lazy from re import compile  # noqa: A004 - this module only compiles regular expressions
 
-from snektest.models import BadRequestError
+lazy from snektest.models import BadRequestError
 
 _WORD = compile(r"[\w:+.\[\]\\/\-]+")
 _PRECEDENCE = {"or": 1, "and": 2, "not": 3}

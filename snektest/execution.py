@@ -1,27 +1,27 @@
 """Test execution, fixture teardown, debugging, and run orchestration."""
 
-import asyncio
-import pdb  # noqa: T100
-import sys
-import time
-from collections.abc import Callable, Coroutine, Sequence
-from contextlib import nullcontext
-from dataclasses import replace
-from inspect import iscoroutine
-from pathlib import Path
-from types import TracebackType
-from typing import Any, cast
+lazy import asyncio
+lazy import pdb  # noqa: T100
+lazy import sys
+lazy import time
+lazy from collections.abc import Callable, Coroutine, Sequence
+lazy from contextlib import nullcontext
+lazy from dataclasses import replace
+lazy from inspect import iscoroutine
+lazy from pathlib import Path
+lazy from types import TracebackType
+lazy from typing import Any, cast
 
-from snektest.benchmark import collect_benchmarks
-from snektest.benchmark_baseline import BenchmarkBaseline
-from snektest.diagnostics import (
+lazy from snektest.benchmark import collect_benchmarks
+lazy from snektest.benchmark_baseline import BenchmarkBaseline
+lazy from snektest.diagnostics import (
     LiveDiagnosticStore,
     snapshot_exception,
     use_live_diagnostic_store,
 )
-from snektest.fixtures import FixtureRegistry, current_registry, use_registry
-from snektest.memory import collect_measurements
-from snektest.models import (
+lazy from snektest.fixtures import FixtureRegistry, current_registry, use_registry
+lazy from snektest.memory import collect_measurements
+lazy from snektest.models import (
     DEFAULT_CLEANUP_TIMEOUT_SECONDS,
     AssertionFailure,
     BackgroundFailure,
@@ -42,14 +42,18 @@ from snektest.models import (
     _ExpectedFailureSignal,
     _SkipSignal,
 )
-from snektest.output import maybe_capture_output
-from snektest.reporting import ConsoleRunReporter, RunReporter, result_for_retention
-from snektest.task_cleanup import (
+lazy from snektest.output import maybe_capture_output
+lazy from snektest.reporting import (
+    ConsoleRunReporter,
+    RunReporter,
+    result_for_retention,
+)
+lazy from snektest.task_cleanup import (
     cancel_owned_tasks,
     collect_cleanup,
     task_scope,
 )
-from snektest.thread_observation import observe_background_failures
+lazy from snektest.thread_observation import observe_background_failures
 
 
 async def _await_test_body(

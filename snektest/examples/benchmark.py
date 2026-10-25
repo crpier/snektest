@@ -4,9 +4,9 @@ Each measurement context is single-use. Create a fresh context for each region,
 and access or advance its rounds iterator only inside that active context.
 """
 
-import asyncio
+lazy import asyncio
 
-from snektest import assert_benchmark, test
+lazy from snektest import assert_benchmark, test
 
 
 @test(mark="fast")

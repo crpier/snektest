@@ -15,9 +15,9 @@ Caller cancellation during cleanup waits for bounded teardown to finish, even
 when repeated. Older fixtures and later scopes still receive teardown attempts.
 """
 
-from collections.abc import AsyncGenerator, Generator
+lazy from collections.abc import AsyncGenerator, Generator
 
-from snektest import Scope, assert_eq, fixture, load_fixture, test
+lazy from snektest import Scope, assert_eq, fixture, load_fixture, test
 
 
 @fixture

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import cast
+lazy from dataclasses import dataclass
+lazy from typing import cast
 
-from rich.console import Console
-from rich.text import Text
+lazy from rich.console import Console
+lazy from rich.text import Text
 
-from snektest.models import (
+lazy from snektest.models import (
     BackgroundFailure,
     ErrorResult,
     FailedResult,
     TeardownFailure,
     TestResult,
 )
-from snektest.presenter.diff import render_assertion_failure
-from snektest.presenter.traceback import render_traceback
+lazy from snektest.presenter.diff import render_assertion_failure
+lazy from snektest.presenter.traceback import render_traceback
 
 
 @dataclass(frozen=True)

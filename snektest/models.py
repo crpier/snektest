@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from itertools import product
-from math import prod
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, override
+lazy from collections.abc import Callable
+lazy from dataclasses import dataclass, field
+lazy from itertools import product
+lazy from math import prod
+lazy from pathlib import Path
+lazy from typing import TYPE_CHECKING, Any, Literal, override
 
 if TYPE_CHECKING:
-    from snektest.benchmark_baseline import MachineFingerprint
+    lazy from snektest.benchmark_baseline import MachineFingerprint
 
-from snektest.annotations import Coroutine
+lazy from snektest.annotations import Coroutine
 
 DEFAULT_CLEANUP_TIMEOUT_SECONDS = 60.0
 """Maximum async cleanup time when no shorter run timeout is configured."""

@@ -1,23 +1,23 @@
 """Shared type aliases, fixture handles, and validated path annotations."""
 
-import contextlib
-from collections.abc import AsyncGenerator, Callable, Generator
-from collections.abc import Coroutine as _Coroutine
-from dataclasses import dataclass
-from enum import StrEnum
-from pathlib import Path
-from types import TracebackType
-from typing import Annotated, Any, NewType, override
+lazy import contextlib
+lazy from collections.abc import AsyncGenerator, Callable, Generator
+lazy from collections.abc import Coroutine as _Coroutine
+lazy from dataclasses import dataclass
+lazy from enum import StrEnum
+lazy from pathlib import Path
+lazy from types import TracebackType
+lazy from typing import Annotated, Any, NewType, override
 
-from pydantic import (
+lazy from pydantic import (
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
     ValidationInfo,
 )
-from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema, PydanticCustomError
-from pydantic_core.core_schema import (
+lazy from pydantic.json_schema import JsonSchemaValue
+lazy from pydantic_core import CoreSchema, PydanticCustomError
+lazy from pydantic_core.core_schema import (
     with_info_after_validator_function,
 )
 

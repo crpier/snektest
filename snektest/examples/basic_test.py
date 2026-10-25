@@ -10,7 +10,7 @@ Warning message formatting failures use safe fallback text; capture still restor
 standard streams and debugger hooks.
 """
 
-from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
+lazy from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
 
 
 @test(mark="fast")

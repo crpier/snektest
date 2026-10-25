@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import linecache
-import traceback as traceback_module
-from collections.abc import Generator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
-from pathlib import Path
-from types import TracebackType
+lazy import linecache
+lazy import traceback as traceback_module
+lazy from collections.abc import Generator
+lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar
+lazy from dataclasses import dataclass, field
+lazy from pathlib import Path
+lazy from types import TracebackType
 
-from snektest.models import (
+lazy from snektest.models import (
     AssertionDiagnostic,
     AssertionFailure,
     DiagnosticDict,

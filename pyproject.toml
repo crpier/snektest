@@ -119,6 +119,7 @@ ignore = [
   "PTH110",  # Allow using `os.path.exists`. Removed because Path.exists is 4 times slower.
   "S311",    # Allow pseudo-random generators.
   "T201",    # Allow `print` statements. Useful mostly for debugging.
+  "TID255",  # Explicit lazy imports are the runtime convention, even when definitions immediately resolve them.
   "TC001",   # Don't suggest putting imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
   "TC002",   # Don't suggest putting third party imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.
   "TC003",   # Don't suggest putting stdlib imports in `TYPE_CHECKING` blocks. Mostly makes sense for Python>=3.11.

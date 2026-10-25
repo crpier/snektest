@@ -1,6 +1,6 @@
-from rich.console import Console
+lazy from rich.console import Console
 
-from snektest.models import (
+lazy from snektest.models import (
     BenchmarkComparison,
     BenchmarkMeasurement,
     ErrorResult,
@@ -14,9 +14,9 @@ from snektest.models import (
     TestResult,
     UnexpectedPassResult,
 )
-from snektest.presenter.errors import print_failures as _print_failures
-from snektest.presenter.summary import print_slowest_tests as _print_slowest_tests
-from snektest.presenter.summary import print_summary as _print_summary
+lazy from snektest.presenter.errors import print_failures as _print_failures
+lazy from snektest.presenter.summary import print_slowest_tests as _print_slowest_tests
+lazy from snektest.presenter.summary import print_summary as _print_summary
 
 console = Console()
 

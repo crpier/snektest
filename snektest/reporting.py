@@ -1,10 +1,10 @@
 """Adapters for reporting test run progress and completion."""
 
-from dataclasses import replace
-from typing import Protocol
+lazy from dataclasses import replace
+lazy from typing import Protocol
 
-from snektest.models import PassedResult, RunResult, TestResult
-from snektest.presenter import (
+lazy from snektest.models import PassedResult, RunResult, TestResult
+lazy from snektest.presenter import (
     print_failures,
     print_slowest_tests,
     print_summary,

@@ -1,12 +1,12 @@
 """Supported top-level interface for authoring and integrating snektest tests."""
 
-from snektest._version import __version__ as __version__
-from snektest.annotations import (
+lazy from snektest._version import __version__ as __version__
+lazy from snektest.annotations import (
     AsyncFixture,
     Fixture,
     Scope,
 )
-from snektest.assertions import (
+lazy from snektest.assertions import (
     assert_eq,
     assert_false,
     assert_ge,
@@ -28,8 +28,8 @@ from snektest.assertions import (
     assert_true,
     fail,
 )
-from snektest.benchmark import assert_benchmark
-from snektest.decorators import (
+lazy from snektest.benchmark import assert_benchmark
+lazy from snektest.decorators import (
     Marker,
     fixture,
     load_fixture,
@@ -38,14 +38,14 @@ from snektest.decorators import (
     test_hypothesis,
     xfail,
 )
-from snektest.models import AssertionFailure as AssertionFailure
-from snektest.models import BadRequestError as BadRequestError
-from snektest.models import CollectionError as CollectionError
-from snektest.models import FixtureError as FixtureError
-from snektest.models import Param as Param
-from snektest.models import SnektestError as SnektestError
-from snektest.models import TestTimeoutError as TestTimeoutError
-from snektest.schema import (
+lazy from snektest.models import AssertionFailure as AssertionFailure
+lazy from snektest.models import BadRequestError as BadRequestError
+lazy from snektest.models import CollectionError as CollectionError
+lazy from snektest.models import FixtureError as FixtureError
+lazy from snektest.models import Param as Param
+lazy from snektest.models import SnektestError as SnektestError
+lazy from snektest.models import TestTimeoutError as TestTimeoutError
+lazy from snektest.schema import (
     GraphQLFilter,
     GraphQLOperationSelector,
     SchemaAuthProvider,
