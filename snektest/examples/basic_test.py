@@ -10,7 +10,15 @@ Warning message formatting failures use safe fallback text; capture still restor
 standard streams and debugger hooks.
 """
 
-lazy from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
+lazy from snektest import (
+    AssertionFailure,
+    SnektestError,
+    assert_eq,
+    assert_in,
+    assert_raises,
+    fail,
+    test,
+)
 
 
 @test(mark="fast")
@@ -30,3 +38,11 @@ def test_public_error_base() -> None:
     """Catch user-facing framework failures under one conventional base."""
     with assert_raises(SnektestError):
         fail("expected failure")
+
+
+@test(mark="fast")
+def test_structured_comparison_diagnostic() -> None:
+    """A captured failure identifies the nested path, not just two large reprs."""
+    with assert_raises(AssertionFailure) as mismatch:
+        assert_eq({"types": ["int", "str"]}, {"types": ["int", "bytes"]})
+    assert_in("At $['types'][1]: 'str' != 'bytes'", str(mismatch.exception))

@@ -5,6 +5,7 @@ lazy from statistics import median
 lazy from types import TracebackType
 lazy from typing import Any, Self, cast, overload
 
+lazy from snektest.equality import describe_inequality
 lazy from snektest.memory import (
     BackendName,
     MemoryBackend,
@@ -408,7 +409,7 @@ class MemoryContext:
 def assert_eq(actual: Any, expected: Any, *, msg: str | None = None) -> None:
     """Assert that actual == expected."""
     if actual != expected:
-        message = msg or f"{actual!r} != {expected!r}"
+        message = msg or describe_inequality(actual, expected)
         raise AssertionFailure(
             message,
             actual=actual,
