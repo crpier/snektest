@@ -106,7 +106,7 @@ def test_filter_item_file_not_starting_with_test() -> None:
             _ = FilterItem(str(test_file))
 
         msg = str(exc_info.exception)
-        assert_eq("file does not start with _test" in msg, True)
+        assert_eq("file does not start with 'test_'" in msg, True)
 
 
 @test()

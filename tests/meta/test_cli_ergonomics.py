@@ -24,6 +24,50 @@ from testutils.helpers import create_test_file
 
 
 @test(mark="slow")
+def test_filename_error_identifies_required_prefix() -> None:
+    """An invalid filename suggests the prefix that actually permits execution."""
+    tmp_dir = load_fixture(tmp_dir_fixture())
+    body_marker = tmp_dir / "filename-body-ran"
+    test_file = create_test_file(
+        tmp_dir,
+        dedent(f"""
+            from pathlib import Path
+
+            from snektest import test
+
+            @test(mark="medium")
+            def test_runs() -> None:
+                Path({str(body_marker)!r}).touch()
+        """),
+        name="probe_negative",
+    )
+
+    rejected = subprocess.run(
+        [sys.executable, "-m", "snektest", str(test_file)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert_eq(rejected.returncode, 2)
+    assert_in("file does not start with 'test_'", rejected.stdout + rejected.stderr)
+    assert_false(body_marker.exists())
+
+    test_file = test_file.rename(tmp_dir / "test_probe_negative.py")
+    accepted = subprocess.run(
+        [sys.executable, "-m", "snektest", str(test_file)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert_eq(accepted.returncode, 0)
+    assert_true(body_marker.exists())
+
+
+@test(mark="slow")
 def test_collect_only_lists_cases_without_executing_bodies() -> None:
     """Collection prints runnable selectors but never calls a test body."""
     tmp_dir = load_fixture(tmp_dir_fixture())

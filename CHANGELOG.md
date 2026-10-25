@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Correct the invalid test filename diagnostic to identify the required `test_` prefix instead of `_test`, without changing filename validation rules. (#103)
+
 - Adopt explicit lazy imports throughout the runtime and bundled examples. Package imports, ordinary decorators, and CLI help/version defer property/schema engines. Preserve eager collection of test-module imports and scoped engine registration under forced-lazy mode without changing the caller's interpreter mode or retaining an import filter. The release gate now runs the complete suite in both modes. (#93)
 
 - Require Python 3.15 or newer and drop Python 3.14 support. Move the Linux, macOS, and Windows release gate to GIL-enabled CPython 3.15, require Pydantic 2.14 for its Python 3.15 support, and update the pinned uv and validation toolchain. Existing virtual environments must be recreated with Python 3.15 before upgrading. (#92)
