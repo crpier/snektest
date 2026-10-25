@@ -513,6 +513,18 @@ typed as non-`None`, and `assert_isinstance(obj, SomeType)` returns `obj` typed 
 narrow for later attribute access; for a pure assertion discard it
 (`_ = assert_isinstance(x, int)`) to make that intent explicit.
 
+`assert_raises(*expected_exceptions, msg=None, match=None)` accepts string regexes
+and compiled `re.Pattern[str]` values. `match` searches `str(exception)` only after
+type validation, preserves compiled flags, and accepts an empty pattern for any
+renderable message. `msg` overrides assertion failure text, not matching behavior.
+Capture `.exception` for the original typed object and use `assert_eq` on its text
+for exact equality. Mismatches or broken message formatters raise
+`AssertionFailure` with the original exception as cause; fallback text is never
+matched. Invalid regexes and bytes patterns raise `BadRequestError` at context
+construction, before the body. The top-level stub re-exports the implementation's
+generic signature; installed-wheel tests verify capture types and reject bytes
+and non-pattern arguments.
+
 ### Memory Assertions
 
 `assert_memory` (`assertions.py`) is a context-manager assertion, in the

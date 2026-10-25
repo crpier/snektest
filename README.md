@@ -1405,11 +1405,28 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 
 ### Exception Assertions
 
-**`assert_raises(*expected_exceptions, msg=None)`** - Assert that code raises an expected exception
+**`assert_raises(*expected_exceptions, msg=None, match=None)`** - Assert that code raises an expected exception, optionally matching its message
 
-Use as a context manager to verify that a specific exception is raised:
+`match=` accepts a string regex or a compiled `re.Pattern[str]` and uses regex
+**search** against `str(exception)`, after checking the exception type. Compiled
+flags are preserved; an empty pattern matches any successfully rendered message.
+Use anchors for a whole-message regex, `re.escape(...)` for literal text, or
+capture the exception and use `assert_eq(str(exc_info.exception), expected)` for
+exact equality. Exception notes, causes, and type names are not searched.
+
+`msg=` overrides the assertion's failure message; it does **not** match the raised
+exception's text. A message mismatch raises `AssertionFailure` and retains the
+original exception as its cause. If `str(exception)` raises, matching also fails
+with a safe diagnostic and the original cause; fallback diagnostic text is never
+searched. Invalid regexes and bytes patterns raise `BadRequestError` when the
+context is constructed, before entering its body.
+
+Use as a context manager; `.exception` remains the original, statically typed
+exception after exit:
 
 ```python
+import re
+
 from snektest import assert_eq, assert_raises, test
 
 
@@ -1428,11 +1445,17 @@ def test_multiple_exception_types() -> None:
 
 @test(mark="fast")
 def test_access_exception() -> None:
-    # Access the caught exception via the exception property
-    with assert_raises(ValueError) as exc_info:
+    with assert_raises(ValueError, match=r"custom \w+") as exc_info:
         raise ValueError("custom message")
 
-    assert_eq(exc_info.exception.args[0], "custom message")
+    assert_eq(str(exc_info.exception), "custom message")
+
+
+@test(mark="fast")
+def test_compiled_message_pattern() -> None:
+    pattern = re.compile(r"^invalid field: name$", re.IGNORECASE)
+    with assert_raises(ValueError, match=pattern, msg="expected a field error"):
+        raise ValueError("INVALID FIELD: NAME")
 ```
 
 ### Memory Assertions

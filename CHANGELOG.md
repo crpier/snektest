@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
+
 - Correct the invalid test filename diagnostic to identify the required `test_` prefix instead of `_test`, without changing filename validation rules. (#103)
 
 - Adopt explicit lazy imports throughout the runtime and bundled examples. Package imports, ordinary decorators, and CLI help/version defer property/schema engines. Preserve eager collection of test-module imports and scoped engine registration under forced-lazy mode without changing the caller's interpreter mode or retaining an import filter. The release gate now runs the complete suite in both modes. (#93)
