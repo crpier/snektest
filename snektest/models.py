@@ -169,9 +169,7 @@ class FilterItem:
             raise ArgsError(msg)
 
         if path.is_file() and not path.name.startswith("test_"):
-            msg = (
-                f"Invalid test filter - file does not start with _test in '{raw_input}'"
-            )
+            msg = f"Invalid test filter - file does not start with 'test_' in '{raw_input}'"
             raise ArgsError(msg)
 
         if function_name is not None and not function_name.isidentifier():
