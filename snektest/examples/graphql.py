@@ -8,12 +8,12 @@ HTTP server-error diagnostics include the status code and generated operation.
 Subscriptions and complete response-type validation are unsupported.
 """
 
-from collections.abc import Generator
-from typing import Any
+lazy from collections.abc import Generator
+lazy from typing import Any
 
-from hypothesis import settings
+lazy from hypothesis import settings
 
-from snektest import (
+lazy from snektest import (
     GraphQLFilter,
     GraphQLOperationSelector,
     assert_in,

@@ -1,19 +1,25 @@
 """Fixture registry: per-run ownership of caching, setup, and teardown."""
 
-import asyncio
-import sys
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass
-from inspect import isasyncgen, isgenerator, signature
-from pickle import HIGHEST_PROTOCOL, dumps, loads
-from types import TracebackType
-from typing import Any, cast
+lazy import asyncio
+lazy import sys
+lazy from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Generator,
+    Mapping,
+)
+lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar
+lazy from dataclasses import dataclass
+lazy from inspect import isasyncgen, isgenerator, signature
+lazy from pickle import HIGHEST_PROTOCOL, dumps, loads
+lazy from types import TracebackType
+lazy from typing import Any, cast
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture
-from snektest.diagnostics import snapshot_exception
-from snektest.models import (
+lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.models import (
     DEFAULT_CLEANUP_TIMEOUT_SECONDS,
     BadRequestError,
     FixtureError,
@@ -22,7 +28,7 @@ from snektest.models import (
     TeardownFailure,
     UnreachableError,
 )
-from snektest.task_cleanup import (
+lazy from snektest.task_cleanup import (
     cancel_owned_tasks,
     cancel_tasks,
     defer_cancellation,

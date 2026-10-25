@@ -1,4 +1,4 @@
-from snektest.cli import main
+lazy from snektest.cli import main
 
 if __name__ == "__main__":
     main()

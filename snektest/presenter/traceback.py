@@ -1,8 +1,8 @@
-from rich.console import Console
-from rich.markup import escape
-from rich.syntax import Syntax
+lazy from rich.console import Console
+lazy from rich.markup import escape
+lazy from rich.syntax import Syntax
 
-from snektest.models import ExceptionDiagnostic
+lazy from snektest.models import ExceptionDiagnostic
 
 
 def _render_single_traceback(

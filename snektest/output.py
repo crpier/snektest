@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import inspect
-import os
-import pdb  # noqa: T100
-import sys
-import warnings
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from dataclasses import dataclass
-from io import StringIO
-from tempfile import TemporaryFile
-from typing import Any, BinaryIO, Self, TextIO, cast
+lazy import inspect
+lazy import os
+lazy import pdb  # noqa: T100
+lazy import sys
+lazy import warnings
+lazy from collections.abc import Callable, Generator
+lazy from contextlib import contextmanager
+lazy from dataclasses import dataclass
+lazy from io import StringIO
+lazy from tempfile import TemporaryFile
+lazy from typing import Any, BinaryIO, Self, TextIO, cast
 
 
 class StdinProxy:

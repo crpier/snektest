@@ -8,17 +8,17 @@ with their existing owners.
 
 from __future__ import annotations
 
-import asyncio
-import threading
-from collections.abc import Sequence
-from dataclasses import dataclass
-from pickle import loads
-from typing import Any, Protocol, cast
+lazy import asyncio
+lazy import threading
+lazy from collections.abc import Sequence
+lazy from dataclasses import dataclass
+lazy from pickle import loads
+lazy from typing import Any, Protocol, cast
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture
-from snektest.decorators import RunFixtureIdentity
-from snektest.diagnostics import snapshot_exception
-from snektest.models import FixtureError, RunInfrastructureError, TestResult
+lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
+lazy from snektest.decorators import RunFixtureIdentity
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.models import FixtureError, RunInfrastructureError, TestResult
 
 
 class ProcessConnection(Protocol):

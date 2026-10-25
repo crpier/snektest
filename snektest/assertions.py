@@ -1,11 +1,11 @@
-import asyncio
-from collections.abc import Generator
-from contextvars import Token
-from statistics import median
-from types import TracebackType
-from typing import Any, Self, cast, overload
+lazy import asyncio
+lazy from collections.abc import Generator
+lazy from contextvars import Token
+lazy from statistics import median
+lazy from types import TracebackType
+lazy from typing import Any, Self, cast, overload
 
-from snektest.memory import (
+lazy from snektest.memory import (
     BackendName,
     MemoryBackend,
     create_backend,
@@ -14,7 +14,7 @@ from snektest.memory import (
     is_measurement_active,
     record_measurement,
 )
-from snektest.models import (
+lazy from snektest.models import (
     AssertionFailure,
     BadRequestError,
     MemoryMeasurement,

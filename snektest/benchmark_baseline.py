@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable, Generator
-from contextlib import contextmanager, suppress
-from dataclasses import dataclass
-from os import O_CREAT, O_EXCL, O_WRONLY, close, cpu_count, fsync
-from os import open as os_open
-from pathlib import Path
-from platform import machine, processor, python_implementation, python_version, system
-from tempfile import NamedTemporaryFile
-from typing import Literal, Self
+lazy import json
+lazy from collections.abc import Callable, Generator
+lazy from contextlib import contextmanager, suppress
+lazy from dataclasses import dataclass
+lazy from os import O_CREAT, O_EXCL, O_WRONLY, close, cpu_count, fsync
+lazy from os import open as os_open
+lazy from pathlib import Path
+lazy from platform import (
+    machine,
+    processor,
+    python_implementation,
+    python_version,
+    system,
+)
+lazy from tempfile import NamedTemporaryFile
+lazy from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+lazy from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from snektest.collection import git_ignored_files
-from snektest.models import (
+lazy from snektest.collection import git_ignored_files
+lazy from snektest.models import (
     AssertionFailure,
     BadRequestError,
     BenchmarkComparison,

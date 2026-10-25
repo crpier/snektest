@@ -14,7 +14,8 @@ uv run --locked python scripts/release_check.py
 
 This is the one release-health command locally and in GitHub Actions. It checks
 the lock, Ruff formatting and lint, ty, production dependency advisories, the
-complete canonical `tests/` suite under coverage, the 90% core-package threshold,
+complete canonical `tests/` suite under coverage and again with forced lazy imports,
+the 90% core-package threshold,
 and independently built and installed wheel and source archives. CI runs it on
 Python 3.15 under Linux, macOS, and Windows with a 15-minute outer timeout.
 
@@ -443,7 +444,8 @@ diagnostics. `--pdb` alone keeps live tracebacks and stops on the first failure.
 Process dispatch permits at most twice the worker count in active or
 completed-but-unreported cases, or one case in fail-fast mode. Measured budgets
 and the reproducible benchmark command live in
-`docs/large-suite-memory.md`.
+`docs/large-suite-memory.md`. Lazy first-use initialization has a separate cold-run
+budget; the warmed noisy-output run retains its original allocation limit.
 
 ### Structured output
 
@@ -622,6 +624,22 @@ Rules of thumb:
 - Never hand-write sample test output in `README.md`; run the example with `uv run snektest` and paste the actual output.
 - Code blocks in docs must type-check under this repo's strict ty config and run as written.
 - These rules are enforced by `tests/meta/test_doc_blocks.py`, which extracts every ```python block from `README.md` and `AGENT_DOCS`, type-checks them with ty, runs them with snektest, and diffs each adjacent ```text block against captured output. Annotate exceptions with an HTML comment directive before the fence, e.g. `<!-- snektest-doc: expect-fail -->` or `<!-- snektest-doc: expect-type-error, skip-run -->`. `expect-type-error` optionally pins a specific diagnostic — `expect-type-error=invalid-argument-type` (that rule anywhere) or `expect-type-error=invalid-argument-type@10` (that rule at block line 10) — so a signature regression to a different rule or line still fails the test (see `testutils/docblocks.py`).
+
+### Import policy
+
+Eligible runtime imports, including bundled examples, use explicit `lazy` syntax.
+Future imports, stubs, and syntax-restricted contexts remain eager. Definitions
+may resolve imported names immediately; Ruff TID255 is intentionally disabled
+because explicit syntax is the convention, not a promise of universal deferral.
+
+`import_policy.py` owns synchronous, serialized initialization scopes. Collection
+realizes top-level imports in the synthetic test namespace; property/schema engine
+internals register eagerly within collection and schema-factory initialization.
+The scope delegates unrelated imports to the existing filter and restores it on
+all exits without changing the interpreter mode. Never span an await or a
+fixture/test lifetime with this scope. It does not fix unrelated dependency
+imports for embedding applications. See `docs/lazy-imports.md` for policy and
+normal/forced-lazy validation.
 
 ### Code Style Notes
 

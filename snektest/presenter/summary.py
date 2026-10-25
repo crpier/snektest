@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from rich.console import Console
-from rich.text import Text
+lazy from rich.console import Console
+lazy from rich.text import Text
 
-from snektest.models import (
+lazy from snektest.models import (
     ErrorResult,
     ExceptionDiagnostic,
     ExpectedFailureResult,

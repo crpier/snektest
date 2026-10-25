@@ -1,39 +1,43 @@
 """Public decorators and fixture-loading APIs."""
 
-import asyncio
-import threading
-from collections.abc import AsyncGenerator, Callable, Generator
-from concurrent.futures import Future
-from dataclasses import dataclass
-from functools import wraps
-from inspect import (
+lazy import asyncio
+lazy import threading
+lazy from collections.abc import AsyncGenerator, Callable, Generator
+lazy from concurrent.futures import Future
+lazy from dataclasses import dataclass
+lazy from functools import wraps
+lazy from inspect import (
     Parameter,
     Signature,
     isasyncgenfunction,
     iscoroutinefunction,
     signature,
 )
-from typing import Any, Literal, Never, Protocol, TypeVar, cast, overload
+lazy from typing import Any, Literal, Never, Protocol, TypeVar, cast, overload
 
-from hypothesis import given
+lazy from hypothesis import given
 
-from snektest.annotations import AsyncFixture, Coroutine, Fixture, FixtureScope, Scope
-from snektest.fixtures import current_registry, load_run_fixture
-from snektest.models import (
+lazy from snektest.annotations import (
+    AsyncFixture,
+    Coroutine,
+    Fixture,
+    FixtureScope,
+    Scope,
+)
+lazy from snektest.fixtures import current_registry, load_run_fixture
+lazy from snektest.models import (
     BadRequestError,
     Param,
     _ExpectedFailureSignal,
     _SkipSignal,
 )
-from snektest.task_cleanup import (
+lazy from snektest.task_cleanup import (
     cancel_tasks,
     cleanup_budget,
     cleanup_failures,
     defer_cancellation,
 )
-from snektest.utils import mark_test_function
-
-_given = cast("Any", given)
+lazy from snektest.utils import mark_test_function
 
 T_co = TypeVar("T_co", covariant=True)
 
@@ -178,7 +182,8 @@ def _run_hypothesis(
     )
     hypothesis_runner.__signature__ = signature  # ty: ignore[unresolved-attribute]
 
-    hypothesis_runner_wrapped = _given(*strategies)(hypothesis_runner)
+    given_decorator = cast("Any", given)
+    hypothesis_runner_wrapped = given_decorator(*strategies)(hypothesis_runner)
 
     runner = cast(
         "Callable[[], None]",

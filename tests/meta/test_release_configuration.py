@@ -16,6 +16,7 @@ _RELEASE_STAGES = [
     "dependency-audit",
     "tests-with-coverage",
     "coverage-threshold",
+    "tests-forced-lazy-imports",
 ]
 
 

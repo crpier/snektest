@@ -1,28 +1,28 @@
-import asyncio
-import json
-import sys
-import traceback
-from collections.abc import Callable, Coroutine
-from contextlib import nullcontext
-from dataclasses import dataclass
-from math import isfinite
-from pathlib import Path
-from typing import Literal, cast
+lazy import asyncio
+lazy import json
+lazy import sys
+lazy import traceback
+lazy from collections.abc import Callable, Coroutine
+lazy from contextlib import nullcontext
+lazy from dataclasses import dataclass
+lazy from math import isfinite
+lazy from pathlib import Path
+lazy from typing import Literal, cast
 
-from snektest._version import __version__
-from snektest.agent_docs import (
+lazy from snektest._version import __version__
+lazy from snektest.agent_docs import (
     get_agent_docs,
     get_example_source,
     get_examples_listing,
 )
-from snektest.benchmark_baseline import BenchmarkBaseline, discover_project_root
-from snektest.collection import collect_test_plan
-from snektest.configuration import ProjectConfig, load_project_config
-from snektest.diagnostics import snapshot_exception
-from snektest.execution import run_tests
-from snektest.junit import build_junit_xml
-from snektest.keywords import KeywordExpression
-from snektest.models import (
+lazy from snektest.benchmark_baseline import BenchmarkBaseline, discover_project_root
+lazy from snektest.collection import collect_test_plan
+lazy from snektest.configuration import ProjectConfig, load_project_config
+lazy from snektest.diagnostics import snapshot_exception
+lazy from snektest.execution import run_tests
+lazy from snektest.junit import build_junit_xml
+lazy from snektest.keywords import KeywordExpression
+lazy from snektest.models import (
     ArgsError,
     BadRequestError,
     BenchmarkBaselineRun,
@@ -33,21 +33,21 @@ from snektest.models import (
     RunResult,
     UnreachableError,
 )
-from snektest.output import DescriptorOutputCapture
-from snektest.parallel import run_tests_parallel
-from snektest.presenter import print_error
-from snektest.reporting import (
+lazy from snektest.output import DescriptorOutputCapture
+lazy from snektest.parallel import run_tests_parallel
+lazy from snektest.presenter import print_error
+lazy from snektest.reporting import (
     ConsoleRunReporter,
     DeferredRunReporter,
     NullRunReporter,
     RunReporter,
 )
-from snektest.structured import (
+lazy from snektest.structured import (
     SUPPORTED_SCHEMA_VERSIONS,
     build_json_collection,
     build_json_summary,
 )
-from snektest.structured import (
+lazy from snektest.structured import (
     build_json_error as _json_error_document,
 )
 
