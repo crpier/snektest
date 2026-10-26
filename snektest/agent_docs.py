@@ -122,7 +122,7 @@ counts now count each failed fixture teardown.
   Mismatches and broken message formatters raise `AssertionFailure` with the
   original cause; diagnostic fallback text is never matched. Invalid regexes and
   bytes patterns raise `BadRequestError` at context construction, before the body.
-  See `--example basic_test` for string and compiled-pattern examples.
+  See `--example basic` for regex, exact-text, and original-cause examples.
 - `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)` is a
   context-manager assertion for memory budgets (bytes as `int`). Wrap a region
   for a whole-block peak budget, or loop work over `m.rounds`. `rounds` must be
@@ -160,7 +160,10 @@ counts now count each failed fixture teardown.
 - Failed fixture setup retains task ownership before its first yield. At the fixture's scope teardown, abandoned tasks are cancelled and cleanup failures are reported separately from the setup error. Retrying a failed session fixture preserves cleanup for each attempt. Shared async session setup survives cancellation of a test's waiter and remains available to later tests. At scope teardown, unfinished setup receives bounded cancellation; resistance and cleanup errors become fixture teardown diagnostics. Function setup left pending when its test returns is abandoned fixture work and is cleaned before the next test. Put background-task setup and the fixture's `yield` inside `try`/`finally` so both setup failure and normal teardown stop tasks.
 - Use `await asyncio.to_thread(...)` for blocking application work in an async test, and load fixtures before offloading. `to_thread` copies context; a raw `threading.Thread` does not inherit the fixture registry. An async timeout stops awaiting offloaded work but cannot stop its thread, which may continue or delay shutdown. Sync, CPU-bound, import, raw-thread, and sync-teardown hangs still need an outer process or CI timeout.
 - Unhandled thread and `sys.unraisablehook` exceptions make an otherwise passing test an error. A new non-daemon thread still alive after function teardown makes it fail; joined threads pass, daemon threads and event-loop default-executor workers are exempt. Existing hooks are chained and restored. Extra background failures remain visible in console and JSON diagnostics. Snektest does not kill threads or provide a threaded test executor.
-- Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization. Every parameter list must be non-empty. Multiple lists form a Cartesian product capped at 10,000 cases per decorated test; larger products fail during collection. Case names must be unique and non-empty and cannot contain `, `, `[` or `]`, so their CLI filters are unambiguous. Static typing preserves parameter types through two lists; three or more use a variadic `Any` fallback. `@test_hypothesis` preserves strategy types through five strategies; six or more use its `Any` fallback.
+- Use `Param(value=..., name=...)` for one named value per argument. See
+  **Parameter values and case names** below for tuples versus separate axes and
+  common construction mistakes. `@test_hypothesis` preserves strategy types
+  through five strategies; six or more use its `Any` fallback.
 - Define fixtures as generator functions decorated with `@fixture`, annotated `Generator[T]` or `AsyncGenerator[T]`. Load them with `load_fixture(fixture())` — call the decorated fixture and pass the returned handle.
 - `@fixture` (default) is function-scoped. `@fixture(scope="session")` is cached once per execution process. `@fixture(scope="run")` is a zero-argument module-level fixture owned once by the command; it yields an inert stdlib-pickle descriptor of at most 1 MiB, and each worker receives an independent decoded copy. The literals and matching `Scope` enum members normalize to `Scope`; fixture handles expose that enum at runtime.
 - Fixtures may take arguments; pass them at the call site, e.g. `load_fixture(make_user("Ada"))`. Calling a fixture twice gives two independent instances.
@@ -196,6 +199,122 @@ counts now count each failed fixture teardown.
 Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--allow-empty`, in local, worker, and collect-only modes.
 
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
+
+## Parameter values and case names
+
+Use `Param(value=..., name=...)`. `Param(value="sqlite")` and `Param("sqlite")`
+both lack the required name: write `Param(value="sqlite", name="sqlite")`.
+`Param(1, 2, name="pair")` is not a two-value case: write
+`Param(value=(1, 2), name="pair")` and accept one tuple argument. Positional
+construction with both required fields remains supported.
+
+```python
+from snektest import Param, assert_eq, test
+
+
+@test(
+    [
+        Param(value=(2, 3, 5), name="small"),
+        Param(value=(100, 200, 300), name="large"),
+    ],
+    mark="fast",
+)
+def test_tuple_value(case: tuple[int, int, int]) -> None:
+    # One Param passes one tuple argument, not three separate arguments.
+    left, right, expected = case
+    assert_eq(left + right, expected)
+```
+
+A tuple-valued list selects related inputs as one argument; two parameter lists
+supply two arguments and form a Cartesian product, not pairwise zip. Each list
+must be non-empty; names must be non-empty, unique within that list, and exclude
+`, `, `[` and `]`. Explicit stable names become selector IDs; never infer them
+from arbitrary value reprs. One decorated test may expand to at most 10,000 cases;
+split larger matrices or sample with Hypothesis. `@test` checks parameter types
+through two lists; three or more use its variadic `Any` fallback.
+
+Print the complete scalar/tuple/two-axis example with
+`snektest --example parametrize > test_parametrize.py`, then inspect selectors:
+
+```bash
+snektest test_parametrize.py --collect-only
+snektest 'test_parametrize.py::test_tuple_value[small]'
+snektest 'test_parametrize.py::test_cartesian_product[hello, world]'
+```
+
+An unconstrained axis may widen literal values to `str`. When the test accepts
+`Literal` values, preserve them by annotating the axis as `list[Param[Backend]]`
+(or use explicit `Param[Backend](...)` constructors); avoid casts or `Any`:
+
+```python
+from typing import Literal
+
+from snektest import Param, assert_in, test
+
+
+type Backend = Literal["sqlite", "mariadb"]
+
+BACKENDS: list[Param[Backend]] = [
+    Param(value="sqlite", name="sqlite"),
+    Param(value="mariadb", name="mariadb"),
+]
+
+
+@test(BACKENDS, mark="fast")
+def test_literal_backend(backend: Backend) -> None:
+    assert_in(backend, ("sqlite", "mariadb"))
+```
+
+## Narrowing and assertion argument order
+
+Bind narrowing helpers' return values when using the checked value later. This
+both asserts and gives the checker a non-`None` or instance-specific value;
+calling a helper without binding its result is not the recommended narrowing
+pattern. Discard with `_ = assert_isinstance(value, SomeType)` for a pure check.
+Keep the observed/computed value first in subsequent comparisons:
+
+```python
+from snektest import assert_eq, assert_is_not_none, assert_isinstance, test
+
+
+@test(mark="fast")
+def test_bound_narrowing_helpers() -> None:
+    settings: dict[str, object] = {"suite": "SNEKTEST"}
+    configured = assert_is_not_none(settings.get("suite"))
+    name = assert_isinstance(configured, str)
+    assert_eq(name.lower(), "snektest")
+```
+
+## Exception text and original causes
+
+Use `match=` for regex search, or capture `.exception` and assert its exact text.
+`msg=` only overrides a failing assertion's diagnostic: it does not match text.
+Matching never searches causes or notes. Inspect the original cause explicitly:
+
+```python
+from snektest import assert_eq, assert_in, assert_isinstance, assert_raises, test
+
+
+def _parse_port(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        message = "invalid port"
+        raise RuntimeError(message) from error
+
+
+@test(mark="fast")
+def test_exception_cause() -> None:
+    with assert_raises(RuntimeError, msg="port conversion should fail") as caught:
+        _ = _parse_port("not-a-number")
+
+    assert_eq(str(caught.exception), "invalid port")
+    cause = assert_isinstance(caught.exception.__cause__, ValueError)
+    assert_in("not-a-number", str(cause))
+```
+
+The deliberately different `msg=` does not prevent this test from passing.
+Print the complete assertion examples with `snektest --example basic`.
 
 ## Skips and known defects
 
