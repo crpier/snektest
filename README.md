@@ -652,6 +652,49 @@ for up to two parameter lists; three or more use the variadic `Any` fallback.
 `@test_hypothesis` checks up to five strategies; six or more use its variadic
 `Any` fallback.
 
+### Python-native type contracts
+
+Install `snektest[typing]` to check consumer typing behavior with the pinned ty
+checker. Use bare `@test_typing` (unlike `@test(...)`) on a module-level sync or
+async function. Its body is analyzed, never executed; parameters are symbolic
+inputs, not runtime fixtures. Static tests receive the `slow` marker.
+
+```python
+from typing import assert_type
+
+from snektest import assert_type_error, test_typing
+
+
+def takes_int(value: int) -> int:
+    return value
+
+
+@test_typing
+def test_argument_types(symbolic: int) -> None:
+    assert_type(takes_int(symbolic), int)
+    with assert_type_error("invalid-argument-type"):
+        takes_int("wrong")
+```
+
+Each assertion block requires exactly one diagnostic with the literal rule name.
+Missing, different, or additional diagnostics fail; nested blocks own their
+innermost diagnostics. Unexpected errors in the selected function or shared
+module helpers fail too. Broken imports and checker setup are errors, not proof
+of a successful rejection. The marker is not supported in ordinary runtime tests.
+
+Run and select these functions through the usual Snektest commands, locally or
+with workers. Ordinary `ty check` deliberately skips their bodies; **run Snektest
+to validate the contracts**, including positive `assert_type` assertions. The
+static run checks the original source with a temporary partial stub, preserving
+imports and source locations, using the current interpreter and isolated strict
+rules rather than ambient ty configuration. Ordinary runtime tests and
+`--collect-only` do not launch ty.
+
+This initial implementation invokes ty per selected function; cross-function
+batching and configurable checker environments are not implemented yet. Checker
+output and process waits are bounded, but collection/imports still require an
+external command timeout. See `snektest --example typing` for sync/async examples.
+
 ### Public Errors
 
 Catch user-facing framework failures with `SnektestError`. Its exported

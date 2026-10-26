@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import email.parser
 import json
 import os
 import subprocess
@@ -37,6 +38,17 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _wheel_members(wheel: Path) -> list[str]:
+    with zipfile.ZipFile(wheel) as archive:
+        members = archive.namelist()
+        metadata_path = next(
+            name for name in members if name.endswith(".dist-info/METADATA")
+        )
+        metadata = email.parser.BytesParser().parsebytes(archive.read(metadata_path))
+    assert_in("typing", metadata.get_all("Provides-Extra", []))
+    return members
+
+
 @test(mark="slow")
 def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     """A consumer can import and type-check the supported wheel interface."""
@@ -54,8 +66,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(len(wheels), 1)
     wheel = wheels[0]
 
-    with zipfile.ZipFile(wheel) as archive:
-        members = archive.namelist()
+    members = _wheel_members(wheel)
     assert_true("snektest/__init__.pyi" in members)
     assert_true("snektest/py.typed" in members)
 
@@ -293,6 +304,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_in("capture_logs", diagnostics)
 
     _check_invalid_match_types(type_checker, target_dir, tmp_dir)
+    _check_installed_typing_contract(type_checker, target_dir, tmp_dir)
 
 
 def _check_invalid_match_types(
@@ -329,3 +341,56 @@ def _check_invalid_match_types(
     match_diagnostics = rejected_match.stdout + rejected_match.stderr
     assert_eq(rejected_match.returncode, 1, msg=match_diagnostics)
     assert_eq(match_diagnostics.count("error[invalid-argument-type]"), 3)
+
+
+def _check_installed_typing_contract(
+    type_checker: Path, target_dir: Path, tmp_dir: Path
+) -> None:
+    """Static runs use the installed interface and its import search location."""
+    (target_dir / "installed_dependency.py").write_text(
+        "def identity(value: int) -> int:\n    return value\n", encoding="utf-8"
+    )
+    source = tmp_dir / "test_installed_typing.py"
+    source.write_text(
+        dedent("""
+            from typing import assert_type
+            from installed_dependency import identity
+            from snektest import assert_type_error, test_typing
+
+            @test_typing
+            def consumer(symbolic: int) -> None:
+                assert_type(identity(symbolic), int)
+                with assert_type_error("invalid-argument-type"):
+                    identity("wrong")
+        """),
+        encoding="utf-8",
+    )
+    normal = _run(
+        [
+            str(type_checker),
+            "check",
+            "--python",
+            sys.executable,
+            "--extra-search-path",
+            str(target_dir),
+            str(source),
+        ],
+        cwd=tmp_dir,
+    )
+    assert_eq(normal.returncode, 0, msg=normal.stdout + normal.stderr)
+    static = _run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; "
+                f"sys.path.insert(0, {str(target_dir)!r}); "
+                "from snektest.cli import main; "
+                f"sys.argv = ['snektest', '--json-output', {str(source)!r}]; main()"
+            ),
+        ],
+        cwd=tmp_dir,
+    )
+    assert_eq(static.returncode, 0, msg=static.stdout + static.stderr)
+    assert_eq(json.loads(static.stdout)["passed"], 1)

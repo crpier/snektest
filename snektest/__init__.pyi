@@ -1,6 +1,7 @@
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Any, Literal, overload
+from typing import no_type_check as test_typing
 
 from snektest._version import __version__ as __version__
 from snektest.annotations import (
@@ -56,6 +57,7 @@ from snektest.schema import (
     SchemaGenerationError,
     SchemaOperationSelector,
 )
+from snektest.type_contracts import assert_type_error as assert_type_error
 
 __all__ = [
     "AssertionFailure",
@@ -98,6 +100,7 @@ __all__ = [
     "assert_not_isinstance",
     "assert_raises",
     "assert_true",
+    "assert_type_error",
     "capture_logs",
     "fail",
     "fixture",
@@ -108,6 +111,7 @@ __all__ = [
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",
+    "test_typing",
     "xfail",
 ]
 

@@ -58,6 +58,7 @@ lazy from snektest.schema import (
     test_schema,
     test_schema_workflow,
 )
+lazy from snektest.type_contracts import assert_type_error, test_typing
 
 __all__ = [
     "AssertionFailure",
@@ -100,6 +101,7 @@ __all__ = [
     "assert_not_isinstance",
     "assert_raises",
     "assert_true",
+    "assert_type_error",
     "capture_logs",
     "fail",
     "fixture",
@@ -110,5 +112,6 @@ __all__ = [
     "test_hypothesis",
     "test_schema",
     "test_schema_workflow",
+    "test_typing",
     "xfail",
 ]

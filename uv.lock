@@ -662,6 +662,9 @@ dependencies = [
 schema = [
     { name = "schemathesis" },
 ]
+typing = [
+    { name = "ty" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -679,8 +682,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14.0" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "schemathesis", marker = "extra == 'schema'", specifier = ">=4.25.2,<4.26" },
+    { name = "ty", marker = "extra == 'typing'", specifier = "==0.0.84" },
 ]
-provides-extras = ["schema"]
+provides-extras = ["schema", "typing"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -270,6 +270,22 @@ tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
 the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
+### Python-native typing contracts
+
+`type_contracts.py` owns bare `@test_typing` and `assert_type_error(rule)`.
+Bodies are statically analyzed, never executed; function parameters are symbolic
+inputs. The top-level stub exposes the decorator as `typing.no_type_check` for
+ordinary checks. Static runs replace only that declaration through a temporary
+partial stub and analyze original source with the optional pinned ty binary.
+Preserve original imports/locations, exact per-block diagnostic cardinality,
+innermost ownership, selected-function isolation, and shared positive controls.
+Broken imports cannot certify a rejection. Keep checker imports/invocation out of
+collection and runtime-only runs. Each checker subprocess has bounded output and
+must be killed/reaped on cancellation; this does not bound local collection.
+Current work checks one function per invocation; batching and configurable checker
+environments remain follow-ups within #96. Exercise the public marker/decorator,
+real local/worker runner, and installed artifact seams when changing this module.
+
 ### Explicit log capture
 
 `log_capture.py` owns `capture_logs` / `LogCapture`: opt-in stdlib capture with

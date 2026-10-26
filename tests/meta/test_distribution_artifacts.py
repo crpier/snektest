@@ -37,6 +37,7 @@ _REQUIRED_EXAMPLES = {
     "snektest/examples/outcomes.py",
     "snektest/examples/parametrize.py",
     "snektest/examples/schema.py",
+    "snektest/examples/type_contracts.py",
 }
 
 
