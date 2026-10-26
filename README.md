@@ -731,6 +731,22 @@ Internal invariant failures are not exported from the top-level package.
 
 ## Running Tests
 
+Standalone CLI commands enable **context-aware warnings** before collection,
+including in workers. Explicit Python settings win: use
+`python -X context_aware_warnings=0 -m snektest ...` or set
+`PYTHON_CONTEXT_AWARE_WARNINGS=0` to opt out. `-X` takes precedence over the
+environment; `-E`/`-I` ignore the environment, not the CLI default. Already-enabled
+interpreters and explicit opt-outs do not restart.
+
+Otherwise the CLI relaunches the same interpreter, preserving its venv, options,
+arguments and streams. POSIX keeps the PID and inherited ignored signals; Windows
+uses a waiting parent and propagates the child exit status. Interpreter/site
+startup hooks may repeat; collection starts only after the policy is established.
+Library imports, programmatic runners, and direct `snektest.cli.main` calls leave
+the embedding application's startup policy untouched. See
+[CLI startup policy](docs/cli-startup.md) for process, signal, and startup-hook
+limits. There is no new Snektest configuration key or flag.
+
 ### Release health
 
 Run the complete release gate before opening a pull request:
@@ -759,8 +775,11 @@ capture enabled, JSON records import output and warnings separately from test
 output. They cannot prefix or otherwise corrupt the JSON document.
 
 ```sh
-# Run all tests
+# Run all tests (context-aware warnings enabled by default)
 snektest
+
+# Explicitly test Python's legacy warnings behavior instead
+python -X context_aware_warnings=0 -m snektest tests/test_example.py
 
 # Run specific file
 snektest tests/test_myfeature.py

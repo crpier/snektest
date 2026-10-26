@@ -126,6 +126,9 @@ VALID_MARKER_VALUES = {"fast", "medium", "slow"}
 HELP_TEXT = """Usage: snektest [OPTIONS] [FILTER ...]
 
 Run snektest tests.
+Standalone startup enables context-aware warnings unless Python startup settings
+explicitly override it. Opt out with PYTHON_CONTEXT_AWARE_WARNINGS=0 or use
+python -X context_aware_warnings=0 -m snektest. Library calls retain host policy.
 
 Filters:
   .                                      Run tests below current directory
@@ -1083,4 +1086,6 @@ def main_inner(  # noqa: C901, PLR0911, PLR0912
 
 
 if __name__ == "__main__":
-    main()
+    lazy from snektest._bootstrap import main as bootstrap_main
+
+    bootstrap_main()

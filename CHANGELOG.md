@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Enable context-aware warnings by default at standalone CLI startup, including spawned/replacement workers. Honor explicit Python startup opt-outs and precedence; preserve interpreter options, venv, argument boundaries, streams and exits across relaunch, while leaving library/programmatic policy unchanged. Interpreter/site startup hooks may repeat. (#107)
+
 - Clarify canonical named `Param` construction, tuple values versus Cartesian axes, stable selectors, and preserved `Literal` types. Expand executable assertion guidance for exact/regex exception text, `msg` overrides, original causes, actual-first comparisons, and bound narrowing results; make the embedded guide and copyable examples part of the recommended authoring workflow. Existing constructor and assertion behavior is unchanged. (#104)
 
 - Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
