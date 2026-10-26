@@ -35,6 +35,7 @@ lazy from snektest.models import (
     ExceptionDiagnostic,
     FilterItem,
     InvalidTestDefinitionError,
+    RetainedDirectory,
     RunInfrastructureError,
     RunResult,
     RunTeardownDiagnostics,
@@ -103,6 +104,7 @@ class _Shutdown: ...
 
 @dataclass(frozen=True)
 class _WorkerStopped:
+    retained_directories: tuple[RetainedDirectory, ...]
     session_teardown_failures: tuple[TeardownFailure, ...]
     session_teardown_output: str | None
     session_teardown_warnings: tuple[str, ...]
@@ -357,6 +359,7 @@ def _run_worker(  # noqa: PLR0913, PLR0917
                 )
                 connection.send(
                     _WorkerStopped(
+                        retained_directories=registry.temporary_directories.retained_session,
                         session_teardown_failures=tuple(failures),
                         session_teardown_output=output,
                         session_teardown_warnings=warnings,
@@ -725,6 +728,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if fail_fast and test_result.is_actionable_failure:
                     pending.clear()
 
+        retained_directories: list[RetainedDirectory] = []
         session_failures: list[TeardownFailure] = []
         session_outputs: list[str] = []
         session_warnings: list[str] = []
@@ -735,6 +739,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if not isinstance(message, _WorkerStopped):
                 msg = f"worker {worker.identifier + 1} failed during shutdown"
                 raise RunInfrastructureError(msg)
+            retained_directories.extend(message.retained_directories)
             session_failures.extend(message.session_teardown_failures)
             if message.session_teardown_output:
                 session_outputs.append(message.session_teardown_output)
@@ -760,6 +765,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.session_warnings = tuple(session_warnings)
         publication.raise_if_interrupted()
         completed_run = RunResult.from_execution(
+            retained_directories=tuple(retained_directories),
             collection_output=canonical_bootstrap.collection_output,
             collection_warnings=canonical_bootstrap.collection_warnings,
             run_teardown_failures=run_failures,

@@ -155,15 +155,31 @@ async def execute_test(
     ] = sys.exc_info,
 ) -> TestResult:
     """Execute one test while observing failures outside its call stack."""
-    with observe_background_failures() as background_failures:
-        test_result = await _execute_test(
-            test_case,
-            capture_output=capture_output,
-            timeout=timeout,
-            benchmark_baseline=benchmark_baseline,
-            exc_info_provider=exc_info_provider,
+    directories = current_registry().temporary_directories
+    directories.start_test()
+    test_result: TestResult | None = None
+    try:
+        with observe_background_failures() as background_failures:
+            test_result = await _execute_test(
+                test_case,
+                capture_output=capture_output,
+                timeout=timeout,
+                benchmark_baseline=benchmark_baseline,
+                exc_info_provider=exc_info_provider,
+            )
+        test_result = _with_background_failures(test_result, background_failures)
+    finally:
+        (
+            failures,
+            retained,
+        ) = await directories.finish_function(
+            failed=test_result is None or test_result.is_actionable_failure,
         )
-    return _with_background_failures(test_result, background_failures)
+    return replace(
+        test_result,
+        fixture_teardown_failures=(*test_result.fixture_teardown_failures, *failures),
+        retained_directories=retained,
+    )
 
 
 async def _execute_test(  # noqa: C901, PLR0912, PLR0915
@@ -385,16 +401,21 @@ async def teardown_session_fixtures(
     *, capture_output: bool, cleanup_timeout: float | None = None
 ) -> tuple[list[TeardownFailure], str | None, tuple[str, ...]]:
     """Teardown all session fixtures and return failures and output."""
-    with maybe_capture_output(capture_output) as (
-        teardown_output,
-        teardown_warnings,
-    ):
-        session_teardown_failures = await current_registry().teardown_session_fixtures(
-            cleanup_timeout=cleanup_timeout
-        )
-
-    output_value = teardown_output.getvalue() or None
-    return session_teardown_failures, output_value, tuple(teardown_warnings)
+    registry = current_registry()
+    with maybe_capture_output(capture_output) as (teardown_output, teardown_warnings):
+        failures: list[TeardownFailure] = []
+        interrupted = True
+        try:
+            failures = await registry.teardown_session_fixtures(
+                cleanup_timeout=cleanup_timeout
+            )
+            interrupted = False
+        finally:
+            directory_failures = await registry.temporary_directories.finish_session(
+                failed=interrupted or bool(failures)
+            )
+            failures.extend(directory_failures)
+    return failures, teardown_output.getvalue() or None, tuple(teardown_warnings)
 
 
 async def teardown_run_fixtures(
@@ -632,6 +653,7 @@ async def run_tests(  # noqa: PLR0913
             completed_run = RunResult.from_execution(
                 collection_output=collection_output,
                 collection_warnings=collection_warnings,
+                retained_directories=current_registry().temporary_directories.retained_session,
                 run_teardown_failures=run_teardown_failures,
                 run_teardown_output=run_output,
                 run_teardown_warnings=run_warnings,

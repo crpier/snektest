@@ -199,6 +199,18 @@ async def my_fixture() -> AsyncGenerator[str]:
     # teardown
 ```
 
+### Managed temporary directories
+
+`temporary.py` owns `temporary_directory` allocation, retention and off-loop
+removal; `FixtureRegistry` supplies active test/session lifetime. Finalize function
+roots only after ordinary fixture/task/background classification, session roots
+after ordinary session teardown. When changing lifetime inference, outcome rules,
+ownership checks, cancellation, worker transport or retained-path reporting, read
+`docs/temporary-directories.md` and exercise real local/worker CLI/JSON, embedding
+cancellation/progress, and installed-wheel seams. Preserve path-only reporting,
+explicit base placement and cleanup-error attribution without global TMPDIR
+mutation or claims of cleanup after process death/stalled filesystem IO.
+
 ### Keyword selection
 
 `-k EXPR` / `--keyword EXPR` uses `keywords.py` to compile a pytest-style

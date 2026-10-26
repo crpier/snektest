@@ -58,6 +58,7 @@ lazy from snektest.schema import (
     test_schema,
     test_schema_workflow,
 )
+lazy from snektest.temporary import temporary_directory
 
 __all__ = [
     "AssertionFailure",
@@ -105,6 +106,7 @@ __all__ = [
     "fixture",
     "load_fixture",
     "skip",
+    "temporary_directory",
     "test",
     "test_graphql",
     "test_hypothesis",

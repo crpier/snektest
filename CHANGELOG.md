@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Add typed `temporary_directory(base=..., retention=...)` with inferred test/session ownership, default cleanup even on failure, explicit on-failure/always retention, off-loop recursive removal, ownership checks, and path-only console/programmatic/JSON reporting. Keep resource teardown before deletion and cleanup errors alongside original failures. Session policy is process-local; no global TMPDIR mutation, process management, historical pruning or hard-kill cleanup guarantees. (#97)
+
 - Make console collection errors user-first, with selected file/filter context, original types, source/carets, causes, notes, groups, and corrective `Param` guidance. Add `--full-traceback` for bounded framework/dependency details in local and worker modes; preserve JSON schema/output and collection semantics. Broken exception message formatters use a safe fallback instead of hiding the original collection error. (#102)
 
 - Enable context-aware warnings by default at standalone CLI startup, including spawned/replacement workers. Honor explicit Python startup opt-outs and precedence; preserve interpreter options, venv, argument boundaries, streams and exits across relaunch, while leaving library/programmatic policy unchanged. Interpreter/site startup hooks may repeat. (#107)

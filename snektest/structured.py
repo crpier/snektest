@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+lazy from dataclasses import asdict
+
 lazy from snektest._version import __version__
 lazy from snektest.models import (
     BenchmarkBaselineRun,
@@ -60,6 +62,10 @@ def _json_test_entry(test_result: TestResult) -> dict[str, object]:  # noqa: C90
         "status": test_result.status,
         "warnings": list(test_result.warnings),
     }
+    if test_result.retained_directories:
+        entry["retained_directories"] = [
+            asdict(directory) for directory in test_result.retained_directories
+        ]
     match test_result.result:
         case FailedResult(exception=exception) | ErrorResult(exception=exception):
             entry["exception"] = _json_exception(exception)
@@ -250,6 +256,10 @@ def build_json_summary(
         ],
         "tests": [_json_test_entry(result) for result in run_result.test_results],
     }
+    if run_result.retained_directories:
+        output["retained_directories"] = [
+            asdict(directory) for directory in run_result.retained_directories
+        ]
     baseline = run_result.benchmark_baseline
     if isinstance(baseline, BenchmarkBaselineRun):
         machine_output: dict[str, object] | None = None

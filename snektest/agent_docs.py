@@ -585,6 +585,43 @@ snektest --update-benchmark-baseline .snektest-benchmarks.json tests/performance
 snektest --benchmark-baseline .snektest-benchmarks.json tests/performance
 ```
 
+## Managed temporary directories
+
+Call `temporary_directory(base=..., retention="never" | "on-failure" | "always")`
+inside sync/async tests or fixture setup; it returns `Path` immediately, not a
+fixture handle. Default "never" cleans even failed tests. "on-failure" uses final
+outcomes including teardown/task/background failures, not exceptions consumed by
+`assert_raises`, SKIP or XFAIL. "always" retains successful evidence too.
+
+```python
+from snektest import assert_eq, temporary_directory, test
+
+
+@test(mark="medium")
+def test_owned_file() -> None:
+    root = temporary_directory(retention="on-failure")
+    target = root / "payload.txt"
+    _ = target.write_text("payload", encoding="utf-8")
+    assert_eq(target.read_text(encoding="utf-8"), "payload")
+```
+
+Ordinary resource teardown and task cleanup precede directory policy. Session setup
+infers session ownership: roots survive between cases; retention considers any
+failure in that execution process and its session teardown, not other workers or
+later run-fixture errors. Every call is fresh; use a cached session fixture to
+share one path. Run fixtures/standalone context-manager use are unsupported.
+
+Supply an existing short private `base` to avoid tmpfs quotas/socket limits; pass
+paths or child environments explicitly and stop/reap consumers first. Never infer
+ownership of library-created paths. Global TMPDIR and reusable data are unchanged.
+Completed console/JSON results expose retained paths, not contents; the run's
+`retained_directories` aggregates individual-test and session records. Removal
+errors are fixture errors without replacing the test's failure. Large removal
+runs in a thread and waits through caller cancellation, but threads cannot be
+interrupted: a filesystem hang needs an outer timeout. Crashes/SIGKILL can orphan
+roots, interruptions may prevent the final path report, and intentional retention
+still accumulates. No automatic pruning is offered. Print `--example temporary`.
+
 ## Explicit log capture
 
 Use `with capture_logs(logger, level=logging.DEBUG) as logs` inside either sync
@@ -625,6 +662,7 @@ Print one example:
 ```bash
 snektest --example basic
 snektest --example fixtures
+snektest --example temporary
 snektest --example async
 snektest --example benchmark
 snektest --example memory
@@ -641,6 +679,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "basic": "basic_test.py",
     "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
+    "temporary": "temporary.py",
     "graphql": "graphql.py",
     "logging": "log_capture.py",
     "memory": "memory.py",

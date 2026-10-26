@@ -13,9 +13,11 @@ lazy from contextlib import contextmanager
 lazy from contextvars import ContextVar
 lazy from dataclasses import dataclass
 lazy from inspect import isasyncgen, isgenerator, signature
+lazy from os import PathLike
+lazy from pathlib import Path
 lazy from pickle import HIGHEST_PROTOCOL, dumps, loads
 lazy from types import TracebackType
-lazy from typing import Any, cast
+lazy from typing import Any, Literal, cast
 
 lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
 lazy from snektest.diagnostics import snapshot_exception
@@ -34,6 +36,7 @@ lazy from snektest.task_cleanup import (
     defer_cancellation,
     task_scope,
 )
+lazy from snektest.temporary import TemporaryDirectories
 
 type _SessionSlot = tuple[AsyncGenerator[Any] | Generator[Any], object, str]
 type _RunFixtureHandle = Fixture[Any] | AsyncFixture[Any]
@@ -220,6 +223,7 @@ class FixtureRegistry:
     """
 
     def __init__(self) -> None:
+        self.temporary_directories = TemporaryDirectories()
         self._pending_function_tasks: dict[asyncio.Task[Any], str] = {}
         self._session: dict[object, _SessionSlot] = {}
         # Cache entries can be retried; every attempted generator retains cleanup.
@@ -244,6 +248,20 @@ class FixtureRegistry:
             f"snektest_fixture_setup_stack_{id(self)}", default=()
         )
         self._tearing_down = False
+
+    def allocate_temporary_directory(
+        self,
+        *,
+        base: str | PathLike[str] | None,
+        retention: Literal["never", "on-failure", "always"],
+    ) -> Path:
+        self._ensure_loading_allowed()
+        if self._loading_run.get() is not None:
+            msg = "temporary_directory supports test/function and session lifetimes, not run fixtures"
+            raise FixtureError(msg)
+        return self.temporary_directories.allocate(
+            base, retention, session=self._loading_session.get() is not None
+        )
 
     def _ensure_loading_allowed(self) -> None:
         if self._tearing_down:
