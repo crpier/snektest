@@ -346,6 +346,54 @@ def test_show_in_assertion() -> None:
 E       'qux' not found in ['foo', 'bar', 'baz']
 ```
 
+### Explicit log capture
+
+`capture_logs(logger, *, level=logging.DEBUG)` captures a named stdlib logger
+hierarchy. Pass an explicit logger name or `logging.Logger` (`""` selects root).
+Use ordinary `with` in both sync and async tests:
+
+```python
+import logging
+
+from snektest import assert_eq, capture_logs, test
+
+
+@test(mark="fast")
+def test_structured_logging() -> None:
+    logger = logging.getLogger("example.service")
+    with capture_logs(logger, level=logging.INFO) as logs:
+        logger.info("opened %s", "sqlite", extra={"backend": "sqlite"})
+    assert_eq(logs.messages, ("opened sqlite",))
+    assert_eq(vars(logs.records[0])["backend"], "sqlite")
+```
+
+The returned `LogCapture` exposes `.records: tuple[logging.LogRecord, ...]` and
+`.messages: tuple[str, ...]` snapshots, readable during and after capture. Records
+are the original mutable objects, not deep copies; messages render a fresh
+snapshot with `LogRecord.getMessage()` on each access. Rendering exceptions use
+`<log message unavailable>` without exposing exception text or arguments;
+interruptions still propagate.
+
+Capture is process-local and includes records from all threads, not just the
+current async task. Nested and overlapping scopes have independent thresholds,
+including out-of-order exit. Application handlers stay attached; temporary logger
+level changes are restored; unchanged levels are not reconfigured. If an
+application-defined setter rejects restoration, its error propagates while
+capture ownership is retired and other active scopes are refreshed. Lowering a
+logger threshold can also enable messages
+for existing application handlers. Descendant levels/filters/propagation,
+disabled source loggers, and global `logging.disable()` still apply. `NOTSET`
+captures currently enabled emissions without lowering the logger threshold.
+Levels must be non-negative integers (not booleans); contexts are single-use.
+
+To include fixture teardown, put the capture **inside the fixture** around its
+`yield`; a context in the test body exits before function-fixture teardown.
+See `snektest --example logging`. Captured records may contain secrets and are
+retained only by callers, not automatically attached to results or redacted.
+Existing handlers may still print logs into normal output capture. Coordinate
+external logging reconfiguration rather than changing the same logger's settings
+while captures are active. See [lifetime and concurrency details](docs/log-capture.md).
+
 ### Async Support
 
 Write async tests as naturally as sync ones:
