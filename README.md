@@ -480,6 +480,45 @@ Function setup left pending when its test returns counts as abandoned fixture
 work and is cleaned before the next test. Use `try`/`finally` around background-task setup as well as the
 fixture's `yield` to stop tasks yourself on either path.
 
+#### AnyIO on asyncio
+
+For AnyIO APIs or libraries that use them, install the optional integration:
+
+```bash
+uv add 'snektest[anyio]'
+```
+
+Snektest still runs on **asyncio**. Await AnyIO operations directly; do not call
+`anyio.run()` inside a test or start another event loop:
+
+```python
+from anyio.to_thread import run_sync
+
+from snektest import assert_eq, test
+
+
+@test(mark="medium")
+async def test_anyio_offload() -> None:
+    assert_eq(await run_sync(lambda: 42), 42)
+```
+
+Task groups and cancel scopes must enter and exit in the same task. Keep them
+inside a test or a single fixture setup/teardown phase, **not across a fixture's
+`yield`**: fixture setup and teardown may run in different tasks. Independently
+awaited AnyIO operations work in both phases; print `snektest --example anyio`.
+
+Idle AnyIO pool workers registered with the current loop are not thread leaks.
+This is identity-based, not a thread-name exemption. New busy/abandoned workers
+and raw lookalike threads still fail the ordinary thread check. Existing-thread
+work is not comprehensively tracked, and no thread can be forcibly stopped.
+AnyIO remains optional and is not imported by core execution merely to inspect
+threads. The extra selects AnyIO `>=4.14.2,<5`.
+
+There is **no backend selector or Trio support** in this first integration slice.
+Local runs, workers, and programmatic runners retain their asyncio lifecycle.
+See [backend policy and limitations](docs/async-backends.md), including the
+requirements for a future explicit runtime choice.
+
 ### Skips and known defects
 
 Call `skip(reason)` when the current environment cannot run a test. Call
@@ -1095,7 +1134,8 @@ An unhandled exception from a thread during a test, or an exception reported by
 `sys.unraisablehook`, makes an otherwise passing test an error. A new non-daemon
 thread still alive after function-fixture teardown makes an otherwise passing
 test fail; joined threads pass, daemon threads are ignored, and persistent
-workers owned by the event loop's default executor are exempt. Existing process
+workers owned by the event loop's default executor and registered idle AnyIO
+workers on that loop are exempt. Existing process
 hooks are called and restored. When the body already failed or errored,
 additional background failures remain visible in console output and the JSON
 `background_failures` field.
