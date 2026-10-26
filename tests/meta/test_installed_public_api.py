@@ -78,12 +78,16 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
         dedent("""
             from collections.abc import Generator
             import json
+            import logging
+            from typing import assert_type
 
             from hypothesis import strategies as st
 
             import snektest
             from snektest import (
+                LogCapture,
                 Param,
+                capture_logs,
                 Scope,
                 SnektestError,
                 fixture,
@@ -138,6 +142,12 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             ) -> None:
                 pass
 
+            with capture_logs("installed.consumer", level=logging.INFO) as captured:
+                assert_type(captured, LogCapture)
+                logging.getLogger("installed.consumer").info("installed capture")
+            assert_type(captured.records, tuple[logging.LogRecord, ...])
+            assert_type(captured.messages, tuple[str, ...])
+
             scope: Scope = value().scope
             public_error: type[SnektestError] = snektest.FixtureError
             print(json.dumps({
@@ -145,6 +155,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 "error": public_error.__name__,
                 "scope": scope.value,
                 "schemas": SUPPORTED_SCHEMA_VERSIONS,
+                "messages": captured.messages,
             }))
         """),
     )
@@ -162,9 +173,11 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(payload["scope"], "session")
     assert_eq(payload["error"], "FixtureError")
     assert_eq(payload["schemas"], [1])
-    assert_true("SnektestError" in payload["all"])
-    assert_true("skip" in payload["all"])
-    assert_true("xfail" in payload["all"])
+    assert_eq(payload["messages"], ["installed capture"])
+    assert_true(
+        set(payload["all"])
+        >= {"LogCapture", "capture_logs", "SnektestError", "skip", "xfail"}
+    )
     assert_false("UnreachableError" in payload["all"])
 
     installed_project = tmp_dir / "installed-project"
@@ -228,7 +241,10 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
 
             from hypothesis import strategies as st
 
-            from snektest import Param, fixture, test, test_hypothesis
+            from snektest import Param, capture_logs, fixture, test, test_hypothesis
+
+            capture_logs(42)
+            capture_logs("consumer", level="DEBUG")
 
             @fixture(scope="invalid")
             def invalid_scope() -> Generator[int]:
@@ -259,3 +275,4 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(rejected.returncode, 1, msg=diagnostics)
     assert_in("no-matching-overload", diagnostics)
     assert_in("invalid-argument-type", diagnostics)
+    assert_in("capture_logs", diagnostics)

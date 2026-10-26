@@ -270,6 +270,19 @@ tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
 the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
+### Explicit log capture
+
+`log_capture.py` owns `capture_logs` / `LogCapture`: opt-in stdlib capture with
+original-record and safely rendered-message tuple snapshots. The handler lock
+serializes emission, snapshots, and retirement; the process-local registry lock
+protects overlapping captures and restores levels in parent-before-child order.
+Keep these locks inside synchronous entry/exit operations, never across awaits.
+Application handlers remain attached; only capture-owned handlers are removed.
+When changing capture thresholds, scope retirement, nesting, rendering, or logger
+restoration, read `docs/log-capture.md` and exercise the public logger, real
+runner/worker, and installed-package seams. Preserve explicit retention (no
+implicit result attachments or redaction claims).
+
 ### Thread Observability
 
 Execution temporarily installs and chains `threading.excepthook` and

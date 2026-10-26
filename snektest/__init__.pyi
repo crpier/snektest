@@ -37,6 +37,7 @@ from snektest.decorators import fixture as fixture
 from snektest.decorators import load_fixture as load_fixture
 from snektest.decorators import skip as skip
 from snektest.decorators import xfail as xfail
+from snektest.log_capture import LogCapture, capture_logs
 from snektest.models import (
     AssertionFailure,
     BadRequestError,
@@ -65,6 +66,7 @@ __all__ = [
     "FixtureError",
     "GraphQLFilter",
     "GraphQLOperationSelector",
+    "LogCapture",
     "Marker",
     "Param",
     "SchemaAuthProvider",
@@ -96,6 +98,7 @@ __all__ = [
     "assert_not_isinstance",
     "assert_raises",
     "assert_true",
+    "capture_logs",
     "fail",
     "fixture",
     "load_fixture",

@@ -38,6 +38,7 @@ lazy from snektest.decorators import (
     test_hypothesis,
     xfail,
 )
+lazy from snektest.log_capture import LogCapture, capture_logs
 lazy from snektest.models import AssertionFailure as AssertionFailure
 lazy from snektest.models import BadRequestError as BadRequestError
 lazy from snektest.models import CollectionError as CollectionError
@@ -67,6 +68,7 @@ __all__ = [
     "FixtureError",
     "GraphQLFilter",
     "GraphQLOperationSelector",
+    "LogCapture",
     "Marker",
     "Param",
     "SchemaAuthProvider",
@@ -98,6 +100,7 @@ __all__ = [
     "assert_not_isinstance",
     "assert_raises",
     "assert_true",
+    "capture_logs",
     "fail",
     "fixture",
     "load_fixture",

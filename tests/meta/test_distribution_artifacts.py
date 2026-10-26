@@ -32,6 +32,7 @@ _REQUIRED_EXAMPLES = {
     "snektest/examples/benchmark.py",
     "snektest/examples/fixtures.py",
     "snektest/examples/graphql.py",
+    "snektest/examples/log_capture.py",
     "snektest/examples/memory.py",
     "snektest/examples/outcomes.py",
     "snektest/examples/parametrize.py",
@@ -125,9 +126,10 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
     )
     test_path = cwd / f"test_{target.name.replace('-', '_')}.py"
     test_path.write_text(
+        "import logging\n"
         "from collections.abc import Generator\n"
         "from hypothesis import settings, strategies as st\n"
-        "from snektest import assert_eq, fixture, load_fixture, test_hypothesis\n"
+        "from snektest import assert_eq, capture_logs, fixture, load_fixture, test_hypothesis\n"
         "@fixture(scope='run')\n"
         "def descriptor() -> Generator[int]:\n"
         "    yield 7\n"
@@ -135,6 +137,9 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
         "@test_hypothesis(st.just(7), mark='fast')\n"
         "async def property_case(expected: int) -> None:\n"
         "    assert_eq(load_fixture(descriptor()), expected)\n"
+        "    with capture_logs('installed.artifact') as logs:\n"
+        "        logging.getLogger('installed.artifact').info('artifact capture')\n"
+        "    assert_eq(logs.messages, ('artifact capture',))\n"
     )
     property_script = (
         "import runpy, sys; "

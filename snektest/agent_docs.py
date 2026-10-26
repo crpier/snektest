@@ -428,6 +428,31 @@ snektest --update-benchmark-baseline .snektest-benchmarks.json tests/performance
 snektest --benchmark-baseline .snektest-benchmarks.json tests/performance
 ```
 
+## Explicit log capture
+
+Use `with capture_logs(logger, level=logging.DEBUG) as logs` inside either sync
+or async tests. Import `capture_logs` and `LogCapture` from `snektest`; pass a
+logger name or `logging.Logger` explicitly (`""` selects root). `logs.records` is
+an immutable tuple snapshot of original mutable `logging.LogRecord` objects,
+including structured attributes; `logs.messages` renders a fresh tuple snapshot
+on access. Rendering errors become `<log message unavailable>` without exception
+text/arguments; real interruptions propagate.
+
+Capture includes matching emissions from all threads in the current process,
+not task-local or cross-process records. Nested/overlapping scopes preserve
+independent thresholds and restore temporary levels even when exiting out of
+order. Existing handlers remain active; lowering a logger threshold can enable
+additional application-handler output. Respect descendant levels, filters,
+propagation, disabled source loggers, and global logging disable. `NOTSET` captures
+already-enabled emissions without lowering the threshold. Levels are non-negative
+integers, excluding bool. Contexts are single-use. Coordinate external logger
+reconfiguration while captures are active.
+
+Place capture inside a fixture around its `yield` to include teardown; a body
+context exits before function fixtures tear down. Records may contain secrets;
+there is no automatic result attachment or redaction. Application-handler output
+still follows normal stdout/stderr capture. See `snektest --example logging`.
+
 ## Copyable examples
 
 List bundled examples:
@@ -444,6 +469,7 @@ snektest --example fixtures
 snektest --example async
 snektest --example benchmark
 snektest --example memory
+snektest --example logging
 snektest --example outcomes
 snektest --example parametrize
 snektest --example schema
@@ -457,6 +483,7 @@ EXAMPLE_FILES: dict[str, str] = {
     "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
     "graphql": "graphql.py",
+    "logging": "log_capture.py",
     "memory": "memory.py",
     "outcomes": "outcomes.py",
     "parametrize": "parametrize.py",
