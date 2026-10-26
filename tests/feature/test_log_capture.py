@@ -415,3 +415,80 @@ def test_failed_entry_rolls_back_capture_owned_state() -> None:
     with capture_logs(logger, level=logging.WARNING) as following:
         logger.warning("following capture works")
     assert_eq(following.messages, ("following capture works",))
+
+
+@test(mark="fast")
+def test_capture_does_not_reconfigure_a_logger_when_its_level_already_suffices() -> (
+    None
+):
+    class FixedLevelLogger(logging.Logger):
+        @override
+        def setLevel(self, level: int | str) -> None:
+            _ = level
+            message = "this application logger has a fixed level"
+            raise RuntimeError(message)
+
+    logger = FixedLevelLogger("fixed-level", level=logging.DEBUG)
+    with capture_logs(logger, level=logging.WARNING) as logs:
+        logger.debug("below capture threshold")
+        logger.warning("captured warning")
+    assert_eq(logs.messages, ("captured warning",))
+    assert_eq(logger.level, logging.DEBUG)
+    assert_eq(logger.handlers, [])
+
+
+@test(mark="fast")
+def test_failed_level_restoration_does_not_poison_following_captures() -> None:
+    class TransientRestoreLogger(logging.Logger):
+        refuse_restore: bool = False
+
+        @override
+        def setLevel(self, level: int | str) -> None:
+            if self.refuse_restore and level == logging.WARNING:
+                self.refuse_restore = False
+                message = "temporary restore failure"
+                raise RuntimeError(message)
+            super().setLevel(level)
+
+    logger = TransientRestoreLogger("restore-recovery", level=logging.WARNING)
+    with assert_raises(RuntimeError), capture_logs(logger):
+        logger.refuse_restore = True
+    assert_eq(logger.handlers, [])
+    # The application repairs configuration after its setter rejected restoration.
+    logger.setLevel(logging.ERROR)
+    with capture_logs(logger, level=logging.WARNING) as following:
+        logger.warning("recovered")
+    assert_eq(following.messages, ("recovered",))
+    assert_eq(logger.level, logging.ERROR)
+
+
+@test(mark="fast")
+def test_restore_failure_still_refreshes_an_active_child_capture() -> None:
+    class AuditedLogger(logging.Logger):
+        fail_audit: bool = False
+
+        @override
+        def setLevel(self, level: int | str) -> None:
+            super().setLevel(level)
+            if self.fail_audit and level == logging.WARNING:
+                self.fail_audit = False
+                message = "level changed but application audit failed"
+                raise RuntimeError(message)
+
+    parent = AuditedLogger("snektest.capture.audit_parent", level=logging.WARNING)
+    child = logging.getLogger(f"{parent.name}.child")
+    original_parent = child.parent
+    child.parent = parent
+    logs = capture_logs(child, level=logging.INFO)
+    try:
+        with ExitStack() as child_scope:
+            with assert_raises(RuntimeError), capture_logs(parent):
+                _ = child_scope.enter_context(logs)
+                parent.fail_audit = True
+            child.info("child remains usable")
+        assert_eq(logs.messages, ("child remains usable",))
+        assert_eq(child.level, logging.NOTSET)
+        assert_eq(parent.level, logging.WARNING)
+        assert_eq(parent.handlers, [])
+    finally:
+        child.parent = original_parent

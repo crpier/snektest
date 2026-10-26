@@ -377,7 +377,10 @@ interruptions still propagate.
 Capture is process-local and includes records from all threads, not just the
 current async task. Nested and overlapping scopes have independent thresholds,
 including out-of-order exit. Application handlers stay attached; temporary logger
-level changes are restored. Lowering a logger threshold can also enable messages
+level changes are restored; unchanged levels are not reconfigured. If an
+application-defined setter rejects restoration, its error propagates while
+capture ownership is retired and other active scopes are refreshed. Lowering a
+logger threshold can also enable messages
 for existing application handlers. Descendant levels/filters/propagation,
 disabled source loggers, and global `logging.disable()` still apply. `NOTSET`
 captures currently enabled emissions without lowering the logger threshold.

@@ -278,6 +278,8 @@ serializes emission, snapshots, and retirement; the process-local registry lock
 protects overlapping captures and restores levels in parent-before-child order.
 Keep these locks inside synchronous entry/exit operations, never across awaits.
 Application handlers remain attached; only capture-owned handlers are removed.
+Skip unchanged level writes. Retire registry ownership before fallible restoration
+and refresh other scopes even if an application logger setter raises.
 When changing capture thresholds, scope retirement, nesting, rendering, or logger
 restoration, read `docs/log-capture.md` and exercise the public logger, real
 runner/worker, and installed-package seams. Preserve explicit retention (no

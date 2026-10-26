@@ -62,7 +62,8 @@ def _apply_level(logger: logging.Logger, state: _LoggerState) -> None:
         default=baseline,
     )
     level = requested if logging.NOTSET < requested < baseline else state.original_level
-    logger.setLevel(level)
+    if logger.level != level:
+        logger.setLevel(level)
 
 
 def _refresh_levels() -> None:
@@ -140,9 +141,12 @@ class LogCapture:
             state = _states[self._logger]
             state.handlers.remove(self._handler)
             if not state.handlers:
-                self._logger.setLevel(state.original_level)
                 del _states[self._logger]
-            _refresh_levels()
+            try:
+                if not state.handlers and self._logger.level != state.original_level:
+                    self._logger.setLevel(state.original_level)
+            finally:
+                _refresh_levels()
 
 
 def capture_logs(

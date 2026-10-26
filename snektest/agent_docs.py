@@ -450,7 +450,9 @@ text/arguments; real interruptions propagate.
 Capture includes matching emissions from all threads in the current process,
 not task-local or cross-process records. Nested/overlapping scopes preserve
 independent thresholds and restore temporary levels even when exiting out of
-order. Existing handlers remain active; lowering a logger threshold can enable
+order. Unchanged levels are not reconfigured. If an application setter fails
+restoration, propagate the error but retire capture ownership and refresh other
+active scopes. Existing handlers remain active; lowering a logger threshold can enable
 additional application-handler output. Respect descendant levels, filters,
 propagation, disabled source loggers, and global logging disable. `NOTSET` captures
 already-enabled emissions without lowering the threshold. Levels are non-negative

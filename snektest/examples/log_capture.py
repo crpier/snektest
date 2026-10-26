@@ -17,6 +17,7 @@ lazy from snektest import (
 @test(mark="fast")
 def test_structured_logging() -> None:
     logger = logging.getLogger("example.service")
+    # Application handlers stay attached; only necessary level changes are made.
     with capture_logs(logger, level=logging.INFO) as logs:
         logger.info("opened %s", "sqlite", extra={"backend": "sqlite"})
     assert_eq(logs.messages, ("opened sqlite",))

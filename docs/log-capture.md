@@ -36,7 +36,10 @@ The private handler uses the requested level. While active, capture lowers the
 selected logger threshold only when needed; it never raises an existing lower
 threshold and suppresses no application handlers. Lower thresholds are process-global
 and can enable additional output from those handlers. A custom non-negative
-integer level is valid. `NOTSET` means capture currently enabled emissions,
+integer level is valid. Unchanged levels are never written through `setLevel()`.
+If an application-defined setter rejects restoration, the failure propagates,
+but capture-owned registration is retired and other active scopes are refreshed;
+the caller must repair any logger configuration that the setter refused. `NOTSET` means capture currently enabled emissions,
 without lowering the logger threshold.
 
 Standard logging routing still applies: child logger levels, source logger
