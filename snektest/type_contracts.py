@@ -14,6 +14,7 @@ lazy from functools import wraps
 lazy from hashlib import sha256
 lazy from importlib import import_module
 lazy from pathlib import Path
+lazy from shutil import copytree, ignore_patterns
 lazy from tempfile import TemporaryDirectory
 lazy from types import ModuleType
 lazy from typing import Any, cast
@@ -28,7 +29,7 @@ lazy from snektest.utils import mark_test_function
 _MAX_REPORT_BYTES = 4 * 1024 * 1024
 _READ_BYTES = 65_536
 _REAP_SECONDS = 5.0
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_PACKAGE = Path(__file__).resolve().parent
 _MARKER_NOTE = "snektest static assertion reference"
 _configuration: ContextVar[Path | None] = ContextVar(
     "typing_configuration", default=None
@@ -269,19 +270,24 @@ def _source(
     )
 
 
+def _marker_identity(name: str) -> object:
+    return {"assert_type_error": assert_type_error, "test_typing": test_typing}.get(
+        name
+    )
+
+
 def _reference(expression: ast.expr, namespace: dict[str, Any]) -> object:
     if isinstance(expression, ast.Name):
         return namespace.get(expression.id)
-    if isinstance(expression, ast.Attribute) and isinstance(expression.value, ast.Name):
-        module = namespace.get(expression.value.id)
+    if isinstance(expression, ast.Attribute):
+        module = _reference(expression.value, namespace)
         if isinstance(module, ModuleType) and module.__name__ in (
             "snektest",
             "snektest.type_contracts",
         ):
-            return {
-                "assert_type_error": assert_type_error,
-                "test_typing": test_typing,
-            }.get(expression.attr)
+            if module.__name__ == "snektest" and expression.attr == "type_contracts":
+                return sys.modules["snektest.type_contracts"]
+            return _marker_identity(expression.attr)
     return None
 
 
@@ -296,10 +302,7 @@ def _local_marker_imports(node: ast.AST) -> dict[str, object]:
         if isinstance(child, ast.ImportFrom):
             for alias in child.names:
                 binding = (
-                    {
-                        "assert_type_error": assert_type_error,
-                        "test_typing": test_typing,
-                    }.get(alias.name)
+                    _marker_identity(alias.name)
                     if child.level == 0
                     and child.module in ("snektest", "snektest.type_contracts")
                     else None
@@ -307,7 +310,10 @@ def _local_marker_imports(node: ast.AST) -> dict[str, object]:
                 imports.setdefault(alias.asname or alias.name, []).append(binding)
         elif isinstance(child, ast.Import):
             for alias in child.names:
-                binding = sys.modules["snektest"] if alias.name == "snektest" else None
+                binding = None
+                if alias.name in ("snektest", "snektest.type_contracts"):
+                    module = alias.name if alias.asname else "snektest"
+                    binding = sys.modules[module]
                 imports.setdefault(alias.asname or alias.name.split(".")[0], []).append(
                     binding
                 )
@@ -520,6 +526,13 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
     root = _project_root(path)
     with TemporaryDirectory(prefix="snektest-typing-") as directory:
         scratch = Path(directory)
+        # Expose only the framework package, never its hosting site-packages.
+        # Otherwise explicit target environments can inherit unrelated host deps.
+        copytree(
+            _PACKAGE,
+            scratch / "snektest",
+            ignore=ignore_patterns("__pycache__", "snektest-typing-*"),
+        )
         overlay = scratch / "snektest-stubs"
         overlay.mkdir()
         (overlay / "py.typed").write_text("partial\n", encoding="utf-8")
@@ -556,8 +569,6 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
             *_python_arguments(config),
             "--extra-search-path",
             str(scratch),
-            "--extra-search-path",
-            str(_PACKAGE_ROOT),
             "--extra-search-path",
             str(root),
             "--output-format",

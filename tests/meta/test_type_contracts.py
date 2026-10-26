@@ -1083,3 +1083,42 @@ def test_config_edits_invalidate_same_run_report_reuse() -> None:
     assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
     assert_eq((result["errors"], result["failed"], result["passed"]), (0, 1, 2))
     assert_in("missing-override-decorator", result["tests"][2]["exception"]["message"])
+
+
+@test(
+    [
+        Param(
+            ("import snektest.type_contracts as contracts", "contracts"), name="aliased"
+        ),
+        Param(
+            ("import snektest.type_contracts", "snektest.type_contracts"), name="dotted"
+        ),
+    ],
+    mark="slow",
+)
+def test_qualified_implementation_module_imports_declare_contracts(
+    declaration: tuple[str, str],
+) -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    statement, reference = declaration
+    path = create_test_file(
+        directory,
+        dedent(f"""
+        {statement}
+        from typing import assert_type
+        def takes_int(value: int) -> int:
+            return value
+        @{reference}.test_typing
+        def consumer(symbolic: int) -> None:
+            assert_type(takes_int(symbolic), int)
+            with {reference}.assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+            import snektest.type_contracts as local_contracts
+            with local_contracts.assert_type_error("invalid-argument-type"):
+                takes_int("also wrong")
+        """),
+        name=f"test_qualified_{reference.replace('.', '_')}",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["passed"], 1)

@@ -378,6 +378,14 @@ def _check_installed_typing_contract(
         cwd=tmp_dir,
     )
     assert_eq(normal.returncode, 0, msg=normal.stdout + normal.stderr)
+    # This is a non-standard --target installation, not an interpreter site.
+    # Match the ordinary ty invocation's explicit dependency root rather than
+    # relying on the framework to expose its entire hosting directory.
+    config = tmp_dir / "installed-typing.toml"
+    config.write_text(
+        f"[environment]\nextra-paths = [{json.dumps(str(target_dir))}]\n",
+        encoding="utf-8",
+    )
     static = _run(
         [
             sys.executable,
@@ -387,7 +395,7 @@ def _check_installed_typing_contract(
                 "import sys; "
                 f"sys.path.insert(0, {str(target_dir)!r}); "
                 "from snektest.cli import main; "
-                f"sys.argv = ['snektest', '--json-output', {str(source)!r}]; main()"
+                f"sys.argv = ['snektest', '--json-output', '--typing-config', {str(config)!r}, {str(source)!r}]; main()"
             ),
         ],
         cwd=tmp_dir,

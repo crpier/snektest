@@ -5,7 +5,9 @@ contract. Bodies never execute; typed parameters are symbolic inputs. Use native
 `typing.assert_type` for positives and a literal
 `with assert_type_error("ty-rule"):` block for exactly one rejection. Only a
 single bare decorator is supported. Imported aliases and qualified module names,
-including imports inside static functions, preserve Python lexical scope.
+including imports inside static functions, preserve Python lexical scope. Both
+`import snektest as s` and direct aliased/dotted `snektest.type_contracts` imports
+are recognized; the canonical user-facing import style remains top-level.
 
 ## Checker view and assertion declaration validation
 
@@ -36,7 +38,12 @@ another interpreter/environment and `environment.extra-paths` selects additional
 import roots. Snektest only inspects whether the explicit Python field exists to
 avoid overriding it with its default; native parsing/type validation still owns
 configuration errors. An analysis environment does not expand Snektest's supported
-runtime matrix. The `deprecated`, `type-assertion-failure`,
+runtime matrix. Only the framework package is staged alongside its checker stub;
+its host's whole site-packages is never an implicit import root. Selected
+environments cannot resolve host-only dependencies or inherit host versions this
+way. Non-standard runtime sys.path additions require matching native extra-paths,
+just as they do with an ordinary explicit ty invocation.
+The `deprecated`, `type-assertion-failure`,
 and `unresolved-import` rules remain errors so configuration cannot suppress
 reference validation, positive type assertions, or broken environments. Ignoring
 an expected rejection rule cannot satisfy that assertion: the missing diagnostic
@@ -76,10 +83,9 @@ corruption consumes a byte from real native output (without a fake checker or
 synthesized report), proving malformed JSON is an error rather than a rejection.
 Owned installed environments additionally verify non-executable checker startup;
 permission changes break uv-cache hardlinks first and never touch shared binaries.
-Those OS
-fixtures skip where their required facilities or pipe-growth permission are
+Those OS fixtures skip where their required facilities or pipe-growth permission are
 unavailable; they do not establish equivalent macOS/Windows fault coverage.
 
 PR #116 records exact commits, gate counts/coverage, representative downstream
-acceptance, and remaining review work. Full downstream migration and malformed
-checker-protocol defenses are not proven merely by the passing happy paths.
+acceptance, and remaining review work. This is representative downstream
+acceptance, not a full migration or proof of every possible protocol fault.

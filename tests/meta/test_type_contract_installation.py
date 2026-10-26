@@ -78,8 +78,69 @@ def test_base_install_collects_without_ty_and_the_typing_extra_enables_execution
     )
     assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
     assert_eq(json.loads(executed.stdout)["passed"], 2)
+    _check_selected_environment_isolation(python, directory)
     if os.name != "nt":
         _check_native_startup_failure(python, directory)
+
+
+def _site_packages(python: Path, directory: Path) -> Path:
+    located = _run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
+        ],
+        cwd=directory,
+    )
+    assert_eq(located.returncode, 0, msg=located.stderr)
+    return Path(located.stdout.strip())
+
+
+def _check_selected_environment_isolation(python: Path, directory: Path) -> None:
+    target = directory / "isolated-typing-python"
+    created = _run(["uv", "venv", "--python", str(python), str(target)], cwd=directory)
+    assert_eq(created.returncode, 0, msg=created.stderr)
+    target_python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    host_site = _site_packages(python, directory)
+    target_site = _site_packages(target_python, directory)
+    (host_site / "snektest_host_only_probe.pyi").write_text(
+        "def value() -> int: ...\n", encoding="utf-8"
+    )
+    config = directory / "isolated-environment.toml"
+    config.write_text(
+        f"[environment]\npython = {json.dumps(str(target))}\n", encoding="utf-8"
+    )
+    consumer = directory / "test_environment_isolation.py"
+    source = (
+        "from typing import assert_type\nfrom snektest import test_typing\n"
+        "@test_typing\ndef consumer() -> None:\n"
+        "    from snektest_host_only_probe import value\n"
+        "    assert_type(value(), EXPECTED)\n"
+    )
+    consumer.write_text(source.replace("EXPECTED", "int"), encoding="utf-8")
+    command = [
+        str(python),
+        "-I",
+        "-m",
+        "snektest",
+        "--json-output",
+        "--typing-config",
+        str(config),
+        str(consumer),
+    ]
+    missing = _run(command, cwd=directory)
+    assert_eq(missing.returncode, 1, msg=missing.stdout + missing.stderr)
+    result = json.loads(missing.stdout)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 0))
+    assert_in("snektest_host_only_probe", result["tests"][0]["exception"]["message"])
+    (target_site / "snektest_host_only_probe.pyi").write_text(
+        "def value() -> str: ...\n", encoding="utf-8"
+    )
+    consumer.write_text(source.replace("EXPECTED", "str"), encoding="utf-8")
+    selected = _run(command, cwd=directory)
+    assert_eq(selected.returncode, 0, msg=selected.stdout + selected.stderr)
+    assert_eq(json.loads(selected.stdout)["passed"], 1)
 
 
 def _check_native_startup_failure(python: Path, directory: Path) -> None:
