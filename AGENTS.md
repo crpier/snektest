@@ -279,6 +279,13 @@ ordinary checks. Static runs replace only that declaration through a temporary
 partial stub and analyze original source with the optional pinned ty binary.
 Preserve original imports/locations, exact per-block diagnostic cardinality,
 innermost ownership, selected-function isolation, and shared positive controls.
+Resolve direct Snektest imports with Python symbol tables, including local
+imports and closures, rather than mutable runtime globals. Marker values copied,
+re-exported, or dynamically looked up are unsupported. Ownership uses body-only
+line/Unicode-column spans; with-header diagnostics cannot certify rejection.
+Select declarations by code name/first line, not mutable function names. Source
+fingerprints are captured at registration and checked before/after ty; detected
+edits are errors, not atomic protection against concurrent filesystem writers.
 Broken imports cannot certify a rejection. Keep checker imports/invocation out of
 collection and runtime-only runs. Each checker subprocess has bounded output and
 must be killed/reaped on cancellation; this does not bound local collection.

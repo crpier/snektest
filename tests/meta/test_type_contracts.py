@@ -1,10 +1,16 @@
 """Python-native static contracts through real runner and checker interfaces."""
 
+import json
+import os
 import subprocess
 import sys
 from textwrap import dedent
+from xml.etree import ElementTree
 
 from snektest import Param, assert_eq, assert_in, load_fixture, test
+from snektest.cli import run_tests_programmatic
+from snektest.junit import build_junit_xml
+from snektest.models import FilterItem
 from testutils.fixtures import tmp_dir_fixture
 from testutils.helpers import create_test_file, run_test_subprocess
 
@@ -307,3 +313,422 @@ def test_positive_only_contract_is_checked_even_though_normal_ty_skips_its_body(
     assert_eq(result["failed"], 1, msg=result["stdout"] + result["stderr"])
     assert_eq(result["errors"], 0)
     assert_in("type-assertion-failure", result["tests"][0]["exception"]["message"])
+    assert_in(f"{path}:7:", result["tests"][0]["exception"]["message"])
+
+
+@test(mark="slow")
+def test_symbolic_parameter_cannot_impersonate_the_global_assertion_marker() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from collections.abc import Callable
+        from contextlib import AbstractContextManager
+        from snektest import assert_type_error, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer(
+            assert_type_error: Callable[[str], AbstractContextManager[None]],
+        ) -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+        """),
+        name="test_shadowed_typing_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["failed"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["errors"], 0)
+
+
+@test(mark="slow")
+def test_nested_function_parameter_cannot_impersonate_the_assertion_marker() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from collections.abc import Callable
+        from contextlib import AbstractContextManager
+        from snektest import assert_type_error, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            def nested(
+                assert_type_error: Callable[[str], AbstractContextManager[None]],
+            ) -> None:
+                with assert_type_error("invalid-argument-type"):
+                    takes_int("wrong")
+        """),
+        name="test_nested_shadowed_typing_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["failed"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["errors"], 0)
+
+
+@test(mark="slow")
+def test_assertion_imported_inside_the_static_body_is_recognized_without_execution() -> (
+    None
+):
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            from snektest import assert_type_error as reject
+            with reject("invalid-argument-type"):
+                takes_int("wrong")
+        """),
+        name="test_local_typing_import",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["passed"], 1)
+
+
+@test(mark="slow")
+def test_error_in_assertion_header_cannot_certify_its_healthy_body() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import test_typing
+
+        @test_typing
+        def consumer(condition: bool) -> None:
+            if condition:
+                from snektest import assert_type_error as reject
+            with reject("possibly-unresolved-reference"):
+                pass
+        """),
+        name="test_typing_header_error",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["failed"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["errors"], 0)
+
+
+@test(mark="slow")
+def test_mutable_function_name_cannot_redirect_analysis_to_a_different_body() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import assert_type_error, test_typing
+
+        def decoy() -> None:
+            pass
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int(1)
+
+        setattr(getattr(consumer, "__wrapped__"), "__name__", "decoy")
+        """),
+        name="test_typing_source_identity",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["failed"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["errors"], 0)
+    assert_in("no diagnostics", result["tests"][0]["exception"]["message"])
+
+
+@test(mark="slow")
+def test_module_import_inside_the_static_body_supports_qualified_assertions() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            import snektest as s
+            with s.assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+        """),
+        name="test_local_qualified_typing_import",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["passed"], 1)
+
+
+@test(mark="slow")
+def test_oversized_native_report_is_an_error_and_releases_temporary_resources() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    scratch = directory / "report-temporary-files"
+    scratch.mkdir()
+    source = (
+        "from snektest import test, test_typing\n"
+        "def takes_int(value: int) -> int:\n    return value\n"
+        "@test_typing\ndef consumer() -> None:\n"
+        + '    takes_int("wrong")\n' * 10_000
+        + "@test(mark='fast')\ndef following_runtime_case() -> None:\n    pass\n"
+    )
+    path = create_test_file(directory, source, name="test_oversized_ty_report")
+    completed = subprocess.run(
+        [sys.executable, "-m", "snektest", "--json-output", str(path)],
+        env=dict(os.environ, TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    result = json.loads(completed.stdout)
+    assert_eq(completed.returncode, 1, msg=completed.stdout + completed.stderr)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_in("4 MiB report limit", result["tests"][0]["exception"]["message"])
+    assert_eq(list(scratch.iterdir()), [])
+
+
+@test(mark="slow")
+def test_source_changed_after_collection_cannot_certify_the_original_contract() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from pathlib import Path
+        from snektest import assert_type_error, test, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test(mark="medium")
+        def change_source() -> None:
+            path = Path(__file__)
+            path.write_text(path.read_text().replace(
+                "    " + "takes_int(1)", '    takes_int("wrong")',
+            ))
+
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int(1)
+        """),
+        name="test_typing_changed_source",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_in("source changed", result["tests"][1]["exception"]["message"])
+
+
+@test([Param(None, name="local"), Param(1, name="worker")], mark="slow")
+async def test_static_contracts_preserve_programmatic_fail_fast_and_junit_results(
+    workers: int | None,
+) -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import assert_type_error, test, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def positive(symbolic: int) -> None:
+            assert_type(takes_int(symbolic), int)
+
+        @test_typing
+        def missing_rejection() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int(1)
+
+        @test(mark="fast")
+        def must_not_start() -> None:
+            raise RuntimeError("fail-fast started a later body")
+        """),
+        name="test_typing_programmatic_fail_fast",
+    )
+    run = await run_tests_programmatic(
+        [FilterItem(str(path))], workers=workers, fail_fast=True, timeout=10
+    )
+    assert_eq((run.selected_tests, run.total_tests, run.stopped_early), (3, 2, True))
+    assert_eq((run.passed, run.failed, run.errors, run.exit_code), (1, 1, 0, 1))
+    assert_eq([case.markers for case in run.test_results], [("slow",), ("slow",)])
+    suite = ElementTree.fromstring(build_junit_xml(run))  # noqa: S314 -- trusted adapter output
+    assert_eq(
+        (suite.get("tests"), suite.get("failures"), suite.get("errors")),
+        ("2", "1", "0"),
+    )
+    failures = suite.findall("testcase/failure")
+    assert_eq(len(failures), 1)
+    assert_in("no diagnostics", failures[0].get("message", ""))
+
+
+@test(mark="slow")
+def test_replacement_worker_can_run_a_static_contract_after_a_process_exit() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        import os
+        from snektest import assert_type_error, test, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test(mark="slow")
+        def crash_worker() -> None:
+            os._exit(23)
+
+        @test_typing
+        def after_replacement() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+        """),
+        name="test_typing_replacement",
+    )
+    result = run_test_subprocess(path, "--workers", "1", timeout=30)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_eq(result["tests"][1]["status"], "passed")
+
+
+@test(mark="slow")
+def test_single_line_assertion_uses_python_lines_and_unicode_columns() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import assert_type_error, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            text = "a\u2028b"
+            with assert_type_error("invalid-argument-type") as éééééééééééééééééééé: takes_int("wrong")
+        """),
+        name="test_typing_unicode",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["passed"], 1)
+
+
+@test(mark="slow")
+def test_runtime_rebinding_cannot_erase_a_source_declared_static_assertion() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from contextlib import nullcontext
+        from snektest import assert_type_error, test, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test(mark="fast")
+        def rebind_runtime_name() -> None:
+            globals()["assert_type_error"] = nullcontext
+
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int(1)
+        """),
+        name="test_typing_rebound_globals",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (0, 1, 1))
+    assert_in("no diagnostics", result["tests"][1]["exception"]["message"])
+
+
+@test(mark="slow")
+def test_parent_cancellation_during_native_startup_drains_tasks_and_temporary_files() -> (
+    None
+):
+    directory = load_fixture(tmp_dir_fixture())
+    scratch = directory / "cancelled-typing-temporary-files"
+    scratch.mkdir()
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import assert_type_error, test_typing
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+        """),
+        name="test_cancelled_ty_startup",
+    )
+    driver = directory / "cancel_typing_driver.py"
+    driver.write_text(
+        dedent("""
+        import asyncio
+        from pathlib import Path
+        import sys
+        from snektest import assert_eq, assert_false, assert_true, fail
+        from snektest.cli import run_tests_programmatic
+        from snektest.models import FilterItem
+
+        requested = False
+
+        def audit(event: str, arguments: tuple[object, ...]) -> None:
+            global requested
+            if event == "subprocess.Popen" and Path(str(arguments[0])).name in ("ty", "ty.exe"):
+                task = asyncio.current_task()
+                if task is not None:
+                    requested = True
+                    asyncio.get_running_loop().call_soon(task.cancel)
+
+        async def main() -> None:
+            unrelated = asyncio.create_task(asyncio.sleep(60))
+            baseline = set(asyncio.all_tasks())
+            sys.addaudithook(audit)
+            run = asyncio.create_task(run_tests_programmatic([FilterItem(sys.argv[1])]))
+            try:
+                try:
+                    await run
+                except asyncio.CancelledError:
+                    pass
+                else:
+                    fail("parent cancellation did not propagate")
+                assert_true(requested)
+                assert_false(unrelated.done())
+                assert_eq([task.get_name() for task in asyncio.all_tasks() - baseline], [])
+            finally:
+                unrelated.cancel()
+                await asyncio.gather(unrelated, return_exceptions=True)
+            print("cancelled cleanly")
+
+        asyncio.run(main())
+        """),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(driver), str(path)],
+        env=dict(os.environ, TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+    assert_in("cancelled cleanly", completed.stdout)
+    assert_eq(list(scratch.iterdir()), [])

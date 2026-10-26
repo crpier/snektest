@@ -4,7 +4,7 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
-- Begin Python-native static typing contracts with bare `@test_typing`, native `typing.assert_type`, and `with assert_type_error("rule")` blocks. Analyze original sync/async source without executing bodies, retain normal selectors and results, and provide the optional pinned `snektest[typing]` extra. This first slice checks one selected function per invocation; broader lifecycle validation, batching, and configurable environments remain in progress. (#96)
+- Begin Python-native static typing contracts with bare `@test_typing`, native `typing.assert_type`, and `with assert_type_error("rule")` blocks. Analyze original sync/async source without executing bodies, retain normal selectors and results, and provide the optional pinned `snektest[typing]` extra. Harden body-only diagnostic attribution, source identity/edit detection, lexical marker scopes, and original-location failure messages. Validate installed optional-extra boundaries, cancellation during native startup, oversized-report cleanup, fail-fast/JUnit results, and replacement workers. One selected function is still checked per invocation; broader lifecycle validation, batching, and configurable environments remain in progress. (#96)
 
 - Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
 

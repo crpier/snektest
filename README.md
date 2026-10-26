@@ -678,9 +678,18 @@ def test_argument_types(symbolic: int) -> None:
 
 Each assertion block requires exactly one diagnostic with the literal rule name.
 Missing, different, or additional diagnostics fail; nested blocks own their
-innermost diagnostics. Unexpected errors in the selected function or shared
-module helpers fail too. Broken imports and checker setup are errors, not proof
-of a successful rejection. The marker is not supported in ordinary runtime tests.
+innermost diagnostics. Only diagnostics inside the block body count, not errors
+in its `with` header. Unexpected errors in the selected function or shared
+module helpers fail too. Failures include original source locations. Broken
+imports and checker setup are errors, not proof of a successful rejection. The
+marker is not supported in ordinary runtime tests.
+
+Use direct Snektest imports for assertion markers: imported aliases and qualified
+module imports work, including imports inside static bodies. Marker resolution
+uses source bindings rather than mutable runtime globals. Copied, re-exported,
+and dynamically looked-up marker values are unsupported. Keep source files
+unchanged during a run; detected edits are errors. Source checks are not atomic
+filesystem protection against concurrent writers.
 
 Run and select these functions through the usual Snektest commands, locally or
 with workers. Ordinary `ty check` deliberately skips their bodies; **run Snektest

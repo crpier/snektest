@@ -23,7 +23,9 @@ async def length(value: str) -> int:
 
 @test_typing
 async def test_async_argument_types() -> None:
-    """Await expressions are checked without executing a coroutine."""
+    """Local imports and await expressions are checked without executing them."""
+    from snektest import assert_type_error as reject  # noqa: PLC0415 -- demonstrate a static local import
+
     assert_type(await length("hello"), int)
-    with assert_type_error("invalid-argument-type"):
+    with reject("invalid-argument-type"):
         await length(42)
