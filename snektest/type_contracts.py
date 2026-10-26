@@ -5,6 +5,7 @@ lazy import asyncio
 lazy import inspect
 lazy import symtable
 lazy import sys
+lazy import tomllib
 lazy from collections.abc import Callable, Generator, Iterator
 lazy from contextlib import AbstractContextManager, contextmanager, suppress
 lazy from contextvars import ContextVar
@@ -496,6 +497,19 @@ async def _invoke(command: list[str], root: Path) -> tuple[int, bytes, bytes]:
         await _reap(process)
 
 
+def _python_arguments(config: Path) -> list[str]:
+    # Only an explicit environment.python opts out of the current interpreter.
+    # Leave native syntax/type validation to ty, including malformed files.
+    try:
+        settings = tomllib.loads(config.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError, UnicodeDecodeError:
+        return ["--python", sys.executable]
+    environment = settings.get("environment")
+    if isinstance(environment, dict) and "python" in environment:
+        return []
+    return ["--python", sys.executable]
+
+
 async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
     try:
         ty = import_module("ty")
@@ -539,8 +553,7 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
             "type-assertion-failure",
             "--error",
             "unresolved-import",
-            "--python",
-            sys.executable,
+            *_python_arguments(config),
             "--extra-search-path",
             str(scratch),
             "--extra-search-path",

@@ -2,13 +2,14 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from tempfile import mkdtemp
 from textwrap import dedent
 
-from snektest import Param, assert_eq, assert_in, load_fixture, test
+from snektest import Param, assert_eq, assert_in, assert_true, load_fixture, test
 from testutils.fixtures import tmp_dir_fixture
 
 
@@ -77,6 +78,31 @@ def test_base_install_collects_without_ty_and_the_typing_extra_enables_execution
     )
     assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
     assert_eq(json.loads(executed.stdout)["passed"], 2)
+    if os.name != "nt":
+        _check_native_startup_failure(python, directory)
+
+
+def _check_native_startup_failure(python: Path, directory: Path) -> None:
+    located = _run(
+        [str(python), "-I", "-c", "import ty; print(ty.find_ty_bin())"], cwd=directory
+    )
+    assert_eq(located.returncode, 0, msg=located.stderr)
+    binary = Path(located.stdout.strip())
+    assert_true(binary.is_relative_to(directory))
+    # Break any uv-cache hardlink before changing permissions. Only this
+    # disposable environment's directory entry is replaced, never a shared inode.
+    disabled = binary.with_name(f"{binary.name}.disabled")
+    shutil.copyfile(binary, disabled)
+    disabled.chmod(0o600)
+    disabled.replace(binary)
+    failed = _run(
+        [str(python), "-I", "-m", "snektest", "--json-output", "test_consumer.py"],
+        cwd=directory,
+    )
+    assert_eq(failed.returncode, 1, msg=failed.stdout + failed.stderr)
+    result = json.loads(failed.stdout)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_eq(result["tests"][0]["exception"]["type"], "PermissionError")
 
 
 def _check_base_commands(python: Path, directory: Path) -> None:

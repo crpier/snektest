@@ -129,8 +129,11 @@ rules rather than ambient ty configuration. Ordinary runtime tests and
 Use `--typing-config FILE` for an explicit native ty configuration, or pass
 `typing_config=Path(...)` to `run_tests_programmatic`. Otherwise Snektest uses
 isolated strict rules, not ambient project configuration or `TY_CONFIG_FILE`.
-The checker uses the current interpreter. `deprecated`, `type-assertion-failure`,
-and `unresolved-import` remain errors even when the file relaxes other rules;
+The checker defaults to the current interpreter; native `environment.python`
+selects another interpreter/environment and `environment.extra-paths` selects
+additional import roots. These are explicit native ty settings, not new Python
+contract declarations. `deprecated`, `type-assertion-failure`, and
+`unresolved-import` remain errors even when the file relaxes other rules;
 ignored expected diagnostics still cause missing-expectation failures. Config
 parse/startup failures are errors, not successful type rejections. This option is
 run-local, not a persistent `[tool.snektest]` setting.

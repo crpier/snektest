@@ -2,7 +2,9 @@
 
 Use only a single bare decorator and direct imported markers. Same-file tests
 reuse a bounded run-local report. --typing-config FILE selects native ty rules;
-assertion/environment checks remain errors and the current interpreter is used.
+assertion/environment checks remain errors. Native environment.python and
+extra-paths select explicit checker environments/import roots; otherwise the
+current interpreter is used.
 """
 
 lazy from typing import assert_type

@@ -1041,3 +1041,45 @@ def test_reexported_marker_is_rejected_rather_than_treated_as_an_ordinary_contex
     result = run_test_subprocess(path, timeout=30)
     assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
     assert_in("copied or indirect marker values", result["error"]["message"])
+
+
+@test(mark="slow")
+def test_config_edits_invalidate_same_run_report_reuse() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    config = directory / "changing-rules.toml"
+    config.write_text('[rules]\nall = "ignore"\n', encoding="utf-8")
+    path = create_test_file(
+        directory,
+        dedent("""
+        from pathlib import Path
+        from typing import assert_type
+        from snektest import test, test_typing
+
+        class Parent:
+            def value(self) -> int:
+                return 1
+
+        class Child(Parent):
+            def value(self) -> int:
+                return 1
+
+        @test_typing
+        def first(symbolic: int) -> None:
+            assert_type(symbolic, int)
+
+        @test(mark="medium")
+        def update_rules() -> None:
+            Path(__file__).with_name("changing-rules.toml").write_text(
+                '[rules]\\nall = "error"\\n', encoding="utf-8",
+            )
+
+        @test_typing
+        def second(symbolic: int) -> None:
+            assert_type(symbolic, int)
+        """),
+        name="test_changing_configuration",
+    )
+    result = run_test_subprocess(path, "--typing-config", str(config), timeout=30)
+    assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq((result["errors"], result["failed"], result["passed"]), (0, 1, 2))
+    assert_in("missing-override-decorator", result["tests"][2]["exception"]["message"])

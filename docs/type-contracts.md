@@ -31,7 +31,12 @@ form declares one; unrelated context managers remain ordinary type checks.
 `--typing-config FILE`, or `typing_config=Path(...)` on the programmatic runner,
 selects native ty TOML configuration. The default is isolated `[rules] all =
 "error"`, independent of ambient project config and `TY_CONFIG_FILE`. The current
-Python interpreter remains explicit. The `deprecated`, `type-assertion-failure`,
+Python interpreter is the default; native `environment.python` explicitly selects
+another interpreter/environment and `environment.extra-paths` selects additional
+import roots. Snektest only inspects whether the explicit Python field exists to
+avoid overriding it with its default; native parsing/type validation still owns
+configuration errors. An analysis environment does not expand Snektest's supported
+runtime matrix. The `deprecated`, `type-assertion-failure`,
 and `unresolved-import` rules remain errors so configuration cannot suppress
 reference validation, positive type assertions, or broken environments. Ignoring
 an expected rejection rule cannot satisfy that assertion: the missing diagnostic
@@ -66,7 +71,12 @@ replacement workers, and independently installed wheel/sdist environments both
 without and with the typing extra. Disposable embedding applications observe real
 subprocess audit events; they do not patch the checker or emit fake reports.
 Linux-specific procfs/pipe controls verify active timeout/cancellation/termination
-reaping and descriptor release under full native-report backpressure. Those OS
+reaping and descriptor release under full native-report backpressure. Transport
+corruption consumes a byte from real native output (without a fake checker or
+synthesized report), proving malformed JSON is an error rather than a rejection.
+Owned installed environments additionally verify non-executable checker startup;
+permission changes break uv-cache hardlinks first and never touch shared binaries.
+Those OS
 fixtures skip where their required facilities or pipe-growth permission are
 unavailable; they do not establish equivalent macOS/Windows fault coverage.
 

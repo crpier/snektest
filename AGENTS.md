@@ -293,8 +293,9 @@ A private session fixture retains at most one validated file report per executio
 process/run. Key reuse by source fingerprint and explicit config content; later
 runs/replacement workers start fresh. `--typing-config FILE` and programmatic
 `typing_config=Path(...)` accept native ty config, not persistent Snektest config.
-Current interpreter and the deprecated/type-assertion-failure/unresolved-import
-error invariants remain enforced. Preserve run-local context through worker
+Default to the current interpreter unless native `environment.python` explicitly
+selects another; preserve native extra-paths. The deprecated/type-assertion-failure/
+unresolved-import error invariants remain enforced. Preserve run-local context through worker
 replacement. Require a single bare decorator; other contexts do not declare
 expected errors. The temporary stub uses an internal deprecated reference probe
 to reject known copied/re-exported marker escapes without executing Python.

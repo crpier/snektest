@@ -229,3 +229,91 @@ def test_active_native_checker_is_reaped_and_cannot_certify_rejection(
     assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
     assert_in("native child reaped", completed.stdout)
     assert_eq(list(scratch.iterdir()), [])
+
+
+@test(mark="slow")
+def test_corrupted_real_native_report_is_an_error_not_a_successful_rejection() -> None:
+    if sys.platform != "linux":
+        skip("This transport corruption fixture requires Linux procfs")
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import assert_type_error, test, test_typing
+        def takes_int(value: int) -> int:
+            return value
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                takes_int("wrong")
+        @test(mark="fast")
+        def following() -> None:
+            pass
+        """),
+        name="test_corrupted_native_transport",
+    )
+    driver = directory / "corrupt_native_transport.py"
+    driver.write_text(
+        dedent("""
+        import asyncio
+        import fcntl
+        import os
+        from pathlib import Path
+        import stat
+        import sys
+        from snektest import assert_eq, assert_in, assert_isinstance, assert_true
+        from snektest.cli import run_tests_programmatic
+        from snektest.models import ErrorResult, FilterItem
+
+        def pipe_readers() -> set[int]:
+            readers: set[int] = set()
+            for entry in Path("/proc/self/fd").iterdir():
+                fd = int(entry.name)
+                try:
+                    if stat.S_ISFIFO(os.fstat(fd).st_mode) and fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY:
+                        readers.add(fd)
+                except OSError:
+                    pass
+            return readers
+
+        baseline: set[int] = set()
+        corrupted = False
+
+        def consume_prefix(fd: int) -> None:
+            global corrupted
+            # Remove one byte from real ty output through the OS pipe. No
+            # fake checker or synthesized report substitutes for native output.
+            assert_eq(os.read(fd, 1), b"[")
+            corrupted = True
+
+        def observe(event: str, arguments: tuple[object, ...]) -> None:
+            if event == "subprocess.Popen" and Path(str(arguments[0])).name in ("ty", "ty.exe"):
+                readers = pipe_readers() - baseline
+                assert_true(bool(readers))
+                asyncio.get_running_loop().call_soon(consume_prefix, min(readers))
+
+        async def main() -> None:
+            global baseline
+            baseline = pipe_readers()
+            sys.addaudithook(observe)
+            result = await run_tests_programmatic([FilterItem(sys.argv[1])])
+            assert_true(corrupted)
+            assert_eq((result.errors, result.failed, result.passed), (1, 0, 1))
+            error = assert_isinstance(result.test_results[0].result, ErrorResult)
+            assert_in("Invalid JSON", error.exception.message)
+            assert_eq(pipe_readers() - baseline, set())
+            print("corrupted transport rejected")
+
+        asyncio.run(main())
+        """),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(driver), str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+    assert_in("corrupted transport rejected", completed.stdout)
