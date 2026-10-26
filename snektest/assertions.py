@@ -1,4 +1,5 @@
 lazy import asyncio
+lazy import re
 lazy from collections.abc import Generator
 lazy from contextvars import Token
 lazy from statistics import median
@@ -26,12 +27,38 @@ lazy from snektest.models import (
 def assert_raises[T](
     *expected_exceptions: type[T],
     msg: str | None = None,
+    match: str | re.Pattern[str] | None = None,
 ) -> RaisesContex[T]:
-    return RaisesContex(*expected_exceptions, msg=msg)
+    """Assert an exception type and optionally regex-search its rendered message.
+
+    ``match`` accepts string patterns or compiled string regexes, preserving
+    flags. It is validated at construction; invalid regexes and bytes patterns
+    raise ``BadRequestError`` before the body. ``msg`` overrides failure text,
+    not the expected exception message. A mismatch or broken message formatter
+    raises ``AssertionFailure`` chained from the original exception. The caught
+    object stays available as the typed ``.exception`` after exit.
+    """
+    return RaisesContex(*expected_exceptions, msg=msg, match=match)
 
 
 class RaisesContex[T]:
-    def __init__(self, *expected_exceptions: type[T], msg: str | None = None) -> None:
+    def __init__(
+        self,
+        *expected_exceptions: type[T],
+        msg: str | None = None,
+        match: str | re.Pattern[str] | None = None,
+    ) -> None:
+        if match is not None and not (
+            isinstance(match, str)
+            or (isinstance(match, re.Pattern) and isinstance(match.pattern, str))
+        ):
+            message = "assert_raises match must be a valid string regular expression"
+            raise BadRequestError(message)
+        try:
+            self._match = re.compile(match) if match is not None else None
+        except re.PatternError as exc:
+            message = "assert_raises match must be a valid string regular expression"
+            raise BadRequestError(message) from exc
         self.msg = msg
         self.expected_exceptions = expected_exceptions
         self._exception: T | None = None
@@ -70,6 +97,29 @@ class RaisesContex[T]:
                 expected=self.expected_exceptions,
             )
         self._exception = exc_value
+        if self._match is not None:
+            try:
+                actual_message = str(exc_value)
+            except BaseException as formatter_error:
+                message = (
+                    self.msg
+                    or f"Cannot match {type(exc_value).__name__} message: str() raised {type(formatter_error).__name__}"
+                )
+                raise AssertionFailure(
+                    message,
+                    actual=exc_value,
+                    expected=self._match.pattern,
+                ) from exc_value
+            if self._match.search(actual_message) is None:
+                message = (
+                    self.msg
+                    or f"Exception message {actual_message!r} does not match {self._match.pattern!r}"
+                )
+                raise AssertionFailure(
+                    message,
+                    actual=actual_message,
+                    expected=self._match.pattern,
+                ) from exc_value
         return True
 
     @property
