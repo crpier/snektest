@@ -73,7 +73,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     )
     assert_eq(installed.returncode, 0, msg=installed.stderr)
 
-    consumer = tmp_dir / "consumer.py"
+    consumer = tmp_dir / "test_consumer.py"
     consumer.write_text(
         dedent("""
             from collections.abc import Generator
@@ -81,6 +81,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             import logging
             import re
             from typing import assert_type
+            from pathlib import Path
 
             from hypothesis import strategies as st
 
@@ -96,6 +97,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 skip,
                 test,
                 test_hypothesis,
+                temporary_directory,
                 xfail,
             )
             from snektest.cli import run_tests_programmatic
@@ -119,6 +121,11 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             )
             def parameter_types(first: int, second: str) -> None:
                 pass
+
+            @test()
+            def owned_path() -> None:
+                root = temporary_directory(base=Path.cwd(), retention="never")
+                assert_type(root, Path)
 
             @test(xfail="known defect")
             def expected_outcome() -> None:
@@ -191,7 +198,14 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_eq(payload["messages"], ["installed capture"])
     assert_true(
         set(payload["all"])
-        >= {"LogCapture", "capture_logs", "SnektestError", "skip", "xfail"}
+        >= {
+            "LogCapture",
+            "capture_logs",
+            "temporary_directory",
+            "SnektestError",
+            "skip",
+            "xfail",
+        }
     )
     assert_false("UnreachableError" in payload["all"])
 
@@ -249,6 +263,37 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     )
     assert_eq(checked.returncode, 0, msg=checked.stdout + checked.stderr)
 
+    executed_owned_test = _run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import asyncio, runpy, sys; "
+                f"sys.path.insert(0, {str(target_dir)!r}); "
+                f"namespace = runpy.run_path({str(consumer)!r}); "
+                "from snektest.cli import run_tests_programmatic; "
+                "from snektest.models import FilterItem; "
+                f"result = asyncio.run(run_tests_programmatic([FilterItem({str(consumer) + '::owned_path'!r})])); "
+                "sys.exit(result.exit_code)"
+            ),
+        ],
+        cwd=tmp_dir,
+    )
+    assert_eq(
+        executed_owned_test.returncode,
+        0,
+        msg=executed_owned_test.stdout + executed_owned_test.stderr,
+    )
+
+    _check_invalid_authoring_types(type_checker, target_dir, tmp_dir)
+    _check_invalid_match_types(type_checker, target_dir, tmp_dir)
+
+
+def _check_invalid_authoring_types(
+    type_checker: Path, target_dir: Path, tmp_dir: Path
+) -> None:
+    """Reject invalid fixture, decorator, log and directory arguments in the wheel."""
     invalid_consumer = tmp_dir / "invalid_consumer.py"
     invalid_consumer.write_text(
         dedent("""
@@ -256,10 +301,12 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
 
             from hypothesis import strategies as st
 
-            from snektest import Param, capture_logs, fixture, test, test_hypothesis
+            from snektest import Param, capture_logs, fixture, temporary_directory, test, test_hypothesis
 
             capture_logs(42)
             capture_logs("consumer", level="DEBUG")
+            temporary_directory(base=42)
+            temporary_directory(retention="typo")
 
             @fixture(scope="invalid")
             def invalid_scope() -> Generator[int]:
@@ -291,8 +338,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_in("no-matching-overload", diagnostics)
     assert_in("invalid-argument-type", diagnostics)
     assert_in("capture_logs", diagnostics)
-
-    _check_invalid_match_types(type_checker, target_dir, tmp_dir)
+    assert_in("temporary_directory", diagnostics)
 
 
 def _check_invalid_match_types(

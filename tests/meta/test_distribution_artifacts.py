@@ -31,6 +31,8 @@ _REQUIRED_EXAMPLES = {
     "snektest/examples/basic_test.py",
     "snektest/examples/benchmark.py",
     "snektest/examples/fixtures.py",
+    "snektest/examples/temporary.py",
+    "snektest/temporary.py",
     "snektest/examples/graphql.py",
     "snektest/examples/log_capture.py",
     "snektest/examples/memory.py",

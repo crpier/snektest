@@ -5,6 +5,7 @@ lazy from typing import Protocol
 
 lazy from snektest.models import PassedResult, RunResult, TestResult
 lazy from snektest.presenter import (
+    print_error,
     print_failures,
     print_slowest_tests,
     print_summary,
@@ -85,6 +86,13 @@ class ConsoleRunReporter:
         )
         if self._durations is not None:
             print_slowest_tests(run_result, count=self._durations)
+        for directory in run_result.retained_directories:
+            if directory.scope != "session":
+                continue
+            print_error(
+                f"Retained temporary directory ({directory.scope}, {directory.reason}): {directory.path}",
+                soft_wrap=True,
+            )
         print_summary(run_result)
 
 

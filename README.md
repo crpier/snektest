@@ -297,6 +297,48 @@ keeps fixture setup unconditional, makes teardown ownership obvious, and avoids
 hiding fixture setup behind an earlier assertion failure or branch. Only load a
 fixture later in a test when delayed fixture loading is the behavior being tested.
 
+### Managed temporary directories
+
+`temporary_directory(*, base=None, retention="never") -> Path` works in sync or
+async tests/fixture setup without `await` or `load_fixture`. Each call returns a
+unique private absolute path; ordinary resource teardown and test-task/background
+classification finish before directory policy runs.
+
+```python
+from snektest import assert_eq, temporary_directory, test
+
+
+@test(mark="medium")
+def test_owned_file() -> None:
+    root = temporary_directory(retention="on-failure")
+    target = root / "payload.txt"
+    _ = target.write_text("payload", encoding="utf-8")
+    assert_eq(target.read_text(encoding="utf-8"), "payload")
+```
+
+Default `"never"` attempts cleanup even on failure. `"on-failure"` retains FAIL,
+ERROR, XPASS, setup/teardown and background failures, but not consumed exceptions
+or SKIP/XFAIL. `"always"` keeps successful artifacts too. Completed console runs
+report paths only; JSON schema version 1 adds optional `retained_directories`
+arrays on individual tests and the run aggregate. Cleanup errors remain fixture
+errors alongside the original test failure; no artifact contents are attached.
+
+Use `base=` with an **existing**, short, private directory to avoid a small tmpfs
+or long socket paths. Pass the allocated path explicitly to dependencies/children;
+Snektest never changes global `TMPDIR`, sweeps unrelated data, or stops processes.
+Stop/reap consumers before deletion. Roots allocated during session-fixture setup
+survive that process's session teardown; session retain-on-failure considers any
+failure observed by that process, not other workers or later run-fixture errors.
+Run-fixture and standalone context-manager ownership are unsupported.
+
+Recursive removal runs off the shared event loop and waits through caller
+cancellation. Filesystem threads cannot be interrupted, so a stalled removal can
+exceed `--timeout` and still needs an outer process/CI deadline. Crashes/SIGKILL
+can orphan roots, and interrupted runs may lack a completed path report. Retained
+or orphaned roots require deliberate owner-checked cleanup; there is no automatic
+historical pruning. Print `snektest --example temporary` and read
+[temporary-directory policy](docs/temporary-directories.md) for ordering and limits.
+
 ### Rich Assertions
 
 `assert_eq(actual, expected)` keeps the observed value first and preserves Python's

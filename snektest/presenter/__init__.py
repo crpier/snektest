@@ -208,6 +208,14 @@ def print_test_result_to_console(console: Console, result: TestResult) -> None:
                 soft_wrap=True,
             )
 
+    for directory in result.retained_directories:
+        console.print(
+            f"Retained temporary directory ({directory.scope}, {directory.reason}): {directory.path}",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
+
 
 def print_test_result(result: TestResult) -> None:
     """Print the result of a single test."""
