@@ -40,6 +40,38 @@ status. Interpreter/site startup hooks may repeat, before collection. Importing
 Snektest, programmatic runners, and direct `snektest.cli.main` calls keep the host
 policy unchanged. This is startup policy, not hard interruption or cleanup.
 
+## AnyIO and async runtimes
+
+Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`. Snektest runs on asyncio;
+await AnyIO APIs directly, without `anyio.run()` or a nested event loop:
+
+```python
+from anyio.to_thread import run_sync
+
+from snektest import assert_eq, test
+
+
+@test(mark="medium")
+async def test_anyio_offload() -> None:
+    assert_eq(await run_sync(lambda: 42), 42)
+```
+
+Keep task groups and cancel scopes within a test or a single fixture phase;
+**never span a fixture's `yield`** with them, because setup and teardown may run
+in different tasks. Separate awaited operations work in either phase. Idle pool
+workers registered with the current asyncio loop are exempt from thread-leak
+checks by identity, not by name. New busy/abandoned workers and raw lookalikes
+remain failures. Existing-thread work is not comprehensively tracked; threads
+cannot be forcibly stopped. AnyIO is optional and core observation does not
+import it. Print `--example anyio` for task groups and fixture operations.
+
+This first slice adds neither a backend selector nor Trio support. Local runs,
+workers, and programmatic runners stay on asyncio. A future backend choice must
+be explicit and command-wide, apply to host/original/replacement workers and
+fixture/task/timeout lifetimes, preserve asyncio by default, reject missing or
+unsupported runtimes without fallback, and respect an embedding caller's loop.
+Do not infer backend support from AnyIO's API or nest a Trio run inside a test.
+
 ## Quick start
 
 Create a `test_*.py` file and decorate test functions with `@test(mark=...)`. Mark every test with the resources it may use:
@@ -77,6 +109,7 @@ snektest --durations 10
 snektest --agent-docs
 snektest --examples
 snektest --example async
+snektest --example anyio
 snektest examples
 snektest example async
 ```
@@ -176,7 +209,7 @@ counts now count each failed fixture teardown.
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`. Function fixtures tear down before task-leak checks. A task created during fixture setup belongs to that fixture and stays alive through teardown; session-owned tasks may stay alive between tests. Snektest attributes abandoned fixture tasks to their fixture, cancels test-owned leaks, and leaves tasks from an embedding host application alone.
 - Failed fixture setup retains task ownership before its first yield. At the fixture's scope teardown, abandoned tasks are cancelled and cleanup failures are reported separately from the setup error. Retrying a failed session fixture preserves cleanup for each attempt. Shared async session setup survives cancellation of a test's waiter and remains available to later tests. At scope teardown, unfinished setup receives bounded cancellation; resistance and cleanup errors become fixture teardown diagnostics. Function setup left pending when its test returns is abandoned fixture work and is cleaned before the next test. Put background-task setup and the fixture's `yield` inside `try`/`finally` so both setup failure and normal teardown stop tasks.
 - Use `await asyncio.to_thread(...)` for blocking application work in an async test, and load fixtures before offloading. `to_thread` copies context; a raw `threading.Thread` does not inherit the fixture registry. An async timeout stops awaiting offloaded work but cannot stop its thread, which may continue or delay shutdown. Sync, CPU-bound, import, raw-thread, and sync-teardown hangs still need an outer process or CI timeout.
-- Unhandled thread and `sys.unraisablehook` exceptions make an otherwise passing test an error. A new non-daemon thread still alive after function teardown makes it fail; joined threads pass, daemon threads and event-loop default-executor workers are exempt. Existing hooks are chained and restored. Extra background failures remain visible in console and JSON diagnostics. Snektest does not kill threads or provide a threaded test executor.
+- Unhandled thread and `sys.unraisablehook` exceptions make an otherwise passing test an error. A new non-daemon thread still alive after function teardown makes it fail; joined threads pass, daemon threads, event-loop default-executor workers, and registered idle AnyIO workers on that loop are exempt. Existing hooks are chained and restored. Extra background failures remain visible in console and JSON diagnostics. Snektest does not kill threads or provide a threaded test executor.
 - Use `Param(value=..., name=...)` for one named value per argument. See
   **Parameter values and case names** below for tuples versus separate axes and
   common construction mistakes. `@test_hypothesis` preserves strategy types
@@ -675,6 +708,7 @@ snektest --example graphql
 """
 
 EXAMPLE_FILES: dict[str, str] = {
+    "anyio": "anyio_tests.py",
     "async": "async_tests.py",
     "basic": "basic_test.py",
     "benchmark": "benchmark.py",

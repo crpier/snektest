@@ -5,6 +5,7 @@ from __future__ import annotations
 lazy import asyncio
 lazy import sys
 lazy import threading
+lazy from collections import deque
 lazy from collections.abc import Callable, Generator
 lazy from contextlib import contextmanager
 lazy from dataclasses import dataclass, replace
@@ -85,13 +86,13 @@ class _Observer:
         _ = self.previous_unraisable_hook(args)
 
     def record_thread_leaks(self) -> None:
-        executor_threads = _default_executor_threads()
+        runtime_threads = _default_executor_threads() | _idle_anyio_threads()
         leaked_threads = sorted(
             (
                 thread
                 for thread in threading.enumerate()
                 if thread not in self.baseline_threads
-                and thread not in executor_threads
+                and thread not in runtime_threads
                 and thread is not threading.current_thread()
                 and thread.is_alive()
                 and not thread.daemon
@@ -121,6 +122,36 @@ def _default_executor_threads() -> frozenset[threading.Thread]:
     threads = getattr(executor, "_threads", ())
     return frozenset(
         thread for thread in threads if isinstance(thread, threading.Thread)
+    )
+
+
+def _idle_anyio_threads() -> frozenset[threading.Thread]:
+    """Recognize registered, idle AnyIO asyncio workers without importing AnyIO.
+
+    AnyIO exposes no public thread-identity query. Keep its private RunVar layout
+    isolated here and fail closed if it changes: never whitelist thread names or
+    busy workers. The RunVars resolve against the current event loop.
+    """
+    backend = sys.modules.get("anyio._backends._asyncio")
+    if backend is None:
+        return frozenset[threading.Thread]()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return frozenset[threading.Thread]()
+    workers_get = getattr(getattr(backend, "_threadpool_workers", None), "get", None)
+    idle_get = getattr(getattr(backend, "_threadpool_idle_workers", None), "get", None)
+    if not callable(workers_get) or not callable(idle_get):
+        return frozenset[threading.Thread]()
+    workers, idle = workers_get(None), idle_get(None)
+    if not isinstance(workers, set) or not isinstance(idle, deque):
+        return frozenset[threading.Thread]()
+    return frozenset(
+        thread
+        for thread in idle
+        if isinstance(thread, threading.Thread)
+        and thread in workers
+        and getattr(thread, "loop", None) is loop
     )
 
 

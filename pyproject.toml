@@ -29,12 +29,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+anyio = ["anyio>=4.14.2,<5"]
 schema = [
     "schemathesis>=4.25.2,<4.26",
 ]
 
 [dependency-groups]
 dev = [
+    "anyio>=4.14.2,<5",
     "coverage>=7.17.0",
     "pip-audit>=2.10.1,<2.11",
     "pip-api>=0.0.35", # Older vendored parsers import sre_constants, removed in Python 3.15.

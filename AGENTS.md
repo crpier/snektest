@@ -321,7 +321,9 @@ Execution temporarily installs and chains `threading.excepthook` and
 `sys.unraisablehook` around each canonically sequential test, including function
 teardown and task cleanup. An unhandled thread or unraisable exception turns a
 pass into an error. New non-daemon threads alive afterward turn a pass into a
-failure; daemon and current event-loop default-executor threads are exempt.
+failure; daemon and current event-loop default-executor threads are exempt. Registered idle
+AnyIO workers on that loop are also exempt by identity, never by thread name.
+New busy AnyIO workers and raw lookalikes retain the ordinary leak diagnostic.
 Additional background failures on an existing failure/error remain process-safe
 `BackgroundFailure` diagnostics in console and JSON. Broken exception message formatters cannot hide thread or unraisable failures; diagnostics use a safe fallback and still chain the previous hooks. Hooks are process-global,
 so concurrent direct `execute_test` calls are unsupported. The standard runner
@@ -334,6 +336,18 @@ be cancelled. A timed-out `to_thread` await leaves its function running and it
 may delay event-loop shutdown. Raw leaked threads, sync or CPU-bound hangs,
 imports, and sync teardown still need an outer process/CI timeout. There is no
 threaded test executor.
+
+### AnyIO and backend policy
+
+When changing AnyIO thread recognition, fixture integration, or async runtime
+selection, read `docs/async-backends.md`. This first #100 slice supports awaited
+AnyIO operations on asyncio, not Trio or a backend selector. Keep task-local
+AnyIO scopes inside a single test/setup/teardown task, not across fixture yield.
+`thread_observation.py` isolates the private AnyIO RunVar identity lookup, reads
+only an already-loaded backend, and fails closed on unknown registry shapes.
+Preserve raw-thread/busy-new-worker leak checks; do not prewarm, daemonize, rename,
+or shut down a caller-owned pool. Existing-thread work is not fully tracked.
+The optional extra and explicit dev dependency select AnyIO `>=4.14.2,<5`.
 
 ### Timeouts
 
