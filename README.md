@@ -747,6 +747,28 @@ the embedding application's startup policy untouched. See
 [CLI startup policy](docs/cli-startup.md) for process, signal, and startup-hook
 limits. There is no new Snektest configuration key or flag.
 
+### Collection errors
+
+A collection failure exits 2 and shows the selected file/filter, original error,
+and useful user-code source context instead of a framework traceback. Syntax
+source/carets, meaningful causes, notes, and exception-group members remain
+visible. Common parameter-construction errors include corrective guidance.
+
+Rerun with `--full-traceback` for framework and dependency frames:
+
+```sh
+snektest --full-traceback tests/test_example.py
+snektest --full-traceback --collect-only tests/test_example.py
+snektest --full-traceback --workers 2 tests/test_example.py
+```
+
+Both displays are bounded and explicitly mark truncation; full detail does not
+dump locals or mean unlimited output. `--full-traceback` does not change JSON
+schema version 1, captured collection diagnostics, selection, or execution.
+Use `--json-output` to retain structured exceptions and captured import
+output/warnings. See [collection error diagnostics](docs/collection-errors.md)
+for frame selection, display limits, and worker behavior.
+
 ### Release health
 
 Run the complete release gate before opening a pull request:

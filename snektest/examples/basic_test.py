@@ -19,6 +19,11 @@ Directory discovery applies Git ignore rules to symlink names, not targets.
 Explicit file selection bypasses ignores; unexpected Git filtering failures in a
 worktree are collection errors.
 
+Collection failures identify the selected file and original error with user source,
+syntax carets, causes, and groups. Use `snektest --full-traceback test_basic.py`
+for bounded framework/dependency details. The flag leaves JSON diagnostics and
+collection semantics unchanged; `--json-output` retains captured import output.
+
 Warning message formatting failures use safe fallback text; capture still restores
 standard streams and debugger hooks.
 """

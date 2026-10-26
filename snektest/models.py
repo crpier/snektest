@@ -30,6 +30,11 @@ class CollectionError(SnektestError):
 
     def __init__(self, message: str) -> None:
         self.collection_diagnostic: ExceptionDiagnostic | None = None
+        self.collection_full_traceback: str | None = None
+        self.collection_console: str | None = None
+        self.collection_file: str | None = None
+        self.collection_filter: str | None = None
+        self.collection_wrapped = False
         self.collection_output = ""
         self.collection_warnings: tuple[str, ...] = ()
         self.uncaptured_output = ""

@@ -19,6 +19,7 @@ lazy from typing import Any, Literal, cast
 lazy from snektest.annotations import AsyncFixture, Coroutine
 lazy from snektest.benchmark_baseline import BenchmarkBaseline
 lazy from snektest.collection import collect_tests_from_filters
+lazy from snektest.collection_errors import format_collection_error
 lazy from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
 lazy from snektest.diagnostics import snapshot_exception
 lazy from snektest.execution import execute_test, teardown_session_fixtures
@@ -80,6 +81,8 @@ class _BootstrapFailed:
     exception_type: str
     message: str
     diagnostic: ExceptionDiagnostic | None = None
+    collection_full_traceback: str | None = None
+    collection_console: str | None = None
     collection_output: str = ""
     collection_warnings: tuple[str, ...] = ()
 
@@ -196,6 +199,16 @@ def _host_main(  # noqa: PLR0913, PLR0917
                     type(exc).__name__,
                     str(exc),
                     diagnostic=snapshot_exception(type(exc), exc, exc.__traceback__),
+                    collection_console=(
+                        format_collection_error(exc)
+                        if isinstance(exc, CollectionError)
+                        else None
+                    ),
+                    collection_full_traceback=(
+                        format_collection_error(exc, full_traceback=True)
+                        if isinstance(exc, CollectionError)
+                        else None
+                    ),
                     collection_output=output.getvalue(),
                     collection_warnings=tuple(warnings),
                 )
@@ -420,6 +433,10 @@ async def _receive_bootstrap(
             collection_error = CollectionError(message.message)
         if collection_error is not None:
             collection_error.collection_diagnostic = message.diagnostic
+            collection_error.collection_full_traceback = (
+                message.collection_full_traceback
+            )
+            collection_error.collection_console = message.collection_console
             collection_error.collection_output = message.collection_output
             collection_error.collection_warnings = message.collection_warnings
             raise collection_error

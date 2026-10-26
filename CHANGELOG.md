@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Make console collection errors user-first, with selected file/filter context, original types, source/carets, causes, notes, groups, and corrective `Param` guidance. Add `--full-traceback` for bounded framework/dependency details in local and worker modes; preserve JSON schema/output and collection semantics. Broken exception message formatters use a safe fallback instead of hiding the original collection error. (#102)
+
 - Enable context-aware warnings by default at standalone CLI startup, including spawned/replacement workers. Honor explicit Python startup opt-outs and precedence; preserve interpreter options, venv, argument boundaries, streams and exits across relaunch, while leaving library/programmatic policy unchanged. Interpreter/site startup hooks may repeat. (#107)
 
 - Clarify canonical named `Param` construction, tuple values versus Cartesian axes, stable selectors, and preserved `Literal` types. Expand executable assertion guidance for exact/regex exception text, `msg` overrides, original causes, actual-first comparisons, and bound narrowing results; make the embedded guide and copyable examples part of the recommended authoring workflow. Existing constructor and assertion behavior is unchanged. (#104)
