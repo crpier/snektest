@@ -12,7 +12,15 @@ standard streams and debugger hooks.
 
 lazy import re
 
-lazy from snektest import SnektestError, assert_eq, assert_in, assert_raises, fail, test
+lazy from snektest import (
+    AssertionFailure,
+    SnektestError,
+    assert_eq,
+    assert_in,
+    assert_raises,
+    fail,
+    test,
+)
 
 
 @test(mark="fast")
@@ -50,3 +58,11 @@ def test_exception_message_match() -> None:
 
     # Match uses regex search; use an ordinary assertion for exact equality.
     assert_eq(str(caught.exception), "INVALID FIELD: NAME")
+
+
+@test(mark="fast")
+def test_structured_comparison_diagnostic() -> None:
+    """A captured failure identifies the nested path, not just two large reprs."""
+    with assert_raises(AssertionFailure) as mismatch:
+        assert_eq({"types": ["int", "str"]}, {"types": ["int", "bytes"]})
+    assert_in("At $['types'][1]: 'str' != 'bytes'", str(mismatch.exception))

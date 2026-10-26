@@ -506,6 +506,15 @@ value second, following parameter names like `actual`, `expected`, `member`, and
 `container`. Raises `AssertionFailure` with actual/expected values for better
 error messages.
 
+`equality.py` owns failure-only, bounded explanations for `assert_eq`. Inspect
+only exact built-in values; preserve the assertion's original `!=` operation and
+never invoke additional user repr/equality/iteration hooks for diagnostics.
+Equality (`operator="=="`) messages are complete: snapshot/render them as plain
+messages without inspecting operands again. Keep JSON schema version 1 and
+non-empty custom messages unchanged. When changing string/key/index explanations,
+preview safety, or work limits, consult `docs/equality-diagnostics.md` and exercise
+the public assertion and CLI/worker tests.
+
 The narrowing helpers return the narrowed value so a single call both asserts and
 narrows under the strict ty config: `assert_is_not_none(x)` returns `x`
 typed as non-`None`, and `assert_isinstance(obj, SomeType)` returns `obj` typed as

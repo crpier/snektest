@@ -299,7 +299,22 @@ fixture later in a test when delayed fixture loading is the behavior being teste
 
 ### Rich Assertions
 
-Get helpful error messages with custom assertions:
+`assert_eq(actual, expected)` keeps the observed value first and preserves Python's
+existing comparison behavior. Failures explain long strings with a zero-based
+character position and nearby context, multiline strings with an expected-to-actual
+unified diff, and exact built-in dictionaries/lists/tuples with missing/extra keys
+or the first differing index and nested path.
+
+Passing comparisons do not load the failure formatter. A non-empty `msg=` remains
+the complete custom message; an empty message retains the default explanation.
+Diagnostics never invoke custom representation or additional custom equality
+hooks: unsupported objects and built-in subclasses use opaque previews. Work and
+output are capped (8,000 generated characters); limit notices distinguish omitted
+details from equality. These explanations appear in console details and existing
+JSON exception messages without changing schema version 1. See
+[diagnostic limits and safety](docs/equality-diagnostics.md).
+
+For example:
 
 <!-- snektest-doc: expect-fail -->
 ```python
@@ -313,12 +328,8 @@ def test_show_dict_diff() -> None:
 
 ```text
 E       {'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}
-
-E       - {'age': 30, 'name': 'bob'}
-E       ?                      ^^^
-
-E       + {'age': 30, 'name': 'alice'}
-E       ?                      ^^^^^
+E       Differing keys: ['name']
+E       At $['name']: 'alice' != 'bob'
 ```
 
 <!-- snektest-doc: expect-fail -->

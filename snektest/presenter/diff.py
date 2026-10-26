@@ -32,9 +32,15 @@ def render_assertion_failure(
     ndiff_func: Callable[[list[str], list[str]], Any] = difflib.ndiff,
 ) -> None:
     """Pretty-print an AssertionFailure using Rich, styled like pytest."""
+    message = exc.args[0] if isinstance(exc, AssertionFailure) else exc.message
+    if (isinstance(exc, AssertionFailure) and exc.operator == "==") or (
+        isinstance(exc, AssertionDiagnostic) and exc.kind == "plain"
+    ):
+        for line in str(message).split("\n"):
+            console.print(f"E       {line}", style="red", markup=False, highlight=False)
+        return
     actual = exc.actual
     expected = exc.expected
-    message = exc.args[0] if isinstance(exc, AssertionFailure) else exc.message
 
     if isinstance(exc, AssertionDiagnostic):
         actual = _display_value(actual) if actual is not None else None

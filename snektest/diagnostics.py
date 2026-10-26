@@ -116,6 +116,12 @@ def snapshot_assertion_failure(exception: AssertionFailure) -> AssertionDiagnost
     actual = exception.actual
     expected = exception.expected
     message = _safe_string(exception)
+    if exception.operator == "==":
+        # Equality already has a bounded, safe explanation. Re-inspecting the
+        # operands here could invoke hostile hooks or duplicate diagnostic work.
+        return AssertionDiagnostic(
+            actual=None, expected=None, kind="plain", message=message
+        )
     if (
         isinstance(actual, list)
         and isinstance(expected, list)

@@ -17,7 +17,10 @@ def test_list_diff_formatting() -> None:
         assert_eq(["foo"], ["bar"])
 
     error_msg = str(exc_info.exception)
-    assert_eq(error_msg, "['foo'] != ['bar']")
+    assert_eq(
+        error_msg,
+        "['foo'] != ['bar']\nFirst differing index at $: 0\nAt $[0]: 'foo' != 'bar'",
+    )
 
 
 @test()
@@ -30,7 +33,10 @@ def test_nested_list_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    assert_eq(error_msg, "[1, 2, [3, 4, 'foo']] != [1, 2, [3, 4, 'bar']]")
+    assert_eq(
+        error_msg,
+        "[1, 2, [3, 4, 'foo']] != [1, 2, [3, 4, 'bar']]\nFirst differing index at $: 2\nFirst differing index at $[2]: 2\nAt $[2][2]: 'foo' != 'bar'",
+    )
 
 
 @test()
@@ -43,7 +49,10 @@ def test_dict_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    assert_eq(error_msg, "{'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}")
+    assert_eq(
+        error_msg,
+        "{'name': 'alice', 'age': 30} != {'name': 'bob', 'age': 30}\nDiffering keys: ['name']\nAt $['name']: 'alice' != 'bob'",
+    )
 
 
 @test()
@@ -56,7 +65,10 @@ def test_multiline_string_diff_formatting() -> None:
         )
 
     error_msg = str(exc_info.exception)
-    assert_eq(error_msg, "'hello\\nworld\\nfoo' != 'hello\\nworld\\nbar'")
+    assert_eq(
+        error_msg,
+        "Multiline strings differ\n--- expected\n+++ actual\n@@ -1,3 +1,3 @@\n hello\n world\n-bar\n+foo",
+    )
 
 
 @test()

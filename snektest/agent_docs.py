@@ -102,6 +102,15 @@ counts now count each failed fixture teardown.
 - Assertion argument order is intentional: pass the observed/computed value
   first and the expected/reference value second, following names like `actual`,
   `expected`, `member`, and `container`.
+- `assert_eq` failures explain long strings with zero-based character context,
+  multiline strings with expected-to-actual unified diffs, and exact built-in
+  dict/list/tuple values with key/index paths. Only failures load the formatter.
+  Non-empty `msg=` stays authoritative; empty messages use defaults. Generated
+  explanations are capped at 8,000 characters with explicit limit notices.
+  Custom objects and builtin subclasses stay opaque: diagnostics never call
+  their repr or additional equality hooks. Console details and JSON version-1
+  exception messages share the explanation. This does not normalize SQL or
+  alter Python equality semantics.
 - `assert_is_not_none(x)` and `assert_isinstance(x, SomeType)` return the
   narrowed value; bind it to narrow for later use, or discard with `_ =` for a
   pure assertion.
