@@ -97,3 +97,26 @@ assertion failures, exceptions, cancellation, and interruptions.
 Downstream acceptance uses a copied fifth-snekql lifecycle logging test with its
 custom recording handler/context removed. Application assertions filter the public
 records/messages; no additional framework search/assertion methods are required.
+
+## Downstream validation
+
+A copied `lifecycle_verbs_emit_events` from fifth-snekql's
+`tests/sqlite/test_structured_logging.py` at
+`2238a462ed3c26fa122e393de126e840e21fc3f4` passed in normal and forced-lazy
+modes. Its recording handler and capture context were removed; the replacement
+uses `capture_logs("snekql")` and filters zipped record/message snapshots after
+exit for the original level-specific lifecycle assertions. The copied test also
+passed strict ty. Downstream tracked files and its existing environment were
+unchanged; execution used the previously isolated environment and required
+`PYTHON_CONTEXT_AWARE_WARNINGS=1` setting.
+
+The bundled `--example logging` source passed as a discoverable `test_logging.py`
+file. Initial complete validation passed 970 cases in each import mode, with 94%
+core coverage and 100% coverage of `log_capture.py`. Integrating concurrent #105
+preserved its installed-package tests alongside the new capture tests; the fresh
+combined release-gate results are recorded on the pull request.
+
+The machine's `/tmp` user quota exhausted during an earlier gate attempt. A
+successful rerun used a task-owned `TMPDIR` under the home filesystem, retaining
+the same tests, coverage threshold, memory budgets, and artifact checks. CI uses
+its normal runner temporary directory.
