@@ -114,6 +114,15 @@ counts now count each failed fixture teardown.
 - `assert_is_not_none(x)` and `assert_isinstance(x, SomeType)` return the
   narrowed value; bind it to narrow for later use, or discard with `_ =` for a
   pure assertion.
+- `assert_raises(ValueError, match="pattern")` accepts a string regex or compiled
+  `re.Pattern[str]` and searches `str(exception)` after checking its type; compiled
+  flags are preserved. Empty patterns match any renderable message. `msg=` instead
+  overrides assertion failure text. `.exception` preserves the original typed
+  exception; use `assert_eq(str(caught.exception), expected)` for exact equality.
+  Mismatches and broken message formatters raise `AssertionFailure` with the
+  original cause; diagnostic fallback text is never matched. Invalid regexes and
+  bytes patterns raise `BadRequestError` at context construction, before the body.
+  See `--example basic_test` for string and compiled-pattern examples.
 - `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)` is a
   context-manager assertion for memory budgets (bytes as `int`). Wrap a region
   for a whole-block peak budget, or loop work over `m.rounds`. `rounds` must be

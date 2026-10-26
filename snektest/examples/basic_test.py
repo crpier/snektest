@@ -10,6 +10,8 @@ Warning message formatting failures use safe fallback text; capture still restor
 standard streams and debugger hooks.
 """
 
+lazy import re
+
 lazy from snektest import (
     AssertionFailure,
     SnektestError,
@@ -36,8 +38,26 @@ def test_string_membership() -> None:
 @test(mark="fast")
 def test_public_error_base() -> None:
     """Catch user-facing framework failures under one conventional base."""
-    with assert_raises(SnektestError):
+    with assert_raises(SnektestError, match="expected failure"):
         fail("expected failure")
+
+
+@test(mark="fast")
+def test_exception_message_match() -> None:
+    """Search exception text with a string or compiled regex; msg is an override.
+
+    Invalid regexes/bytes patterns raise BadRequestError before the body.
+    Mismatches and unrenderable messages fail without matching fallback text.
+    """
+    pattern = re.compile(r"^invalid field: name$", re.IGNORECASE)
+    with assert_raises(
+        ValueError, match=pattern, msg="expected a field error"
+    ) as caught:
+        message = "INVALID FIELD: NAME"
+        raise ValueError(message)
+
+    # Match uses regex search; use an ordinary assertion for exact equality.
+    assert_eq(str(caught.exception), "INVALID FIELD: NAME")
 
 
 @test(mark="fast")

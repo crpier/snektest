@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
+
 - Add typed, explicit `capture_logs` / `LogCapture` for stdlib logger hierarchies, original structured records and safely rendered message snapshots, sync/async fixture lifetimes, overlapping scopes, and thread-originated records. Preserve application handlers and restore temporary levels without automatic result attachments. (#95)
 
 - Correct the invalid test filename diagnostic to identify the required `test_` prefix instead of `_test`, without changing filename validation rules. (#103)

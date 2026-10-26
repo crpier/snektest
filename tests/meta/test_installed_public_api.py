@@ -79,6 +79,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             from collections.abc import Generator
             import json
             import logging
+            import re
             from typing import assert_type
 
             from hypothesis import strategies as st
@@ -90,6 +91,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
                 capture_logs,
                 Scope,
                 SnektestError,
+                assert_raises,
                 fixture,
                 skip,
                 test,
@@ -148,12 +150,25 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
             assert_type(captured.records, tuple[logging.LogRecord, ...])
             assert_type(captured.messages, tuple[str, ...])
 
+            class FieldError(ValueError):
+                code: int = 7
+
+            with assert_raises(FieldError, match=re.compile("field", re.IGNORECASE)) as caught:
+                raise FieldError("FIELD")
+            assert_type(caught.exception, FieldError)
+            code: int = caught.exception.code
+
+            with assert_raises(ValueError, TypeError, match="message") as multiple:
+                raise TypeError("message")
+            assert_type(multiple.exception, ValueError | TypeError)
+
             scope: Scope = value().scope
             public_error: type[SnektestError] = snektest.FixtureError
             print(json.dumps({
                 "all": snektest.__all__,
                 "error": public_error.__name__,
                 "scope": scope.value,
+                "exception_code": code,
                 "schemas": SUPPORTED_SCHEMA_VERSIONS,
                 "messages": captured.messages,
             }))
@@ -170,7 +185,7 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     )
     assert_eq(executed.returncode, 0, msg=executed.stderr)
     payload = json.loads(executed.stdout)
-    assert_eq(payload["scope"], "session")
+    assert_eq((payload["scope"], payload["exception_code"]), ("session", 7))
     assert_eq(payload["error"], "FixtureError")
     assert_eq(payload["schemas"], [1])
     assert_eq(payload["messages"], ["installed capture"])
@@ -276,3 +291,41 @@ def test_built_wheel_exposes_runtime_and_static_public_interface() -> None:
     assert_in("no-matching-overload", diagnostics)
     assert_in("invalid-argument-type", diagnostics)
     assert_in("capture_logs", diagnostics)
+
+    _check_invalid_match_types(type_checker, target_dir, tmp_dir)
+
+
+def _check_invalid_match_types(
+    type_checker: Path,
+    target_dir: Path,
+    tmp_dir: Path,
+) -> None:
+    """Verify invalid match arguments against the installed wheel signature."""
+    invalid_match_consumer = tmp_dir / "invalid_match_consumer.py"
+    invalid_match_consumer.write_text(
+        dedent("""
+            import re
+
+            from snektest import assert_raises
+
+            _ = assert_raises(ValueError, match=b"bytes")
+            _ = assert_raises(ValueError, match=re.compile(b"bytes"))
+            _ = assert_raises(ValueError, match=42)
+        """),
+        encoding="utf-8",
+    )
+    rejected_match = _run(
+        [
+            str(type_checker),
+            "check",
+            "--python",
+            sys.executable,
+            "--extra-search-path",
+            str(target_dir),
+            str(invalid_match_consumer),
+        ],
+        cwd=tmp_dir,
+    )
+    match_diagnostics = rejected_match.stdout + rejected_match.stderr
+    assert_eq(rejected_match.returncode, 1, msg=match_diagnostics)
+    assert_eq(match_diagnostics.count("error[invalid-argument-type]"), 3)
