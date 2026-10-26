@@ -692,8 +692,9 @@ unchanged during a run; detected edits are errors. Source checks are not atomic
 filesystem protection against concurrent writers.
 
 Run and select these functions through the usual Snektest commands, locally or
-with workers. Ordinary `ty check` deliberately skips their bodies; **run Snektest
-to validate the contracts**, including positive `assert_type` assertions. The
+with workers. Ordinary `ty check` deliberately skips their bodies through both
+package and implementation-module stubs; **run Snektest to validate the contracts**,
+including positive `assert_type` assertions. The
 static run checks the original source with a temporary partial stub, preserving
 imports and source locations, using the current interpreter and isolated strict
 rules rather than ambient ty configuration. Ordinary runtime tests and

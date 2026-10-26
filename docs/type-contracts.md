@@ -7,11 +7,16 @@ contract. Bodies never execute; typed parameters are symbolic inputs. Use native
 single bare decorator is supported. Imported aliases and qualified module names,
 including imports inside static functions, preserve Python lexical scope. Both
 `import snektest as s` and direct aliased/dotted `snektest.type_contracts` imports
-are recognized; the canonical user-facing import style remains top-level.
+are recognized, including `from snektest import type_contracts as contracts`;
+the canonical user-facing import style remains top-level.
 
 ## Checker view and assertion declaration validation
 
-Ordinary consumers see `test_typing` as `typing.no_type_check`. A selected static
+Ordinary consumers see `test_typing` as `typing.no_type_check` through both
+package and implementation-module stubs. The temporary view is derived from those
+same stubs, replacing only the decorator and adding the private marker probe.
+Installed wheel/sdist acceptance proves ordinary checks skip positive-only errors
+while Snektest still detects them through direct module imports. A selected static
 case uses a temporary partial stub to restore an identity decorator while ty
 analyzes unchanged original source. Source fingerprints, code name/first line,
 and body-only Unicode coordinates preserve declaration and diagnostic identity.

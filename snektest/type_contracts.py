@@ -307,6 +307,12 @@ def _local_marker_imports(node: ast.AST) -> dict[str, object]:
                     and child.module in ("snektest", "snektest.type_contracts")
                     else None
                 )
+                if (
+                    child.level == 0
+                    and child.module == "snektest"
+                    and alias.name == "type_contracts"
+                ):
+                    binding = sys.modules["snektest.type_contracts"]
                 imports.setdefault(alias.asname or alias.name, []).append(binding)
         elif isinstance(child, ast.Import):
             for alias in child.names:
@@ -542,14 +548,19 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
             "from snektest.type_contracts import test_typing as test_typing\n",
         )
         (overlay / "__init__.pyi").write_text(stub, encoding="utf-8")
+        implementation_stub = (_PACKAGE / "type_contracts.pyi").read_text(
+            encoding="utf-8"
+        )
+        implementation_stub = implementation_stub.replace(
+            "test_typing = _no_type_check\n",
+            "from collections.abc import Callable\nfrom warnings import deprecated\n"
+            "def test_typing[F: Callable[..., object]](function: F) -> F: ...\n",
+        ).replace(
+            "def assert_type_error(",
+            f"@deprecated({_MARKER_NOTE!r})\ndef assert_type_error(",
+        )
         (overlay / "type_contracts.pyi").write_text(
-            "from collections.abc import Callable\n"
-            "from contextlib import AbstractContextManager\n"
-            "from warnings import deprecated\n"
-            "def test_typing[F: Callable[..., object]](function: F) -> F: ...\n"
-            f"@deprecated({_MARKER_NOTE!r})\n"
-            "def assert_type_error(rule: str, /) -> AbstractContextManager[None]: ...\n",
-            encoding="utf-8",
+            implementation_stub, encoding="utf-8"
         )
         config = _configuration.get()
         if config is None:

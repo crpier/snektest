@@ -1093,6 +1093,14 @@ def test_config_edits_invalidate_same_run_report_reuse() -> None:
         Param(
             ("import snektest.type_contracts", "snektest.type_contracts"), name="dotted"
         ),
+        Param(
+            ("from snektest import type_contracts as contracts", "contracts"),
+            name="from-aliased",
+        ),
+        Param(
+            ("from snektest import type_contracts", "type_contracts"),
+            name="from-module",
+        ),
     ],
     mark="slow",
 )
@@ -1122,3 +1130,20 @@ def test_qualified_implementation_module_imports_declare_contracts(
     result = run_test_subprocess(path, timeout=30)
     assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
     assert_eq(result["passed"], 1)
+    normal = subprocess.run(
+        [sys.executable, "-m", "ty", "check", "--error", "all", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert_eq(normal.returncode, 0, msg=normal.stdout + normal.stderr)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "assert_type(takes_int(symbolic), int)",
+            "assert_type(takes_int(symbolic), str)",
+        ),
+        encoding="utf-8",
+    )
+    broken = run_test_subprocess(path, timeout=30)
+    assert_eq((broken["errors"], broken["failed"], broken["passed"]), (0, 1, 0))

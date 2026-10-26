@@ -274,8 +274,8 @@ the owning test or fixture fails. Errors raised while force-closing abandoned ta
 
 `type_contracts.py` owns bare `@test_typing` and `assert_type_error(rule)`.
 Bodies are statically analyzed, never executed; function parameters are symbolic
-inputs. The top-level stub exposes the decorator as `typing.no_type_check` for
-ordinary checks. Static runs replace only that declaration through a temporary
+inputs. Both top-level and implementation-module stubs expose the decorator as
+`typing.no_type_check` for ordinary checks, including direct submodule imports. Static runs replace only that declaration through a temporary
 partial stub and analyze original source with the optional pinned ty binary.
 Preserve original imports/locations, exact per-block diagnostic cardinality,
 innermost ownership, selected-function isolation, and shared positive controls.

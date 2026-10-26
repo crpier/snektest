@@ -4,7 +4,22 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
-- Begin Python-native static typing contracts with bare `@test_typing`, native `typing.assert_type`, and `with assert_type_error("rule")` blocks. Analyze original sync/async source without executing bodies, retain normal selectors and results, and provide the optional pinned `snektest[typing]` extra. Harden body-only diagnostic attribution, source identity/edit detection, lexical marker scopes, and original-location failure messages. Validate installed optional-extra boundaries, cancellation during native startup, oversized-report cleanup, fail-fast/JUnit results, and replacement workers. Reject known copied/re-exported/rebound marker escapes and opaque stacked decorators. Reuse one bounded file report per run/worker and add explicit native `--typing-config FILE` / programmatic configuration with assertion/environment invariants. Drain report pipes after cancellation/output-limit failures; real Linux process/descriptor tests cover active timeout, cancellation, termination, and backpressure. Respect native environment.python / extra-paths rather than overriding explicit environment selection, and verify malformed native transport plus real non-executable startup failures without fake checkers. Isolate selected environments from host-only packages/versions by staging just the framework package, and recognize direct qualified implementation-module imports. Broader acceptance and review remain in progress. (#96)
+- Begin optional Python-native typing contracts with bare `@test_typing`, native
+  `typing.assert_type`, and exact `assert_type_error("rule")` blocks. Analyze
+  original sync/async source without executing bodies; preserve selectors and
+  normalized results. Both package/module stubs skip bodies during ordinary ty
+  checks, so run Snektest to validate contracts. (#96)
+- Reuse one bounded file report per run/worker and accept explicit native
+  `--typing-config FILE` / programmatic configuration, including Python environments
+  and extra import roots. Isolate target dependencies from host-only packages and
+  versions; preserve source locations, lexical assertion identity, and exact
+  diagnostic ownership. Invalid declarations, source edits, missing dependencies,
+  and checker failures cannot certify expected rejections. (#96)
+- Bound native typing reports and drain/reap checker processes on timeout,
+  cancellation, and output-limit failures. Add real process/pipe, malformed-report,
+  installed-extra, environment-isolation, and qualified-import acceptance without
+  fake checkers. Hard collection/synchronous deadlines still require an external
+  command timeout; OS-specific fault evidence remains qualified. (#96)
 
 - Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
 

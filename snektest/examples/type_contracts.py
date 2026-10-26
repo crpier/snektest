@@ -1,5 +1,6 @@
 """Python-native contracts; install snektest[typing] before running.
 
+Ordinary checks skip contract bodies through both package and module stubs.
 Use only a single bare decorator and direct imported markers. Same-file tests
 reuse a bounded run-local report. --typing-config FILE selects native ty rules;
 assertion/environment checks remain errors. Native environment.python and

@@ -78,9 +78,33 @@ def test_base_install_collects_without_ty_and_the_typing_extra_enables_execution
     )
     assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
     assert_eq(json.loads(executed.stdout)["passed"], 2)
+    _check_ordinary_implementation_module_view(python, directory)
     _check_selected_environment_isolation(python, directory)
     if os.name != "nt":
         _check_native_startup_failure(python, directory)
+
+
+def _check_ordinary_implementation_module_view(python: Path, directory: Path) -> None:
+    source = directory / "test_implementation_view.py"
+    source.write_text(
+        "from typing import assert_type\n"
+        "import snektest.type_contracts as contracts\n"
+        "@contracts.test_typing\ndef consumer() -> None:\n"
+        "    assert_type(42, str)\n",
+        encoding="utf-8",
+    )
+    normal = _run(
+        [str(python), "-I", "-m", "ty", "check", "--error", "all", str(source)],
+        cwd=directory,
+    )
+    assert_eq(normal.returncode, 0, msg=normal.stdout + normal.stderr)
+    checked = _run(
+        [str(python), "-I", "-m", "snektest", "--json-output", str(source)],
+        cwd=directory,
+    )
+    assert_eq(checked.returncode, 1, msg=checked.stdout + checked.stderr)
+    result = json.loads(checked.stdout)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (0, 1, 0))
 
 
 def _site_packages(python: Path, directory: Path) -> Path:
