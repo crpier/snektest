@@ -1,37 +1,49 @@
-"""AnyIO operations on Snektest's existing asyncio runner.
+"""AnyIO operations and fixture-owned services on the asyncio runner.
 
-Install snektest[anyio]. Await operations directly, without anyio.run() in tests.
-Task-local cancel scopes/task groups belong wholly inside one task: never keep
-one open across fixture yield, since setup and teardown may use different tasks.
-Idle registered pool workers are safe; no thread-name exemption or prewarming
-is needed. Blocking threads cannot be stopped, so retain an outer timeout.
-There is no Trio backend or runtime selector in this integration slice.
+Install snektest[anyio]; await APIs directly without nesting anyio.run().
+Managed async fixtures keep setup/yield/teardown in one task. Task-local scopes
+may span yield, but govern fixture work rather than the test; yield resources
+explicitly instead of relying on fixture ContextVar changes reaching the test.
+Stop background services in finally. Threads still require an outer timeout.
+There is no Trio backend or runtime selector yet.
 """
 
 lazy from collections.abc import AsyncGenerator
 
 lazy import anyio
 lazy import anyio.lowlevel
+lazy from anyio.abc import ObjectReceiveStream, ObjectSendStream
 lazy from anyio.to_thread import run_sync
 
 lazy from snektest import assert_eq, fixture, load_fixture, test
 
 
 @fixture
-async def configuration() -> AsyncGenerator[str]:
-    """Await operations independently in setup and teardown."""
-    value = await run_sync(lambda: "ready")
-    try:
-        yield value
-    finally:
-        # A scope opened here must also close here, not in the setup phase.
-        await anyio.lowlevel.checkpoint()
+async def uppercase_service() -> AsyncGenerator[
+    tuple[ObjectSendStream[str], ObjectReceiveStream[str]]
+]:
+    """Keep a request/reply service alive while the test uses its streams."""
+    requests, request_receiver = anyio.create_memory_object_stream[str]()
+    replies, reply_receiver = anyio.create_memory_object_stream[str]()
+
+    async def serve() -> None:
+        async with request_receiver, replies:
+            async for value in request_receiver:
+                await replies.send(await run_sync(str.upper, value))
+
+    async with requests, reply_receiver, anyio.create_task_group() as group:
+        group.start_soon(serve)
+        try:
+            yield requests, reply_receiver
+        finally:
+            group.cancel_scope.cancel()
 
 
 @test(mark="medium")
 async def test_anyio_fixture_operations() -> None:
-    config = await load_fixture(configuration())
-    assert_eq(config, "ready")
+    requests, replies = await load_fixture(uppercase_service())
+    await requests.send("ready")
+    assert_eq(await replies.receive(), "READY")
 
 
 @test(mark="fast")
@@ -42,7 +54,6 @@ async def test_anyio_task_group() -> None:
         await anyio.lowlevel.checkpoint()
         values.append(value)
 
-    # Both scopes close in the test's own task before its body returns.
     with anyio.fail_after(5):
         async with anyio.create_task_group() as group:
             group.start_soon(collect, 1)

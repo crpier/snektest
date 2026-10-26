@@ -9,10 +9,47 @@ lazy import sys
 lazy import warnings
 lazy from collections.abc import Callable, Generator
 lazy from contextlib import contextmanager
+lazy from contextvars import ContextVar
 lazy from dataclasses import dataclass
 lazy from io import StringIO
 lazy from tempfile import TemporaryFile
 lazy from typing import Any, BinaryIO, Self, TextIO, cast
+
+_warning_sink: ContextVar[list[warnings.WarningMessage] | None] = ContextVar(
+    "snektest_warning_sink", default=None
+)
+
+
+@contextmanager
+def fixture_warning_capture() -> Generator[list[warnings.WarningMessage]]:
+    """Keep task-local fixture warnings until their current phase can drain them.
+
+    With context-aware warnings disabled, stdlib capture is process-global and
+    already follows the active phase; a lifetime-spanning catcher would corrupt
+    its nesting. Uncaptured runs likewise keep normal warning delivery.
+    """
+    if not sys.flags.context_aware_warnings or _warning_sink.get() is None:
+        yield []
+        return
+    with warnings.catch_warnings(record=True) as records:
+        token = _warning_sink.set(records)
+        try:
+            yield records
+        finally:
+            _warning_sink.reset(token)
+
+
+def relay_fixture_warnings(records: list[warnings.WarningMessage]) -> None:
+    """Deliver a fixture's buffered warnings to the caller's active phase."""
+    sink = _warning_sink.get()
+    if sink is records:
+        return
+    if sink is not None:
+        sink.extend(records)
+    else:
+        for text in _format_warnings(records):
+            print(text, file=sys.stderr)
+    records.clear()
 
 
 class StdinProxy:
@@ -316,9 +353,11 @@ def capture_output(
     try:
         with warnings.catch_warnings(record=True) as warning_list:
             warnings.simplefilter("always")
+            token = _warning_sink.set(warning_list)
             try:
                 yield output_buffer, captured_warnings
             finally:
+                _warning_sink.reset(token)
                 captured_warnings.extend(_format_warnings(warning_list))
     finally:
         _restore_system_state(original_sys)

@@ -153,6 +153,19 @@ directly off the decorator — no frame/annotation inspection. The handle is als
 a sync or async context manager, so fixtures double as setup helpers in
 standalone scripts.
 
+Managed async generators use `AsyncFixtureDriver` (`async_fixtures.py`): one
+persistent fixture-owned task advances setup and teardown, with a shared setup
+result and an explicit teardown signal. This preserves task-local scopes and
+ContextVar tokens across yield in every scope. Context changes stay in that
+task, not the loading test; yield resources explicitly. Sync fixture loading
+remains synchronous, so runtime scopes spanning yield require async fixtures.
+Failed setup attempts retain ownership and dependency ordering; validation after
+a run descriptor's yield still receives same-task teardown. `start_test()` opens
+the function lifetime; function loads stay rejected after its teardown starts,
+including during test-task cancellation. The fixture host awaits command reads
+off-loop within one continuously running loop, so hosted async services remain
+live between publication requests.
+
 All fixture state and teardown is owned by a `FixtureRegistry` (`fixtures.py`),
 created fresh per run and reached ambiently through a `ContextVar` (set by
 `run_tests` via `use_registry`). `load_fixture` is a free function that reads the
@@ -340,9 +353,13 @@ threaded test executor.
 ### AnyIO and backend policy
 
 When changing AnyIO thread recognition, fixture integration, or async runtime
-selection, read `docs/async-backends.md`. This first #100 slice supports awaited
-AnyIO operations on asyncio, not Trio or a backend selector. Keep task-local
-AnyIO scopes inside a single test/setup/teardown task, not across fixture yield.
+selection, read `docs/async-backends.md`. The #100 integration supports AnyIO on
+asyncio, not Trio or a backend selector. Async fixture tasks may keep scopes
+across yield; fixture-local context/cancellation is not the test's context.
+Warnings are buffered by their fixture task and relayed at setup/teardown;
+later fixture-background warnings belong to its teardown. Run-host setup
+warnings travel with existing setup output. Respect capture opt-outs and avoid
+lifetime warning catchers when context-aware warnings are explicitly disabled.
 `thread_observation.py` isolates the private AnyIO RunVar identity lookup, reads
 only an already-loaded backend, and fails closed on unknown registry shapes.
 Preserve raw-thread/busy-new-worker leak checks; do not prewarm, daemonize, rename,

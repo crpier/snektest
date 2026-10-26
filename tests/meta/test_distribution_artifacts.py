@@ -264,13 +264,26 @@ def _assert_optional_anyio(
     assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
     consumer = cwd / f"test_{python.parent.parent.name.replace('-', '_')}_anyio.py"
     consumer.write_text(
+        "import asyncio\n"
+        "import anyio\n"
         "import snektest\n"
+        "from collections.abc import AsyncGenerator\n"
         "from anyio.to_thread import run_sync\n"
-        "from snektest import assert_eq, assert_in, test\n"
+        "from snektest import assert_eq, assert_in, assert_is, fixture, load_fixture, test\n"
         "assert_in('site-packages', snektest.__file__ or '')\n"
+        "@fixture\n"
+        "async def resource() -> AsyncGenerator[int]:\n"
+        "    owner = asyncio.current_task()\n"
+        "    async with anyio.create_task_group() as group:\n"
+        "        group.start_soon(anyio.sleep_forever)\n"
+        "        try:\n"
+        "            yield await run_sync(lambda: 42)\n"
+        "        finally:\n"
+        "            assert_is(asyncio.current_task(), owner)\n"
+        "            group.cancel_scope.cancel()\n"
         "@test(mark='medium')\n"
         "async def offload() -> None:\n"
-        "    assert_eq(await run_sync(lambda: 42), 42)\n"
+        "    assert_eq(await load_fixture(resource()), 42)\n"
     )
     for mode in ("normal", "all"):
         for arguments in ([], ["--workers", "1"]):

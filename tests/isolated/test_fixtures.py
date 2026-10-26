@@ -276,9 +276,10 @@ async def test_async_session_fixture_is_cached_within_a_run() -> None:
     async def thing() -> AsyncGenerator[object]:
         yield object()
 
-    with use_registry(FixtureRegistry()):
+    with use_registry(FixtureRegistry()) as registry:
         first = await load_fixture(thing())
         second = await load_fixture(thing())
+        _ = await registry.teardown_session_fixtures()
 
     assert_is(first, second)
 

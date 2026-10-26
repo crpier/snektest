@@ -155,8 +155,9 @@ async def execute_test(
     ] = sys.exc_info,
 ) -> TestResult:
     """Execute one test while observing failures outside its call stack."""
-    directories = current_registry().temporary_directories
-    directories.start_test()
+    registry = current_registry()
+    registry.start_test()
+    directories = registry.temporary_directories
     test_result: TestResult | None = None
     try:
         with observe_background_failures() as background_failures:

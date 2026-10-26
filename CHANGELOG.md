@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Give every managed async fixture one owning task for setup, yield, and teardown, allowing AnyIO scopes and async services to span yield in all fixture scopes. Keep the run-fixture host loop live between requests, retain warning diagnostics and unfinished-setup cleanup, report malformed yields without losing structured output, and reject function loads after teardown starts. Fixture ContextVar changes are now isolated from tests; pass context/resources through yielded values. Sync loading is unchanged. This is the next #100 prerequisite, not backend selection or Trio support.
+
 - Recognize idle AnyIO asyncio pool workers by current-loop registration and identity, without importing AnyIO, prewarming/shutting down pools, or exempting thread names or newly created busy workers. Add the optional `snektest[anyio]` extra, executable examples, and explicit task-local fixture-scope/backend limitations. This is the first #100 slice: backend selection and Trio remain unimplemented.
 
 - Add typed `temporary_directory(base=..., retention=...)` with inferred test/session ownership, default cleanup even on failure, explicit on-failure/always retention, off-loop recursive removal, ownership checks, and path-only console/programmatic/JSON reporting. Keep resource teardown before deletion and cleanup errors alongside original failures. Session policy is process-local; no global TMPDIR mutation, process management, historical pruning or hard-kill cleanup guarantees. (#97)
