@@ -2,6 +2,13 @@
 
 Requires Python 3.15 or newer; Python 3.14 is no longer supported.
 
+The standalone CLI enables context-aware warnings before collection and workers.
+Opt out with `python -X context_aware_warnings=0 -m snektest test_basic.py`, or
+PYTHON_CONTEXT_AWARE_WARNINGS=0. Explicit -X wins over the environment; -E/-I
+ignore the environment. Default startup may relaunch the same interpreter/venv
+and repeat site hooks. Already-enabled/explicitly opted-out startup is unchanged;
+library imports and programmatic runners never restart or change host policy.
+
 Pass observed values first and expected values second in comparisons. Bind the
 return values of narrowing helpers; use `_ =` when only checking a value's type.
 For exception text, `match=` is regex search, capture plus assert_eq is exact,

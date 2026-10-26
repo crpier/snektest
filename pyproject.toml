@@ -44,7 +44,7 @@ dev = [
 ]
 
 [project.scripts]
-snektest = "snektest.cli:main"
+snektest = "snektest._bootstrap:main"
 
 [project.urls]
 Changelog = "https://github.com/crpier/snektest/blob/main/CHANGELOG.md"

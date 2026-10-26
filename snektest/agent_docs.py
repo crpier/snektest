@@ -23,6 +23,23 @@ Engine registration uses a scoped filter that preserves unrelated import policy
 and restores the caller's filter on exit; the interpreter mode is unchanged.
 Unrelated third-party lazy-import compatibility remains application-owned.
 
+## CLI startup
+
+The executable, `python -m snektest`, and `python -m snektest.cli` enable
+context-aware warnings before collection and worker startup. No environment
+variable is needed for ordinary runs. Explicit Python startup choices win:
+`python -X context_aware_warnings=0 -m snektest ...` or
+`PYTHON_CONTEXT_AWARE_WARNINGS=0` opts out; `-X` beats the environment, while
+`-E`/`-I` ignore the environment and still apply the default. Already-enabled
+interpreters and explicit opt-outs do not restart.
+
+Otherwise the CLI relaunches the same interpreter/venv with its options,
+arguments, cwd and streams preserved. POSIX replaces the process without resetting
+inherited ignored signals; Windows waits for the child and propagates its exit
+status. Interpreter/site startup hooks may repeat, before collection. Importing
+Snektest, programmatic runners, and direct `snektest.cli.main` calls keep the host
+policy unchanged. This is startup policy, not hard interruption or cleanup.
+
 ## Quick start
 
 Create a `test_*.py` file and decorate test functions with `@test(mark=...)`. Mark every test with the resources it may use:
