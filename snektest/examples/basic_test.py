@@ -2,6 +2,12 @@
 
 Requires Python 3.15 or newer; Python 3.14 is no longer supported.
 
+Pass observed values first and expected values second in comparisons. Bind the
+return values of narrowing helpers; use `_ =` when only checking a value's type.
+For exception text, `match=` is regex search, capture plus assert_eq is exact,
+and `msg=` is only the failure diagnostic. Inspect original causes explicitly.
+Print the usage guide with `snektest --agent-docs`.
+
 Directory discovery applies Git ignore rules to symlink names, not targets.
 Explicit file selection bypasses ignores; unexpected Git filtering failures in a
 worktree are collection errors.
@@ -17,6 +23,8 @@ lazy from snektest import (
     SnektestError,
     assert_eq,
     assert_in,
+    assert_is_not_none,
+    assert_isinstance,
     assert_raises,
     fail,
     test,
@@ -66,3 +74,29 @@ def test_structured_comparison_diagnostic() -> None:
     with assert_raises(AssertionFailure) as mismatch:
         assert_eq({"types": ["int", "str"]}, {"types": ["int", "bytes"]})
     assert_in("At $['types'][1]: 'str' != 'bytes'", str(mismatch.exception))
+
+
+def _parse_port(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        message = "invalid port"
+        raise RuntimeError(message) from error
+
+
+@test(mark="fast")
+def test_exception_cause() -> None:
+    with assert_raises(RuntimeError, msg="port conversion should fail") as caught:
+        _ = _parse_port("not-a-number")
+
+    assert_eq(str(caught.exception), "invalid port")
+    cause = assert_isinstance(caught.exception.__cause__, ValueError)
+    assert_in("not-a-number", str(cause))
+
+
+@test(mark="fast")
+def test_bound_narrowing_helpers() -> None:
+    settings: dict[str, object] = {"suite": "SNEKTEST"}
+    configured = assert_is_not_none(settings.get("suite"))
+    name = assert_isinstance(configured, str)
+    assert_eq(name.lower(), "snektest")

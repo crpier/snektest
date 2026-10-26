@@ -562,8 +562,23 @@ def test_needs_a_timing_budget() -> None:
 
 ### Parameterized Tests
 
-Run the same test with different inputs. Every parameter list must be non-empty.
-Case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
+Use the canonical spelling `Param(value=..., name=...)`: each `Param` contains
+**one value**, passed to one test argument. Use a tuple for related inputs and an
+expected output; use separate parameter lists for independent arguments and every
+combination of their values.
+
+Names are explicit, stable case IDs used in rerun selectors, not inferred from
+value reprs (which may be unstable or sensitive). Common construction mistakes:
+
+| Attempt | Correction |
+| --- | --- |
+| `Param(value="sqlite")` or `Param("sqlite")` | Supply the required name: `Param(value="sqlite", name="sqlite")`. |
+| `Param(1, 2, name="pair")` | A `Param` holds one value: `Param(value=(1, 2), name="pair")`, consumed by one tuple-annotated argument. |
+
+This is usage guidance, not a constructor change: positional construction with
+both required fields remains supported.
+
+Every parameter list must be non-empty. Within a list, case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
 rendered case filters remain unambiguous. Multiple lists form a Cartesian
 product. One decorated test may expand to at most 10,000 cases; larger products
 raise `BadRequestError` during collection. Split exhaustive matrices or use
@@ -585,15 +600,69 @@ def test_string_length(value: str) -> None:
     assert_eq(len(value), 5)
 
 
-# Test with multiple parameter combinations (cartesian product)
+@test(
+    [
+        Param(value=(2, 3, 5), name="small"),
+        Param(value=(100, 200, 300), name="large"),
+    ],
+    mark="fast",
+)
+def test_tuple_value(case: tuple[int, int, int]) -> None:
+    """One Param passes one tuple argument, not three separate arguments."""
+    left, right, expected = case
+    assert_eq(left + right, expected)
+
+
+# Two lists produce four cases, not two paired cases.
 @test(
     [Param(value="hello", name="hello"), Param(value="hi", name="hi")],
     [Param(value=" world", name="world"), Param(value=" there", name="there")],
     mark="fast",
 )
-def test_concatenation(greeting: str, target: str) -> None:
+def test_cartesian_product(greeting: str, target: str) -> None:
     result = greeting + target
     assert_eq(result[0], greeting[0])
+```
+
+Save the block as `test_parametrize.py`. Its tuple test has two cases, each
+receiving one tuple; its two-axis test has four cases, each receiving two strings.
+Quote selectors containing brackets or spaces when using a shell:
+
+```bash
+snektest 'test_parametrize.py::test_tuple_value[small]'
+snektest 'test_parametrize.py::test_cartesian_product[hello, world]'
+```
+
+Use `snektest --collect-only test_parametrize.py` to list selectors, and
+`snektest --example parametrize` to print a complete copyable example. The embedded
+`snektest --agent-docs` guide covers the same conventions.
+
+#### Preserving literal parameter types
+
+An unconstrained list can infer `Param[str]` even when the test argument expects
+`Literal["sqlite", "mariadb"]`. A function accepting that literal union cannot
+accept every `str`; annotate the axis as `list[Param[Backend]]` so its values
+retain the intended type. Alternatively construct each value explicitly as
+`Param[Backend](value="sqlite", name="sqlite")`. Neither approach needs `Any`,
+casts, nor type-checker ignores:
+
+```python
+from typing import Literal
+
+from snektest import Param, assert_in, test
+
+
+type Backend = Literal["sqlite", "mariadb"]
+
+BACKENDS: list[Param[Backend]] = [
+    Param(value="sqlite", name="sqlite"),
+    Param(value="mariadb", name="mariadb"),
+]
+
+
+@test(BACKENDS, mark="fast")
+def test_literal_backend(backend: Backend) -> None:
+    assert_in(backend, ("sqlite", "mariadb"))
 ```
 
 ### Static Type Checking
@@ -699,13 +768,19 @@ snektest -s --json-output
 # Write a JUnit XML report while retaining normal console output
 snektest --junit-output reports/snektest.xml
 
-# Print AI-agent usage guide
+# Before authoring tests, read the guide and copy the relevant example
 snektest --agent-docs
 python -m snektest --agent-docs
 
 # List or print bundled examples
 snektest --examples
 snektest --example async
+snektest --example parametrize > test_parametrize.py
+snektest --example basic > test_basic.py
+
+# Inspect exact case names before running one quoted selector
+snektest test_parametrize.py --collect-only
+snektest 'test_parametrize.py::test_tuple_value[small]'
 
 # Drop into post-mortem debugging on first failure
 snektest --pdb
@@ -1414,6 +1489,24 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 - `assert_not_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is false
 - `assert_len(obj, expected_length)` — assert that `len(obj) == expected_length`
 
+Bind narrowing helpers' return values when using the checked value later. This
+both asserts and gives the checker a non-`None` or instance-specific value;
+calling a helper without binding its result is not the recommended narrowing
+pattern. Discard with `_ = assert_isinstance(value, SomeType)` for a pure check.
+Keep the observed/computed value first in subsequent comparisons:
+
+```python
+from snektest import assert_eq, assert_is_not_none, assert_isinstance, test
+
+
+@test(mark="fast")
+def test_bound_narrowing_helpers() -> None:
+    settings: dict[str, object] = {"suite": "SNEKTEST"}
+    configured = assert_is_not_none(settings.get("suite"))
+    name = assert_isinstance(configured, str)
+    assert_eq(name.lower(), "snektest")
+```
+
 ### Exception Assertions
 
 **`assert_raises(*expected_exceptions, msg=None, match=None)`** - Assert that code raises an expected exception, optionally matching its message
@@ -1438,7 +1531,7 @@ exception after exit:
 ```python
 import re
 
-from snektest import assert_eq, assert_raises, test
+from snektest import assert_eq, assert_in, assert_isinstance, assert_raises, test
 
 
 @test(mark="fast")
@@ -1467,7 +1560,31 @@ def test_compiled_message_pattern() -> None:
     pattern = re.compile(r"^invalid field: name$", re.IGNORECASE)
     with assert_raises(ValueError, match=pattern, msg="expected a field error"):
         raise ValueError("INVALID FIELD: NAME")
+
+
+def _parse_port(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        message = "invalid port"
+        raise RuntimeError(message) from error
+
+
+@test(mark="fast")
+def test_exception_cause() -> None:
+    with assert_raises(RuntimeError, msg="port conversion should fail") as caught:
+        _ = _parse_port("not-a-number")
+
+    assert_eq(str(caught.exception), "invalid port")
+    cause = assert_isinstance(caught.exception.__cause__, ValueError)
+    assert_in("not-a-number", str(cause))
 ```
+
+The cause is a separate exception object: message matching does not search it.
+Inspect `.exception.__cause__` explicitly, binding the value returned by
+`assert_isinstance` before using it. In the example, `msg="port conversion should
+fail"` is only a diagnostic override, not a requirement on the exception text.
+Print these patterns with `snektest --example basic`.
 
 ### Memory Assertions
 

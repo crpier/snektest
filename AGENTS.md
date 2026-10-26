@@ -4,6 +4,15 @@
 
 snektest is a Python testing framework with first class support for async and static typing.
 
+## Authoring tests
+
+Before adding tests, read `uv run snektest --agent-docs` and print the relevant
+bundled example (`uv run snektest --example parametrize` or `--example basic`).
+Copy canonical shapes rather than assuming pytest-compatible constructor or
+assertion arguments. Validate new parameter selectors with `--collect-only` and
+run the chosen case; documentation snippets must also pass the existing strict
+ty/execution checks in `tests/meta/test_doc_blocks.py`.
+
 ## Development Commands
 
 ### Complete release gate
@@ -340,6 +349,23 @@ Interactions:
 
 ### Parameterization
 
+Use `Param(value=..., name=...)`: one named value per argument. A tuple value
+carries related inputs/expected output to one tuple-annotated argument; separate
+lists supply separate arguments and their Cartesian product, never pairwise zip.
+Missing names (`Param(value="sqlite")` / `Param("sqlite")`) require an explicit
+stable name; multiple values (`Param(1, 2, name="pair")`) require a tuple value.
+Positional construction with both required fields remains supported. Never infer
+IDs from value reprs. Print `--example parametrize`, save it as
+`test_parametrize.py`, and use `--collect-only` to obtain exact rerun selectors;
+quote bracketed/multi-axis selectors in shells. `--agent-docs` is the embedded
+usage guide, not a separate workflow to maintain.
+
+For a `Literal`-annotated argument, preserve the union in the axis type, e.g.
+`type Backend = Literal["sqlite", "mariadb"]` and
+`BACKENDS: list[Param[Backend]] = [...]`, or use `Param[Backend](...)` explicitly.
+An unconstrained axis may widen to `Param[str]`, which cannot safely feed that
+narrower argument; casts, `Any`, and checker ignores are not the remedy.
+
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
 each non-empty list built from `Param(value=..., name=...)`. Static checking
 preserves parameter types through two lists; three or more use the variadic
@@ -527,7 +553,11 @@ and compiled `re.Pattern[str]` values. `match` searches `str(exception)` only af
 type validation, preserves compiled flags, and accepts an empty pattern for any
 renderable message. `msg` overrides assertion failure text, not matching behavior.
 Capture `.exception` for the original typed object and use `assert_eq` on its text
-for exact equality. Mismatches or broken message formatters raise
+for exact equality. Match does not inspect notes or causes: bind
+`cause = assert_isinstance(caught.exception.__cause__, ExpectedError)` and assert
+on that original cause explicitly. A different `msg=` does not prevent a passing
+match or replace assertions on the raised text. Print `--example basic` for exact
+text, regex, and cause examples. Mismatches or broken message formatters raise
 `AssertionFailure` with the original exception as cause; fallback text is never
 matched. Invalid regexes and bytes patterns raise `BadRequestError` at context
 construction, before the body. The top-level stub re-exports the implementation's
