@@ -289,9 +289,19 @@ edits are errors, not atomic protection against concurrent filesystem writers.
 Broken imports cannot certify a rejection. Keep checker imports/invocation out of
 collection and runtime-only runs. Each checker subprocess has bounded output and
 must be killed/reaped on cancellation; this does not bound local collection.
-Current work checks one function per invocation; batching and configurable checker
-environments remain follow-ups within #96. Exercise the public marker/decorator,
-real local/worker runner, and installed artifact seams when changing this module.
+A private session fixture retains at most one validated file report per execution
+process/run. Key reuse by source fingerprint and explicit config content; later
+runs/replacement workers start fresh. `--typing-config FILE` and programmatic
+`typing_config=Path(...)` accept native ty config, not persistent Snektest config.
+Current interpreter and the deprecated/type-assertion-failure/unresolved-import
+error invariants remain enforced. Preserve run-local context through worker
+replacement. Require a single bare decorator; other contexts do not declare
+expected errors. The temporary stub uses an internal deprecated reference probe
+to reject known copied/re-exported marker escapes without executing Python.
+Drain cancelled report streams before returning, not just the process exit:
+paused transports can retain pipe descriptors. For checker changes, read
+`docs/type-contracts.md` and exercise the public marker/decorator, real runner,
+and independently installed artifact seams.
 
 ### Explicit log capture
 

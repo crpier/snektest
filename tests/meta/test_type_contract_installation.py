@@ -108,6 +108,14 @@ def _check_base_commands(python: Path, directory: Path) -> None:
     normal = _run([*command, "-k", "normal_case"], cwd=directory)
     assert_eq(normal.returncode, 0, msg=normal.stdout + normal.stderr)
     assert_eq(json.loads(normal.stdout)["passed"], 1)
+    (directory / "invalid-ty.toml").write_text("[rules", encoding="utf-8")
+    for selection in (["--collect-only"], ["-k", "normal_case"]):
+        unused_config = _run(
+            [*command, "--typing-config", "invalid-ty.toml", *selection], cwd=directory
+        )
+        assert_eq(
+            unused_config.returncode, 0, msg=unused_config.stdout + unused_config.stderr
+        )
     missing = _run(command, cwd=directory)
     assert_eq(missing.returncode, 1, msg=missing.stdout + missing.stderr)
     result = json.loads(missing.stdout)

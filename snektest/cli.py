@@ -106,6 +106,7 @@ class CliOptions:
     keyword: str | None = None
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
+    typing_config: str | None = None
     update_benchmark_baseline: str | None = None
     workers: WorkerCount | None = None
 
@@ -160,6 +161,8 @@ Options:
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   --no-mark         Run every marker, overriding a project default
   -n, --workers N   Run in N worker processes, or use auto
+  --typing-config FILE
+                    Use an explicit native ty configuration for static contracts
   --timeout SECONDS Set a finite positive async-test timeout (default: 60)
   --no-timeout      Disable async-test body timeout; cleanup remains bounded
   -x, --fail-fast   Stop after the first actionable failure
@@ -372,6 +375,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         else _DEFAULT_TIMEOUT_SECONDS
     )
     timeout_option_seen = False
+    typing_config: str | None = None
     update_benchmark_baseline: str | None = None
     workers: WorkerCount | None = None
     workers_option_seen = False
@@ -436,6 +440,13 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 benchmark_baseline = baseline_path
             else:
                 update_benchmark_baseline = baseline_path
+        elif arg == "--typing-config":
+            if typing_config is not None:
+                return ParseError("Only one --typing-config value is supported")
+            consumed = _consume_flag_value(argv, index, arg)
+            if isinstance(consumed, ParseError):
+                return consumed
+            typing_config, index = consumed
         elif arg == "--pdb":
             pdb_on_failure = True
         elif arg == "--durations":
@@ -509,6 +520,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         or keyword is not None
         or junit_option_seen
         or update_benchmark_baseline is not None
+        or typing_config is not None
     ):
         return ParseError(
             "Cannot combine informational commands with test filters or baseline options"
@@ -540,6 +552,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         keyword=keyword,
         pdb_on_failure=pdb_on_failure,
         timeout=timeout,
+        typing_config=typing_config,
         update_benchmark_baseline=update_benchmark_baseline,
         workers=workers,
     )
@@ -557,6 +570,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
+    typing_config: Path | None = None,
 ) -> RunResult:
     collection_diagnostics = CollectionDiagnostics()
     try:
@@ -583,6 +597,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
         timeout=timeout,
         reporter=reporter,
         benchmark_baseline=benchmark_baseline,
+        typing_config=typing_config,
     )
 
 
@@ -602,6 +617,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
     timeout: float | None = None,  # noqa: ASYNC109
     reporter: RunReporter | None = None,
     benchmark_baseline: BenchmarkBaseline | None = None,
+    typing_config: Path | None = None,
     workers: WorkerCount | None = None,
 ) -> RunResult:
     """Run tests and return structured results instead of printing.
@@ -629,6 +645,8 @@ async def run_tests_programmatic(  # noqa: PLR0913
         msg = "workers must be a positive integer, 'auto', or None"
         raise BadRequestError(msg)
 
+    if typing_config is not None:
+        typing_config = await asyncio.to_thread(typing_config.resolve)
     selected_reporter = reporter or NullRunReporter()
     if workers is None:
         return await _run_tests_with_collected_plan(
@@ -642,6 +660,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
             timeout=timeout,
             reporter=selected_reporter,
             benchmark_baseline=benchmark_baseline,
+            typing_config=typing_config,
         )
     if pdb_on_failure:
         msg = "Cannot combine pdb_on_failure with workers"
@@ -657,6 +676,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         timeout=timeout,
         workers=workers,
         benchmark_baseline=benchmark_baseline,
+        typing_config=typing_config,
     )
 
 
@@ -827,6 +847,9 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     timeout=options.timeout,
                     reporter=reporter,
                     benchmark_baseline=benchmark_baseline,
+                    typing_config=Path(options.typing_config)
+                    if options.typing_config is not None
+                    else None,
                     workers=options.workers,
                 ),
             )

@@ -5,8 +5,9 @@ lazy import asyncio
 lazy import inspect
 lazy import symtable
 lazy import sys
-lazy from collections.abc import Callable, Iterator
-lazy from contextlib import AbstractContextManager, suppress
+lazy from collections.abc import Callable, Generator, Iterator
+lazy from contextlib import AbstractContextManager, contextmanager, suppress
+lazy from contextvars import ContextVar
 lazy from dataclasses import dataclass
 lazy from functools import wraps
 lazy from hashlib import sha256
@@ -18,6 +19,7 @@ lazy from typing import Any, cast
 
 lazy from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+lazy from snektest.decorators import fixture, load_fixture
 lazy from snektest.models import AssertionFailure, BadRequestError, SnektestError
 lazy from snektest.task_cleanup import cleanup_budget, defer_cancellation
 lazy from snektest.utils import mark_test_function
@@ -26,6 +28,11 @@ _MAX_REPORT_BYTES = 4 * 1024 * 1024
 _READ_BYTES = 65_536
 _REAP_SECONDS = 5.0
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_MARKER_NOTE = "snektest static assertion reference"
+_configuration: ContextVar[Path | None] = ContextVar(
+    "typing_configuration", default=None
+)
+type _Span = tuple[tuple[int, int], tuple[int, int]]
 
 
 class _Position(BaseModel):
@@ -56,6 +63,7 @@ class _ExpectedError:
     line: int
     start: tuple[int, int]
     end: tuple[int, int]
+    reference: _Span
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,65 @@ class _ContractSource:
     other_contracts: list[tuple[int, int]]
     scopes: dict[tuple[str, int], symtable.SymbolTable]
     lines: list[str]
+    imports: list[_Span]
+
+
+@dataclass(frozen=True)
+class _CachedReport:
+    path: Path
+    fingerprint: bytes
+    configuration: tuple[Path, bytes] | None
+    root: Path
+    diagnostics: list[_Diagnostic]
+
+
+@dataclass
+class _ReportCache:
+    report: _CachedReport | None = None
+
+
+@fixture(scope="session")
+def _report_cache() -> Generator[_ReportCache]:
+    # A registry belongs to one run/worker incarnation. Retain at most one file,
+    # not an unbounded map of every report seen by a large suite.
+    yield _ReportCache()
+
+
+async def _cached_diagnostics(
+    source: _ContractSource,
+) -> tuple[Path, list[_Diagnostic]]:
+    cache = load_fixture(_report_cache())
+    configuration = _configuration_identity()
+    report = cache.report
+    if report is None or (report.path, report.fingerprint, report.configuration) != (
+        source.path,
+        source.fingerprint,
+        configuration,
+    ):
+        root, diagnostics = await _diagnostics(source.path)
+        if _configuration_identity() != configuration:
+            msg = "Typing checker configuration changed during analysis"
+            raise SnektestError(msg)
+        report = _CachedReport(
+            source.path, source.fingerprint, configuration, root, diagnostics
+        )
+        cache.report = report
+    return report.root, report.diagnostics
+
+
+@contextmanager
+def typing_configuration(path: Path | None) -> Generator[None]:
+    """Scope one explicit native ty configuration to a run/worker incarnation."""
+    token = _configuration.set(path.resolve() if path is not None else None)
+    try:
+        yield
+    finally:
+        _configuration.reset(token)
+
+
+def _configuration_identity() -> tuple[Path, bytes] | None:
+    path = _configuration.get()
+    return None if path is None else (path, sha256(path.read_bytes()).digest())
 
 
 def assert_type_error(rule: str, /) -> AbstractContextManager[None]:
@@ -164,6 +231,11 @@ def _source(
         for symbol in tables.get_symbols()
         if symbol.is_imported() and not symbol.is_assigned()
     }
+    if len(selected.decorator_list) != 1 or (
+        _reference(selected.decorator_list[0], namespace) is not test_typing
+    ):
+        msg = "A typing contract requires a single bare @test_typing decorator"
+        raise BadRequestError(msg)
     other_contracts = [
         (node.lineno, node.end_lineno or node.lineno)
         for node in module.body
@@ -174,6 +246,16 @@ def _source(
             for decorator in node.decorator_list
         )
     ]
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    imports = [
+        _span(lines, alias)
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom)
+        and node.level == 0
+        and node.module in ("snektest", "snektest.type_contracts")
+        for alias in node.names
+        if alias.name == "assert_type_error"
+    ]
     return _ContractSource(
         namespace,
         fingerprint,
@@ -181,7 +263,8 @@ def _source(
         selected,
         other_contracts,
         scopes,
-        text.replace("\r\n", "\n").replace("\r", "\n").split("\n"),
+        lines,
+        imports,
     )
 
 
@@ -271,6 +354,7 @@ def _expectations(source: _ContractSource) -> list[_ExpectedError]:
     ):
         for item in block.items:
             call = item.context_expr
+            _reject_dynamic_marker(call, bindings)
             if not (
                 isinstance(call, ast.Call)
                 and _reference(call.func, bindings) is assert_type_error
@@ -299,15 +383,49 @@ def _expectations(source: _ContractSource) -> list[_ExpectedError]:
                         block.end_lineno or block.lineno,
                         block.end_col_offset or 0,
                     ),
+                    _span(source.lines, call.func),
                 )
             )
     return expectations
+
+
+def _reject_dynamic_marker(expression: ast.expr, bindings: dict[str, Any]) -> None:
+    if not isinstance(expression, ast.Call) or not isinstance(
+        expression.func, ast.Call
+    ):
+        return
+    lookup = expression.func
+    if not (
+        isinstance(lookup.func, ast.Name)
+        and lookup.func.id == "getattr"
+        and len(lookup.args) > 1
+    ):
+        return
+    module = _reference(lookup.args[0], bindings)
+    attribute = lookup.args[1]
+    if (
+        isinstance(module, ModuleType)
+        and module.__name__ in ("snektest", "snektest.type_contracts")
+        and (
+            not isinstance(attribute, ast.Constant)
+            or attribute.value == "assert_type_error"
+        )
+    ):
+        msg = "Unsupported dynamic marker lookup; use a direct Snektest import"
+        raise BadRequestError(msg)
 
 
 def _coordinate(lines: list[str], line: int, byte_column: int) -> tuple[int, int]:
     """Convert AST UTF-8 offsets to ty's one-based Unicode columns."""
     prefix = lines[line - 1].encode("utf-8")[:byte_column]
     return line, len(prefix.decode("utf-8")) + 1
+
+
+def _span(lines: list[str], node: ast.expr | ast.alias) -> _Span:
+    return (
+        _coordinate(lines, node.lineno, node.col_offset),
+        _coordinate(lines, node.end_lineno or node.lineno, node.end_col_offset or 0),
+    )
 
 
 def _project_root(path: Path) -> Path:
@@ -332,12 +450,23 @@ async def _read_report(stream: asyncio.StreamReader) -> bytes:
     return b"".join(chunks)
 
 
+async def _discard_report(stream: asyncio.StreamReader) -> None:
+    while await stream.read(_READ_BYTES):
+        pass
+
+
 @defer_cancellation
 async def _reap(process: asyncio.subprocess.Process) -> None:
     if process.returncode is None:
         with suppress(ProcessLookupError):
             process.kill()
-    async with asyncio.timeout(min(_REAP_SECONDS, cleanup_budget.get())):
+    async with (
+        asyncio.timeout(min(_REAP_SECONDS, cleanup_budget.get())),
+        asyncio.TaskGroup() as group,
+    ):
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                group.create_task(_discard_report(stream))
         await process.wait()
 
 
@@ -386,13 +515,30 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
             "from snektest.type_contracts import test_typing as test_typing\n",
         )
         (overlay / "__init__.pyi").write_text(stub, encoding="utf-8")
-        config = scratch / "ty.toml"
-        config.write_text('[rules]\nall = "error"\n', encoding="utf-8")
+        (overlay / "type_contracts.pyi").write_text(
+            "from collections.abc import Callable\n"
+            "from contextlib import AbstractContextManager\n"
+            "from warnings import deprecated\n"
+            "def test_typing[F: Callable[..., object]](function: F) -> F: ...\n"
+            f"@deprecated({_MARKER_NOTE!r})\n"
+            "def assert_type_error(rule: str, /) -> AbstractContextManager[None]: ...\n",
+            encoding="utf-8",
+        )
+        config = _configuration.get()
+        if config is None:
+            config = scratch / "ty.toml"
+            config.write_text('[rules]\nall = "error"\n', encoding="utf-8")
         command = [
             executable,
             "check",
             "--config-file",
             str(config),
+            "--error",
+            "deprecated",
+            "--error",
+            "type-assertion-failure",
+            "--error",
+            "unresolved-import",
             "--python",
             sys.executable,
             "--extra-search-path",
@@ -422,11 +568,36 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
     return root, diagnostics
 
 
+def _marker_reference(
+    diagnostic: _Diagnostic, source: _ContractSource, expected: list[_ExpectedError]
+) -> bool:
+    """Let ty identify helper values, including aliases our syntax disallows.
+
+    Only the temporary checker stub is deprecated. Ordinary user checks and
+    runtime imports never see this internal reference-verification diagnostic.
+    """
+    if diagnostic.check_name != "deprecated" or not diagnostic.description.endswith(
+        f": {_MARKER_NOTE}"
+    ):
+        return False
+    position = diagnostic.location.positions.begin
+    point = position.line, position.column
+    allowed = [*source.imports, *(region.reference for region in expected)]
+    if not any(start <= point < end for start, end in allowed):
+        msg = (
+            f"{source.path}:{position.line}: assertion markers require a direct "
+            "Snektest import and a literal assert_type_error with block; "
+            "copied or indirect marker values are unsupported"
+        )
+        raise BadRequestError(msg)
+    return True
+
+
 async def _check(function: Callable[..., object], fingerprint: bytes | None) -> None:
     source = _source(function, fingerprint)
     path = source.path
     expected = _expectations(source)
-    root, diagnostics = await _diagnostics(path)
+    root, diagnostics = await _cached_diagnostics(source)
     _verify_source(path, path.read_bytes(), source.fingerprint)
     observed: list[list[_Diagnostic]] = [[] for _ in expected]
     unexpected: list[_Diagnostic] = []
@@ -441,6 +612,8 @@ async def _check(function: Callable[..., object], fingerprint: bytes | None) -> 
             msg = f"Typing contract environment is unavailable: {diagnostic.description[:2000]}"
             raise SnektestError(msg)
         point = (line, diagnostic.location.positions.begin.column)
+        if _marker_reference(diagnostic, source, expected):
+            continue
         regions = [
             index
             for index, region in enumerate(expected)

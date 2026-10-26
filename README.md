@@ -699,9 +699,28 @@ imports and source locations, using the current interpreter and isolated strict
 rules rather than ambient ty configuration. Ordinary runtime tests and
 `--collect-only` do not launch ty.
 
-This initial implementation invokes ty per selected function; cross-function
-batching and configurable checker environments are not implemented yet. Checker
-output and process waits are bounded, but collection/imports still require an
+Use `--typing-config FILE` for an explicit native ty configuration, or pass
+`typing_config=Path(...)` to `run_tests_programmatic`. Otherwise Snektest uses
+isolated strict rules, not ambient project configuration or `TY_CONFIG_FILE`.
+The checker uses the current interpreter. `deprecated`, `type-assertion-failure`,
+and `unresolved-import` remain errors even when the file relaxes other rules;
+ignored expected diagnostics still cause missing-expectation failures. Config
+parse/startup failures are errors, not successful type rejections. This option is
+run-local, not a persistent `[tool.snektest]` setting.
+
+Each execution process retains at most the most recent validated file report,
+reusing it for same-source contracts in the same run. Later runs and replacement
+workers start fresh; switching files can require another invocation. Keep all
+source/dependency files unchanged during a run. Explicit configuration edits
+invalidate reuse. This preserves selection and fail-fast without running bodies.
+
+Use a single bare decorator; stacked decorators can disable analysis and are
+rejected. Only the documented literal `with assert_type_error("rule")` form
+(or its imported alias/qualified spelling) declares an expected error. Other
+Python context managers are ordinary type checks, not rejection assertions.
+Known marker escapes through copied/re-exported bindings and direct dynamic
+lookups are rejected. Checker output and process waits are bounded; cleanup
+kills/reaps the child and drains its pipes. Collection/imports still require an
 external command timeout. See `snektest --example typing` for sync/async examples.
 
 ### Public Errors

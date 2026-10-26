@@ -732,3 +732,312 @@ def test_parent_cancellation_during_native_startup_drains_tasks_and_temporary_fi
     assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
     assert_in("cancelled cleanly", completed.stdout)
     assert_eq(list(scratch.iterdir()), [])
+
+
+@test(mark="slow")
+def test_copied_assertion_marker_cannot_silently_erase_an_expectation() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import assert_type_error, test_typing
+        reject = assert_type_error
+
+        def takes_int(value: int) -> int:
+            return value
+
+        @test_typing
+        def consumer() -> None:
+            with reject("invalid-argument-type"):
+                takes_int(1)
+        """),
+        name="test_copied_static_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
+    assert_in("direct Snektest import", result["error"]["message"])
+
+
+@test(mark="slow")
+def test_rebinding_an_imported_marker_is_rejected_as_an_invalid_declaration() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from contextlib import AbstractContextManager, nullcontext
+        from snektest import assert_type_error, test_typing
+
+        def replacement(rule: str) -> AbstractContextManager[None]:
+            return nullcontext()
+
+        assert_type_error = replacement
+
+        @test_typing
+        def consumer() -> None:
+            with assert_type_error("invalid-argument-type"):
+                pass
+        """),
+        name="test_rebound_static_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
+    assert_in("copied or indirect marker values", result["error"]["message"])
+
+
+@test(mark="slow")
+def test_dynamic_marker_lookup_cannot_silently_erase_an_expectation() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        import snektest as s
+        from snektest import test_typing
+
+        @test_typing
+        def consumer() -> None:
+            with getattr(s, "assert_type_error")("invalid-argument-type"):
+                pass
+        """),
+        name="test_dynamic_static_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
+    assert_in("dynamic marker lookup", result["error"]["message"])
+
+
+@test(mark="slow")
+def test_opaque_decorator_cannot_disable_a_positive_only_contract() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type, no_type_check
+        from snektest import test_typing
+
+        @test_typing
+        @no_type_check
+        def consumer(symbolic: int) -> None:
+            assert_type(symbolic, str)
+        """),
+        name="test_opaque_static_decorator",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
+    assert_in("single bare @test_typing", result["error"]["message"])
+
+
+@test(mark="slow")
+def test_same_file_contracts_share_checker_work_but_later_runs_check_fresh() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import test_typing
+
+        @test_typing
+        def first(symbolic: int) -> None:
+            assert_type(symbolic, int)
+
+        @test_typing
+        def second(symbolic: str) -> None:
+            assert_type(symbolic, str)
+        """),
+        name="test_batched_contracts",
+    )
+    driver = directory / "batch_driver.py"
+    driver.write_text(
+        dedent("""
+        import asyncio
+        from pathlib import Path
+        import sys
+        from snektest import assert_eq
+        from snektest.cli import run_tests_programmatic
+        from snektest.models import FilterItem
+
+        starts: list[str] = []
+
+        def observe(event: str, arguments: tuple[object, ...]) -> None:
+            if event == "subprocess.Popen" and Path(str(arguments[0])).name in ("ty", "ty.exe"):
+                starts.append(str(arguments[0]))
+
+        async def main() -> None:
+            sys.addaudithook(observe)
+            for _ in range(2):
+                starts.clear()
+                result = await run_tests_programmatic([FilterItem(sys.argv[1])])
+                assert_eq(result.passed, 2)
+                assert_eq(len(starts), 1)
+            print("batches are run-scoped")
+
+        asyncio.run(main())
+        """),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(driver), str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+    assert_in("batches are run-scoped", completed.stdout)
+
+
+@test([Param(None, name="local"), Param(1, name="worker")], mark="slow")
+def test_explicit_ty_configuration_preserves_required_assertion_checks(
+    workers: int | None,
+) -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    config = directory / "contracts.toml"
+    config.write_text('[rules]\nall = "ignore"\n', encoding="utf-8")
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import assert_type_error, test_typing
+
+        class Parent:
+            def value(self) -> int:
+                return 1
+
+        class Child(Parent):
+            def value(self) -> int:
+                return 1
+
+        @test_typing
+        def healthy(symbolic: int) -> None:
+            assert_type(symbolic, int)
+
+        @test_typing
+        def broken(symbolic: int) -> None:
+            assert_type(symbolic, str)
+
+        @test_typing
+        def missing() -> None:
+            with assert_type_error("invalid-argument-type"):
+                pass
+        """),
+        name="test_configured_contracts",
+    )
+    arguments = [] if workers is None else ["--workers", str(workers)]
+    result = run_test_subprocess(
+        path, "--typing-config", str(config), *arguments, timeout=30
+    )
+    assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq((result["errors"], result["failed"], result["passed"]), (0, 2, 1))
+    assert_in("type-assertion-failure", result["tests"][1]["exception"]["message"])
+    assert_in("no diagnostics", result["tests"][2]["exception"]["message"])
+
+
+@test(mark="slow")
+async def test_programmatic_configuration_is_explicit_and_does_not_leak_between_runs() -> (
+    None
+):
+    directory = load_fixture(tmp_dir_fixture())
+    config = directory / "relaxed.toml"
+    config.write_text(
+        '[rules]\nmissing-override-decorator = "ignore"\n', encoding="utf-8"
+    )
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import test_typing
+
+        class Parent:
+            def value(self) -> int:
+                return 1
+
+        class Child(Parent):
+            def value(self) -> int:
+                return 1
+
+        @test_typing
+        def consumer(symbolic: int) -> None:
+            assert_type(symbolic, int)
+        """),
+        name="test_programmatic_configuration",
+    )
+    configured = await run_tests_programmatic(
+        [FilterItem(str(path))], typing_config=config
+    )
+    assert_eq((configured.errors, configured.failed, configured.passed), (0, 0, 1))
+    default = await run_tests_programmatic([FilterItem(str(path))])
+    assert_eq((default.errors, default.failed, default.passed), (0, 1, 0))
+
+
+@test(mark="slow")
+def test_invalid_native_configuration_is_an_error_and_cleans_up() -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    config = directory / "malformed.toml"
+    config.write_text("[rules", encoding="utf-8")
+    path = create_test_file(
+        directory,
+        dedent("""
+        from snektest import test, test_typing
+
+        @test_typing
+        def consumer() -> None:
+            pass
+
+        @test(mark="fast")
+        def following() -> None:
+            pass
+        """),
+        name="test_bad_native_configuration",
+    )
+    scratch = directory / "bad-config-scratch"
+    scratch.mkdir()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "snektest",
+            "--json-output",
+            "--typing-config",
+            str(config),
+            str(path),
+        ],
+        env=dict(os.environ, TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert_eq(completed.returncode, 1, msg=completed.stdout + completed.stderr)
+    result = json.loads(completed.stdout)
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_in(
+        "ty invocation failed with status 2", result["tests"][0]["exception"]["message"]
+    )
+    assert_eq(list(scratch.iterdir()), [])
+
+
+@test(mark="slow")
+def test_reexported_marker_is_rejected_rather_than_treated_as_an_ordinary_context() -> (
+    None
+):
+    directory = load_fixture(tmp_dir_fixture()) / "reexport_package"
+    directory.mkdir()
+    (directory / "__init__.py").write_text("", encoding="utf-8")
+    (directory / "marker_exports.py").write_text(
+        "from snektest import assert_type_error as reject\n", encoding="utf-8"
+    )
+    path = create_test_file(
+        directory,
+        dedent("""
+        from .marker_exports import reject
+        from snektest import test_typing
+
+        @test_typing
+        def consumer() -> None:
+            with reject("invalid-argument-type"):
+                pass
+        """),
+        name="test_reexported_static_marker",
+    )
+    result = run_test_subprocess(path, timeout=30)
+    assert_eq(result["returncode"], 2, msg=result["stdout"] + result["stderr"])
+    assert_in("copied or indirect marker values", result["error"]["message"])
