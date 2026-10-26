@@ -528,6 +528,14 @@ project directory. CLI filters and flags, including inverse output and marker
 flags, override configured values. `--output-schema-versions` lists supported
 JSON schema versions.
 
+`collection_errors.py` owns bounded, user-first collection console reports.
+`--full-traceback` adds framework/dependency frames, including child-host details,
+without changing JSON snapshots or collection behavior. When changing frame
+selection, syntax/cause/group rendering, work/output limits, or host transport,
+read `docs/collection-errors.md` and exercise real local/worker console and JSON
+subprocesses in `tests/meta/test_collection_diagnostics.py`. Preserve selected-file
+context, original error types, explicit truncation, and the exit-2/no-body contract.
+
 Console summary lines intentionally keep exception details compact: only the first
 exception message line is shown and long lines may be ellipsized. Use the full
 failure details or `--json-output` for exact diagnostics.

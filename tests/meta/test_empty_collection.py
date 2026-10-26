@@ -137,7 +137,9 @@ def test_human_output_explains_empty_selection() -> None:
     result = _run_selection(str(empty_dir))
 
     assert_eq(result.returncode, 2)
-    assert_in("Collection error: No tests selected", result.stdout)
+    assert_in("Collection error", result.stdout)
+    assert_in("No tests selected", result.stdout)
+    assert_in(str(empty_dir), result.stdout)
 
 
 @test(mark="slow")

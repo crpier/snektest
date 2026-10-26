@@ -135,9 +135,9 @@ def _format_benchmarks(
     return "  " + "  ".join(formatted)
 
 
-def print_error(exc: str) -> None:
-    """Print an error message in red."""
-    console.print(exc, markup=False, style="red")
+def print_error(exc: str, *, soft_wrap: bool = False) -> None:
+    """Print an error message in red, optionally retaining copyable long lines."""
+    console.print(exc, markup=False, style="red", soft_wrap=soft_wrap)
 
 
 def print_test_result_to_console(console: Console, result: TestResult) -> None:

@@ -217,6 +217,18 @@ Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--a
 
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
 
+## Collection failures
+
+Default console diagnostics identify the selected file/filter, original exception,
+and user source rather than framework plumbing. Syntax carets, causes, notes,
+and exception groups remain useful. Rerun the same command with
+`--full-traceback` to include framework/dependency frames, including with
+`--collect-only` or workers. Both modes are bounded and mark truncation; full
+detail is not a locals dump. The flag does not change JSON schema version 1 or
+captured collection output/warnings; use `--json-output` for those structured
+diagnostics. Collection still exits 2 and finishes before any body runs; fix the
+import/declaration instead of weakening validation or adding `--allow-empty`.
+
 ## Parameter values and case names
 
 Use `Param(value=..., name=...)`. `Param(value="sqlite")` and `Param("sqlite")`
