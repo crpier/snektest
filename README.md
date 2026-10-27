@@ -802,6 +802,88 @@ for up to two parameter lists; three or more use the variadic `Any` fallback.
 `@test_hypothesis` checks up to five strategies; six or more use its variadic
 `Any` fallback.
 
+### Python-native type contracts
+
+Install `snektest[typing]` to check consumer typing behavior with the pinned ty
+checker. Use bare `@test_typing` (unlike `@test(...)`) on a module-level sync or
+async function. Its body is analyzed, never executed; parameters are symbolic
+inputs, not runtime fixtures. Static tests receive the `slow` marker.
+
+```python
+from typing import assert_type
+
+from snektest import assert_type_error, test_typing
+
+
+def takes_int(value: int) -> int:
+    return value
+
+
+@test_typing
+def test_argument_types(symbolic: int) -> None:
+    assert_type(takes_int(symbolic), int)
+    with assert_type_error("invalid-argument-type"):
+        takes_int("wrong")
+```
+
+Each assertion block requires exactly one diagnostic with the literal rule name.
+Missing, different, or additional diagnostics fail; nested blocks own their
+innermost diagnostics. Only diagnostics inside the block body count, not errors
+in its `with` header. Unexpected errors in the selected function or shared
+module helpers fail too. Failures include original source locations. Broken
+imports and checker setup are errors, not proof of a successful rejection. The
+marker is not supported in ordinary runtime tests.
+
+Use direct Snektest imports for assertion markers: imported aliases and qualified
+module imports work, including imports inside static bodies. Marker resolution
+uses source bindings rather than mutable runtime globals. Copied, re-exported,
+and dynamically looked-up marker values are unsupported. Keep source files
+unchanged during a run; detected edits are errors. Source checks are not atomic
+filesystem protection against concurrent writers.
+
+Run and select these functions through the usual Snektest commands, locally or
+with workers. Ordinary `ty check` deliberately skips their bodies through both
+package and implementation-module stubs; **run Snektest to validate the contracts**,
+including positive `assert_type` assertions. The
+static run checks the original source with a temporary partial stub, preserving
+imports and source locations, using the current interpreter and isolated strict
+rules rather than ambient ty configuration. Ordinary runtime tests and
+`--collect-only` do not launch ty.
+
+Use `--typing-config FILE` for an explicit native ty configuration, or pass
+`typing_config=Path(...)` to `run_tests_programmatic`. Otherwise Snektest uses
+isolated strict rules, not ambient project configuration or `TY_CONFIG_FILE`.
+The checker defaults to the current interpreter; native `environment.python`
+selects another interpreter/environment and `environment.extra-paths` selects
+additional import roots. These are explicit native ty settings, not new Python
+contract declarations. Only Snektest's package is exposed to the checker, not its
+host's entire package directory. Non-standard runtime `sys.path` additions need
+matching native `extra-paths`; they are not implicitly inherited.
+`deprecated`, `type-assertion-failure`, and
+`unresolved-import` remain errors even when the file relaxes other rules.
+Every per-file override must preserve these three rules at `error`; overrides
+that lower them directly or through `all` are configuration errors, even if their
+patterns do not match the selected file. Restore the three rules explicitly when
+using a per-file `all = "ignore"`. Ignored expected diagnostics still cause
+missing-expectation failures. Config
+parse/startup failures are errors, not successful type rejections. This option is
+run-local, not a persistent `[tool.snektest]` setting.
+
+Each execution process retains at most the most recent validated file report,
+reusing it for same-source contracts in the same run. Later runs and replacement
+workers start fresh; switching files can require another invocation. Keep all
+source/dependency files unchanged during a run. Explicit configuration edits
+invalidate reuse. This preserves selection and fail-fast without running bodies.
+
+Use a single bare decorator; stacked decorators can disable analysis and are
+rejected. Only the documented literal `with assert_type_error("rule")` form
+(or its imported alias/qualified spelling) declares an expected error. Other
+Python context managers are ordinary type checks, not rejection assertions.
+Known marker escapes through copied/re-exported bindings and direct dynamic
+lookups are rejected. Checker output and process waits are bounded; cleanup
+kills/reaps the child and drains its pipes. Collection/imports still require an
+external command timeout. See `snektest --example typing` for sync/async examples.
+
 ### Public Errors
 
 Catch user-facing framework failures with `SnektestError`. Its exported

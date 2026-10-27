@@ -54,6 +54,7 @@ lazy from snektest.run_fixture_publication import (
     RunFixturePublication,
     WorkerRunFixtures,
 )
+lazy from snektest.type_contracts import typing_configuration
 
 
 @dataclass(frozen=True)
@@ -300,6 +301,7 @@ def _worker_main(  # noqa: PLR0913, PLR0917
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
     benchmark_baseline: BenchmarkBaseline | None,
+    typing_config: Path | None,
 ) -> None:
     """Run a worker with interactive stdin disabled."""
     with Path(os.devnull).open() as worker_stdin:
@@ -312,6 +314,7 @@ def _worker_main(  # noqa: PLR0913, PLR0917
             capture_output,
             timeout,
             benchmark_baseline,
+            typing_config,
         )
 
 
@@ -323,6 +326,7 @@ def _run_worker(  # noqa: PLR0913, PLR0917
     capture_output: bool,  # noqa: FBT001
     timeout: float | None,
     benchmark_baseline: BenchmarkBaseline | None,
+    typing_config: Path | None,
 ) -> None:
     """Import one local plan and execute assigned ordinals on one event loop."""
     try:
@@ -346,6 +350,7 @@ def _run_worker(  # noqa: PLR0913, PLR0917
     run_fixture_loader = WorkerRunFixtures(connection)
     with (
         use_registry(registry),
+        typing_configuration(typing_config),
         use_run_fixture_loader(run_fixture_loader),
         asyncio.Runner() as runner,
     ):
@@ -476,12 +481,21 @@ async def _start_worker(  # noqa: PLR0913
     publication: RunFixturePublication,
     raw_filters: tuple[str, ...],
     timeout: float | None,  # noqa: ASYNC109
+    typing_config: Path | None = None,
 ) -> _Worker:
     """Start one worker serially and require the canonical structural manifest."""
     process, connection = _spawn_process(
         context,
         _worker_main,
-        (raw_filters, mark, keyword, capture_output, timeout, benchmark_baseline),
+        (
+            raw_filters,
+            mark,
+            keyword,
+            capture_output,
+            timeout,
+            benchmark_baseline,
+            typing_config,
+        ),
         name=f"snektest-worker-{identifier + 1}",
     )
     try:
@@ -567,6 +581,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
     timeout: float | None,  # noqa: ASYNC109
     workers: int | Literal["auto"],
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
+    typing_config: Path | None = None,
 ) -> RunResult:
     """Run a canonical plan across persistent spawn workers."""
     started_at = time.monotonic()
@@ -600,6 +615,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     canonical_bootstrap=canonical_bootstrap,
                     capture_output=capture_output,
                     benchmark_baseline=benchmark_baseline,
+                    typing_config=typing_config,
                     identifier=identifier,
                     mark=mark,
                     keyword=keyword,
@@ -642,6 +658,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                             canonical_bootstrap=canonical_bootstrap,
                             capture_output=capture_output,
                             benchmark_baseline=benchmark_baseline,
+                            typing_config=typing_config,
                             identifier=next_worker_identifier,
                             mark=mark,
                             keyword=keyword,

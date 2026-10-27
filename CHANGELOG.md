@@ -4,6 +4,25 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Begin optional Python-native typing contracts with bare `@test_typing`, native
+  `typing.assert_type`, and exact `assert_type_error("rule")` blocks. Analyze
+  original sync/async source without executing bodies; preserve selectors and
+  normalized results. Both package/module stubs skip bodies during ordinary ty
+  checks, so run Snektest to validate contracts. (#96)
+- Reuse one bounded file report per run/worker and accept explicit native
+  `--typing-config FILE` / programmatic configuration, including Python environments
+  and extra import roots. Isolate target dependencies from host-only packages and
+  versions; preserve source locations, lexical assertion identity, and exact
+  diagnostic ownership. Invalid declarations, source edits, missing dependencies,
+  and checker failures cannot certify expected rejections. Reject per-file
+  overrides that weaken protected diagnostics instead of silently passing
+  positive-only contracts. (#96)
+- Bound native typing reports and drain/reap checker processes on timeout,
+  cancellation, and output-limit failures. Add real process/pipe, malformed-report,
+  installed-extra, environment-isolation, and qualified-import acceptance without
+  fake checkers. Hard collection/synchronous deadlines still require an external
+  command timeout; OS-specific fault evidence remains qualified. (#96)
+
 - Recognize idle AnyIO asyncio pool workers by current-loop registration and identity, without importing AnyIO, prewarming/shutting down pools, or exempting thread names or newly created busy workers. Add the optional `snektest[anyio]` extra, executable examples, and explicit task-local fixture-scope/backend limitations. This is the first #100 slice: backend selection and Trio remain unimplemented.
 
 - Add typed `temporary_directory(base=..., retention=...)` with inferred test/session ownership, default cleanup even on failure, explicit on-failure/always retention, off-loop recursive removal, ownership checks, and path-only console/programmatic/JSON reporting. Keep resource teardown before deletion and cleanup errors alongside original failures. Session policy is process-local; no global TMPDIR mutation, process management, historical pruning or hard-kill cleanup guarantees. (#97)
