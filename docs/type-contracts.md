@@ -50,7 +50,15 @@ way. Non-standard runtime sys.path additions require matching native extra-paths
 just as they do with an ordinary explicit ty invocation.
 The `deprecated`, `type-assertion-failure`,
 and `unresolved-import` rules remain errors so configuration cannot suppress
-reference validation, positive type assertions, or broken environments. Ignoring
+reference validation, positive type assertions, or broken environments. Native
+per-file overrides take precedence over CLI severities, so every override must
+preserve these three rules at `error`. An override that lowers one directly or
+through `all` is a configuration ERROR, even if its pattern does not match this
+selection. A per-file `all = "ignore"` is supported when the same override sets
+all three protected rules explicitly to `error`; other rules may be relaxed.
+Native syntax/type errors still receive native diagnostics. If native parsing
+ever accepts syntax that the framework cannot safely inspect, analysis fails
+closed rather than certifying the unchecked configuration. Ignoring
 an expected rejection rule cannot satisfy that assertion: the missing diagnostic
 still fails. The option is not a persistent `[tool.snektest]` key.
 

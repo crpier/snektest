@@ -509,13 +509,25 @@ async def _invoke(command: list[str], root: Path) -> tuple[int, bytes, bytes]:
         await _reap(process)
 
 
-def _python_arguments(config: Path) -> list[str]:
+def _configuration_arguments(config: Path) -> list[str]:
+    settings = tomllib.loads(config.read_text(encoding="utf-8-sig"))
+    overrides = settings.get("overrides", [])
+    if isinstance(overrides, list):
+        for index, override in enumerate(overrides, start=1):
+            if not isinstance(override, dict):
+                continue  # Native validation owns malformed configuration types.
+            rules = override.get("rules", {})
+            if not isinstance(rules, dict):
+                continue
+            for rule in ("deprecated", "type-assertion-failure", "unresolved-import"):
+                if rules.get(rule, rules.get("all")) in ("ignore", "warn"):
+                    msg = (
+                        f"Typing configuration {config}: per-file override {index} "
+                        f"weakens protected typing diagnostics ({rule}). Set that "
+                        "rule explicitly to 'error' or remove the relaxing override."
+                    )
+                    raise SnektestError(msg)
     # Only an explicit environment.python opts out of the current interpreter.
-    # Leave native syntax/type validation to ty, including malformed files.
-    try:
-        settings = tomllib.loads(config.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError, UnicodeDecodeError:
-        return ["--python", sys.executable]
     environment = settings.get("environment")
     if isinstance(environment, dict) and "python" in environment:
         return []
@@ -566,6 +578,14 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
         if config is None:
             config = scratch / "ty.toml"
             config.write_text('[rules]\nall = "error"\n', encoding="utf-8")
+        configuration_error = None
+        try:
+            configuration_arguments = _configuration_arguments(config)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            # Let ty diagnose invalid native files, but fail closed if a future
+            # native TOML parser accepts syntax we could not safely inspect.
+            configuration_error = error
+            configuration_arguments = ["--python", sys.executable]
         command = [
             executable,
             "check",
@@ -577,7 +597,7 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
             "type-assertion-failure",
             "--error",
             "unresolved-import",
-            *_python_arguments(config),
+            *configuration_arguments,
             "--extra-search-path",
             str(scratch),
             "--extra-search-path",
@@ -592,6 +612,9 @@ async def _diagnostics(path: Path) -> tuple[Path, list[_Diagnostic]]:
     if status not in (0, 1):
         msg = f"ty invocation failed with status {status}: {stderr.decode(errors='replace')[:2000]}"
         raise SnektestError(msg)
+    if configuration_error is not None:
+        msg = "Typing configuration could not be inspected for protected diagnostics"
+        raise SnektestError(msg) from configuration_error
     diagnostics = [
         item
         for item in TypeAdapter(list[_Diagnostic]).validate_json(stdout)

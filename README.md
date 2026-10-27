@@ -710,8 +710,12 @@ contract declarations. Only Snektest's package is exposed to the checker, not it
 host's entire package directory. Non-standard runtime `sys.path` additions need
 matching native `extra-paths`; they are not implicitly inherited.
 `deprecated`, `type-assertion-failure`, and
-`unresolved-import` remain errors even when the file relaxes other rules;
-ignored expected diagnostics still cause missing-expectation failures. Config
+`unresolved-import` remain errors even when the file relaxes other rules.
+Every per-file override must preserve these three rules at `error`; overrides
+that lower them directly or through `all` are configuration errors, even if their
+patterns do not match the selected file. Restore the three rules explicitly when
+using a per-file `all = "ignore"`. Ignored expected diagnostics still cause
+missing-expectation failures. Config
 parse/startup failures are errors, not successful type rejections. This option is
 run-local, not a persistent `[tool.snektest]` setting.
 

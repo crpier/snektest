@@ -14,7 +14,9 @@ Notable user-facing changes are recorded here.
   and extra import roots. Isolate target dependencies from host-only packages and
   versions; preserve source locations, lexical assertion identity, and exact
   diagnostic ownership. Invalid declarations, source edits, missing dependencies,
-  and checker failures cannot certify expected rejections. (#96)
+  and checker failures cannot certify expected rejections. Reject per-file
+  overrides that weaken protected diagnostics instead of silently passing
+  positive-only contracts. (#96)
 - Bound native typing reports and drain/reap checker processes on timeout,
   cancellation, and output-limit failures. Add real process/pipe, malformed-report,
   installed-extra, environment-isolation, and qualified-import acceptance without

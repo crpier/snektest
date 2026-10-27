@@ -298,7 +298,11 @@ selects another; preserve native extra-paths. Stage only the framework package,
 never its hosting site-packages directory, so selected environments cannot inherit
 unrelated host libraries or shadow target versions. Non-standard sys.path additions
 need explicit native extra-paths. The deprecated/type-assertion-failure/
-unresolved-import error invariants remain enforced. Preserve run-local context through worker
+unresolved-import error invariants remain enforced. Inspect every per-file rule
+override: native overrides outrank CLI severities, so reject relaxations of the
+protected rules (including all=ignore/warn without explicit restoration) as run
+errors. Keep native syntax/type diagnostics and fail closed on uninspectable
+configuration. Preserve run-local context through worker
 replacement. Require a single bare decorator; other contexts do not declare
 expected errors. The temporary stub uses an internal deprecated reference probe
 to reject known copied/re-exported marker escapes without executing Python.

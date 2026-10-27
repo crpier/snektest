@@ -3,7 +3,9 @@
 Ordinary checks skip contract bodies through both package and module stubs.
 Use only a single bare decorator and direct imported markers. Same-file tests
 reuse a bounded run-local report. --typing-config FILE selects native ty rules;
-assertion/environment checks remain errors. Native environment.python and
+assertion/environment checks remain errors. Per-file overrides must explicitly
+preserve protected rules at error when relaxing all other rules.
+Native environment.python and
 extra-paths select explicit checker environments/import roots; otherwise the
 current interpreter is used. Only the framework package is staged; non-standard
 runtime sys.path additions need explicit extra-paths, not host-package leakage.

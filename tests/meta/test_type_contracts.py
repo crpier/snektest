@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from tempfile import mkdtemp
 from textwrap import dedent
 from xml.etree import ElementTree
 
@@ -968,11 +970,24 @@ async def test_programmatic_configuration_is_explicit_and_does_not_leak_between_
     assert_eq((default.errors, default.failed, default.passed), (0, 1, 0))
 
 
-@test(mark="slow")
-def test_invalid_native_configuration_is_an_error_and_cleans_up() -> None:
+@test(
+    [
+        Param("[rules", name="syntax"),
+        Param('overrides = "wrong"', name="override-list-type"),
+        Param("overrides = [42]", name="override-entry-type"),
+        Param(
+            '[[overrides]]\ninclude = ["**"]\nrules = "wrong"',
+            name="override-rules-type",
+        ),
+    ],
+    mark="slow",
+)
+def test_invalid_native_configuration_is_an_error_and_cleans_up(
+    configuration: str,
+) -> None:
     directory = load_fixture(tmp_dir_fixture())
     config = directory / "malformed.toml"
-    config.write_text("[rules", encoding="utf-8")
+    config.write_text(configuration, encoding="utf-8")
     path = create_test_file(
         directory,
         dedent("""
@@ -988,8 +1003,7 @@ def test_invalid_native_configuration_is_an_error_and_cleans_up() -> None:
         """),
         name="test_bad_native_configuration",
     )
-    scratch = directory / "bad-config-scratch"
-    scratch.mkdir()
+    scratch = Path(mkdtemp(prefix="bad-config-scratch-", dir=directory))
     completed = subprocess.run(
         [
             sys.executable,
@@ -1147,3 +1161,91 @@ def test_qualified_implementation_module_imports_declare_contracts(
     )
     broken = run_test_subprocess(path, timeout=30)
     assert_eq((broken["errors"], broken["failed"], broken["passed"]), (0, 1, 0))
+
+
+@test(
+    [
+        Param((rule, severity), name=f"{rule}-{severity}")
+        for rule in ("all", "deprecated", "type-assertion-failure", "unresolved-import")
+        for severity in ("ignore", "warn")
+    ],
+    [Param(None, name="local"), Param(1, name="worker")],
+    mark="slow",
+)
+def test_per_file_configuration_cannot_disable_protected_typing_diagnostics(
+    override: tuple[str, str],
+    workers: int | None,
+) -> None:
+    directory = load_fixture(tmp_dir_fixture())
+    rule, severity = override
+    config = directory / "unsafe-override.toml"
+    config.write_text(
+        f'[[overrides]]\ninclude = ["**"]\n[overrides.rules]\n{rule} = "{severity}"\n',
+        encoding="utf-8",
+    )
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import test, test_typing
+
+        @test_typing
+        def broken() -> None:
+            assert_type(42, str)
+
+        @test(mark="fast")
+        def following() -> None:
+            pass
+        """),
+        name="test_protected_diagnostics",
+    )
+    arguments = [] if workers is None else ["--workers", str(workers)]
+    result = run_test_subprocess(
+        path, "--typing-config", str(config), *arguments, timeout=30
+    )
+    assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq((result["errors"], result["failed"], result["passed"]), (1, 0, 1))
+    assert_in(
+        "protected typing diagnostics", result["tests"][0]["exception"]["message"]
+    )
+
+
+@test(mark="slow")
+def test_per_file_rules_can_relax_other_checks_while_preserving_protected_errors() -> (
+    None
+):
+    directory = load_fixture(tmp_dir_fixture())
+    config = directory / "safe-overrides.toml"
+    config.write_text(
+        '[rules]\nall = "error"\n[[overrides]]\ninclude = ["**"]\n'
+        '[overrides.rules]\nall = "ignore"\ndeprecated = "error"\n'
+        'type-assertion-failure = "error"\nunresolved-import = "error"\n',
+        encoding="utf-8",
+    )
+    path = create_test_file(
+        directory,
+        dedent("""
+        from typing import assert_type
+        from snektest import test_typing
+
+        class Parent:
+            def value(self) -> int:
+                return 1
+        class Child(Parent):
+            def value(self) -> int:
+                return 1
+
+        @test_typing
+        def healthy() -> None:
+            assert_type(Child().value(), int)
+
+        @test_typing
+        def broken() -> None:
+            assert_type(Child().value(), str)
+        """),
+        name="test_safe_per_file_rules",
+    )
+    result = run_test_subprocess(path, "--typing-config", str(config), timeout=30)
+    assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
+    assert_eq((result["errors"], result["failed"], result["passed"]), (0, 1, 1))
+    assert_in("type-assertion-failure", result["tests"][1]["exception"]["message"])
