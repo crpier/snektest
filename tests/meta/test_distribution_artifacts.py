@@ -28,9 +28,12 @@ _REQUIRED_PROJECT_FILES = {
 _REQUIRED_EXAMPLES = {
     "snektest/examples/__init__.py",
     "snektest/examples/async_tests.py",
+    "snektest/examples/anyio_tests.py",
     "snektest/examples/basic_test.py",
     "snektest/examples/benchmark.py",
     "snektest/examples/fixtures.py",
+    "snektest/examples/temporary.py",
+    "snektest/temporary.py",
     "snektest/examples/graphql.py",
     "snektest/examples/log_capture.py",
     "snektest/examples/memory.py",
@@ -161,6 +164,135 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
         assert_eq(json.loads(executed.stdout)["passed"], 1)
 
 
+def _assert_standalone_cli_startup(artifact: Path, *, target: Path, cwd: Path) -> None:
+    environment_root = target.with_name(f"{target.name}-venv")
+    created = _run(
+        ["uv", "venv", "--python", sys.executable, str(environment_root)], cwd=cwd
+    )
+    assert_eq(created.returncode, 0, msg=created.stdout + created.stderr)
+    binary = environment_root / ("Scripts" if os.name == "nt" else "bin")
+    python = binary / ("python.exe" if os.name == "nt" else "python")
+    executable = binary / ("snektest.exe" if os.name == "nt" else "snektest")
+    constraints = cwd / f"{target.name}-constraints.txt"
+    exported = _run(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--no-dev",
+            "--extra",
+            "anyio",
+            "--no-emit-project",
+            "--no-hashes",
+            "--output-file",
+            str(constraints),
+        ],
+        cwd=Path.cwd(),
+    )
+    assert_eq(exported.returncode, 0, msg=exported.stderr)
+    installed = _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--constraints",
+            str(constraints),
+            str(artifact),
+        ],
+        cwd=cwd,
+    )
+    assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
+    consumer = cwd / f"test_{target.name.replace('-', '_')}_startup.py"
+    consumer.write_text(
+        "import sys\n"
+        "from snektest import assert_eq, test\n"
+        "assert_eq(sys.flags.context_aware_warnings, 1)\n"
+        "@test(mark='fast')\n"
+        "def startup_policy() -> None:\n"
+        "    assert_eq(sys.flags.context_aware_warnings, 1)\n"
+    )
+    environment = dict(os.environ)
+    environment.pop("COVERAGE_PROCESS_START", None)
+    environment.pop("PYTHON_CONTEXT_AWARE_WARNINGS", None)
+    for entry in ([str(executable)], [str(python), "-I", "-m", "snektest"]):
+        executed = subprocess.run(
+            [*entry, "--json-output", str(consumer)],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+        assert_eq(json.loads(executed.stdout)["passed"], 1)
+
+    _assert_optional_anyio(artifact, python=python, constraints=constraints, cwd=cwd)
+
+
+def _assert_optional_anyio(
+    artifact: Path, *, python: Path, constraints: Path, cwd: Path
+) -> None:
+    """Exercise the extra independently, after the core-only installation checks."""
+    absent = _run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            (
+                "from importlib.util import find_spec; "
+                "from snektest import assert_is_none; assert_is_none(find_spec('anyio'))"
+            ),
+        ],
+        cwd=cwd,
+    )
+    assert_eq(absent.returncode, 0, msg=absent.stdout + absent.stderr)
+    installed = _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--constraints",
+            str(constraints),
+            f"{artifact}[anyio]",
+        ],
+        cwd=cwd,
+    )
+    assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
+    consumer = cwd / f"test_{python.parent.parent.name.replace('-', '_')}_anyio.py"
+    consumer.write_text(
+        "import snektest\n"
+        "from anyio.to_thread import run_sync\n"
+        "from snektest import assert_eq, assert_in, test\n"
+        "assert_in('site-packages', snektest.__file__ or '')\n"
+        "@test(mark='medium')\n"
+        "async def offload() -> None:\n"
+        "    assert_eq(await run_sync(lambda: 42), 42)\n"
+    )
+    for mode in ("normal", "all"):
+        for arguments in ([], ["--workers", "1"]):
+            executed = _run(
+                [
+                    str(python),
+                    "-I",
+                    "-X",
+                    f"lazy_imports={mode}",
+                    "-m",
+                    "snektest",
+                    "--json-output",
+                    *arguments,
+                    str(consumer),
+                ],
+                cwd=cwd,
+            )
+            assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+            assert_eq(json.loads(executed.stdout)["passed"], 1)
+
+
 def _assert_wheel_manifest_and_metadata(
     wheel: Path, expected_package_files: set[str]
 ) -> None:
@@ -197,6 +329,7 @@ def _assert_wheel_manifest_and_metadata(
     assert_eq(metadata["Author-email"], "crpier42@gmail.com")
     assert_eq(metadata["License-Expression"], "MIT")
     assert_eq(metadata["Requires-Python"], ">=3.15")
+    assert_in("anyio", metadata.get_all("Provides-Extra"))
     project_urls = metadata.get_all("Project-URL")
     assert_in("Repository, https://github.com/crpier/snektest", project_urls)
     assert_in("Issues, https://github.com/crpier/snektest/issues", project_urls)
@@ -270,3 +403,5 @@ def test_wheel_and_sdist_are_intentional_and_independently_installable() -> None
     _assert_sdist_manifest(sdist, expected_package_files)
     _assert_install_smoke(wheel, target=tmp_dir / "wheel-install", cwd=tmp_dir)
     _assert_install_smoke(sdist, target=tmp_dir / "sdist-install", cwd=tmp_dir)
+    _assert_standalone_cli_startup(wheel, target=tmp_dir / "wheel-cli", cwd=tmp_dir)
+    _assert_standalone_cli_startup(sdist, target=tmp_dir / "sdist-cli", cwd=tmp_dir)

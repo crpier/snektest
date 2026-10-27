@@ -23,6 +23,16 @@ Notable user-facing changes are recorded here.
   fake checkers. Hard collection/synchronous deadlines still require an external
   command timeout; OS-specific fault evidence remains qualified. (#96)
 
+- Recognize idle AnyIO asyncio pool workers by current-loop registration and identity, without importing AnyIO, prewarming/shutting down pools, or exempting thread names or newly created busy workers. Add the optional `snektest[anyio]` extra, executable examples, and explicit task-local fixture-scope/backend limitations. This is the first #100 slice: backend selection and Trio remain unimplemented.
+
+- Add typed `temporary_directory(base=..., retention=...)` with inferred test/session ownership, default cleanup even on failure, explicit on-failure/always retention, off-loop recursive removal, ownership checks, and path-only console/programmatic/JSON reporting. Keep resource teardown before deletion and cleanup errors alongside original failures. Session policy is process-local; no global TMPDIR mutation, process management, historical pruning or hard-kill cleanup guarantees. (#97)
+
+- Make console collection errors user-first, with selected file/filter context, original types, source/carets, causes, notes, groups, and corrective `Param` guidance. Add `--full-traceback` for bounded framework/dependency details in local and worker modes; preserve JSON schema/output and collection semantics. Broken exception message formatters use a safe fallback instead of hiding the original collection error. (#102)
+
+- Enable context-aware warnings by default at standalone CLI startup, including spawned/replacement workers. Honor explicit Python startup opt-outs and precedence; preserve interpreter options, venv, argument boundaries, streams and exits across relaunch, while leaving library/programmatic policy unchanged. Interpreter/site startup hooks may repeat. (#107)
+
+- Clarify canonical named `Param` construction, tuple values versus Cartesian axes, stable selectors, and preserved `Literal` types. Expand executable assertion guidance for exact/regex exception text, `msg` overrides, original causes, actual-first comparisons, and bound narrowing results; make the embedded guide and copyable examples part of the recommended authoring workflow. Existing constructor and assertion behavior is unchanged. (#104)
+
 - Add `assert_raises(match=...)` for regex search of exception messages, supporting strings and compiled string patterns while preserving typed exception capture. Message mismatches and broken formatters are assertion failures with the original cause; invalid regexes and bytes patterns are rejected before entering the context body. `msg=` remains a failure-message override. (#105)
 
 - Add typed, explicit `capture_logs` / `LogCapture` for stdlib logger hierarchies, original structured records and safely rendered message snapshots, sync/async fixture lifetimes, overlapping scopes, and thread-originated records. Preserve application handlers, avoid unnecessary level writes, and retire capture ownership safely if application level setters fail, without automatic result attachments. (#95)

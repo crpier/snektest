@@ -20,6 +20,7 @@ lazy from typing import TypeGuard, cast
 lazy from pydantic import ValidationError
 
 lazy from snektest.annotations import PyFilePath, validate_PyFilePath
+lazy from snektest.collection_errors import safe_collection_message
 lazy from snektest.decorators import reset_run_fixture_catalog
 lazy from snektest.import_policy import initializing_imports
 lazy from snektest.keywords import KeywordExpression
@@ -379,13 +380,18 @@ def collect_tests_from_filters(
     empty_filters: list[FilterItem] = []
     module_loader = _CollectionModuleLoader()
     reset_run_fixture_catalog()
+    active_file: str | None = None
+    active_filter: str | None = None
     try:
         for filter_item in filter_items:
+            active_file = None
+            active_filter = str(filter_item)
             collected_before_filter = len(collected_cases)
             function_matched = filter_item.function_name is None
             params_matched = filter_item.params is None
             selection_names: set[TestName] = set()
             for file_path in generate_file_list(filter_item):
+                active_file = str(file_path)
                 collected_file = collect_tests_from_file(
                     file_path=file_path,
                     filter_item=filter_item,
@@ -427,14 +433,21 @@ def collect_tests_from_filters(
                 empty_filters=empty_filters,
             )
         _validate_nonempty_plan(collected_cases, empty_filters, allow_empty=allow_empty)
-    except CollectionError:
+    except CollectionError as error:
+        error.collection_file, error.collection_filter = active_file, active_filter
         raise
     except BadRequestError as exc:
-        msg = f"Invalid test definition: {exc}"
-        raise InvalidTestDefinitionError(msg) from exc
+        msg = f"Invalid test definition: {safe_collection_message(exc)}"
+        error = InvalidTestDefinitionError(msg)
+        error.collection_wrapped = True
+        error.collection_file, error.collection_filter = active_file, active_filter
+        raise error from exc
     except BaseException as exc:
-        msg = f"Error during collection: {exc}"
-        raise CollectionError(msg) from exc
+        msg = f"Error during collection: {safe_collection_message(exc)}"
+        error = CollectionError(msg)
+        error.collection_wrapped = True
+        error.collection_file, error.collection_filter = active_file, active_filter
+        raise error from exc
     return _select_keyword_cases(
         collected_cases,
         expression,

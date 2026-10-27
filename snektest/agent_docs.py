@@ -23,6 +23,55 @@ Engine registration uses a scoped filter that preserves unrelated import policy
 and restores the caller's filter on exit; the interpreter mode is unchanged.
 Unrelated third-party lazy-import compatibility remains application-owned.
 
+## CLI startup
+
+The executable, `python -m snektest`, and `python -m snektest.cli` enable
+context-aware warnings before collection and worker startup. No environment
+variable is needed for ordinary runs. Explicit Python startup choices win:
+`python -X context_aware_warnings=0 -m snektest ...` or
+`PYTHON_CONTEXT_AWARE_WARNINGS=0` opts out; `-X` beats the environment, while
+`-E`/`-I` ignore the environment and still apply the default. Already-enabled
+interpreters and explicit opt-outs do not restart.
+
+Otherwise the CLI relaunches the same interpreter/venv with its options,
+arguments, cwd and streams preserved. POSIX replaces the process without resetting
+inherited ignored signals; Windows waits for the child and propagates its exit
+status. Interpreter/site startup hooks may repeat, before collection. Importing
+Snektest, programmatic runners, and direct `snektest.cli.main` calls keep the host
+policy unchanged. This is startup policy, not hard interruption or cleanup.
+
+## AnyIO and async runtimes
+
+Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`. Snektest runs on asyncio;
+await AnyIO APIs directly, without `anyio.run()` or a nested event loop:
+
+```python
+from anyio.to_thread import run_sync
+
+from snektest import assert_eq, test
+
+
+@test(mark="medium")
+async def test_anyio_offload() -> None:
+    assert_eq(await run_sync(lambda: 42), 42)
+```
+
+Keep task groups and cancel scopes within a test or a single fixture phase;
+**never span a fixture's `yield`** with them, because setup and teardown may run
+in different tasks. Separate awaited operations work in either phase. Idle pool
+workers registered with the current asyncio loop are exempt from thread-leak
+checks by identity, not by name. New busy/abandoned workers and raw lookalikes
+remain failures. Existing-thread work is not comprehensively tracked; threads
+cannot be forcibly stopped. AnyIO is optional and core observation does not
+import it. Print `--example anyio` for task groups and fixture operations.
+
+This first slice adds neither a backend selector nor Trio support. Local runs,
+workers, and programmatic runners stay on asyncio. A future backend choice must
+be explicit and command-wide, apply to host/original/replacement workers and
+fixture/task/timeout lifetimes, preserve asyncio by default, reject missing or
+unsupported runtimes without fallback, and respect an embedding caller's loop.
+Do not infer backend support from AnyIO's API or nest a Trio run inside a test.
+
 ## Quick start
 
 Create a `test_*.py` file and decorate test functions with `@test(mark=...)`. Mark every test with the resources it may use:
@@ -60,6 +109,7 @@ snektest --durations 10
 snektest --agent-docs
 snektest --examples
 snektest --example async
+snektest --example anyio
 snektest examples
 snektest example async
 ```
@@ -204,7 +254,7 @@ counts now count each failed fixture teardown.
   Mismatches and broken message formatters raise `AssertionFailure` with the
   original cause; diagnostic fallback text is never matched. Invalid regexes and
   bytes patterns raise `BadRequestError` at context construction, before the body.
-  See `--example basic_test` for string and compiled-pattern examples.
+  See `--example basic` for regex, exact-text, and original-cause examples.
 - `assert_memory(peak_below=..., slope_below=..., rounds=..., warmup=...)` is a
   context-manager assertion for memory budgets (bytes as `int`). Wrap a region
   for a whole-block peak budget, or loop work over `m.rounds`. `rounds` must be
@@ -241,8 +291,11 @@ counts now count each failed fixture teardown.
 - Async tests are regular `async def` functions decorated with `@test(mark=...)`. Function fixtures tear down before task-leak checks. A task created during fixture setup belongs to that fixture and stays alive through teardown; session-owned tasks may stay alive between tests. Snektest attributes abandoned fixture tasks to their fixture, cancels test-owned leaks, and leaves tasks from an embedding host application alone.
 - Failed fixture setup retains task ownership before its first yield. At the fixture's scope teardown, abandoned tasks are cancelled and cleanup failures are reported separately from the setup error. Retrying a failed session fixture preserves cleanup for each attempt. Shared async session setup survives cancellation of a test's waiter and remains available to later tests. At scope teardown, unfinished setup receives bounded cancellation; resistance and cleanup errors become fixture teardown diagnostics. Function setup left pending when its test returns is abandoned fixture work and is cleaned before the next test. Put background-task setup and the fixture's `yield` inside `try`/`finally` so both setup failure and normal teardown stop tasks.
 - Use `await asyncio.to_thread(...)` for blocking application work in an async test, and load fixtures before offloading. `to_thread` copies context; a raw `threading.Thread` does not inherit the fixture registry. An async timeout stops awaiting offloaded work but cannot stop its thread, which may continue or delay shutdown. Sync, CPU-bound, import, raw-thread, and sync-teardown hangs still need an outer process or CI timeout.
-- Unhandled thread and `sys.unraisablehook` exceptions make an otherwise passing test an error. A new non-daemon thread still alive after function teardown makes it fail; joined threads pass, daemon threads and event-loop default-executor workers are exempt. Existing hooks are chained and restored. Extra background failures remain visible in console and JSON diagnostics. Snektest does not kill threads or provide a threaded test executor.
-- Use `Param(value=..., name=...)` inside `@test([...], mark=...)` for parameterization. Every parameter list must be non-empty. Multiple lists form a Cartesian product capped at 10,000 cases per decorated test; larger products fail during collection. Case names must be unique and non-empty and cannot contain `, `, `[` or `]`, so their CLI filters are unambiguous. Static typing preserves parameter types through two lists; three or more use a variadic `Any` fallback. `@test_hypothesis` preserves strategy types through five strategies; six or more use its `Any` fallback.
+- Unhandled thread and `sys.unraisablehook` exceptions make an otherwise passing test an error. A new non-daemon thread still alive after function teardown makes it fail; joined threads pass, daemon threads, event-loop default-executor workers, and registered idle AnyIO workers on that loop are exempt. Existing hooks are chained and restored. Extra background failures remain visible in console and JSON diagnostics. Snektest does not kill threads or provide a threaded test executor.
+- Use `Param(value=..., name=...)` for one named value per argument. See
+  **Parameter values and case names** below for tuples versus separate axes and
+  common construction mistakes. `@test_hypothesis` preserves strategy types
+  through five strategies; six or more use its `Any` fallback.
 - Define fixtures as generator functions decorated with `@fixture`, annotated `Generator[T]` or `AsyncGenerator[T]`. Load them with `load_fixture(fixture())` — call the decorated fixture and pass the returned handle.
 - `@fixture` (default) is function-scoped. `@fixture(scope="session")` is cached once per execution process. `@fixture(scope="run")` is a zero-argument module-level fixture owned once by the command; it yields an inert stdlib-pickle descriptor of at most 1 MiB, and each worker receives an independent decoded copy. The literals and matching `Scope` enum members normalize to `Scope`; fixture handles expose that enum at runtime.
 - Fixtures may take arguments; pass them at the call site, e.g. `load_fixture(make_user("Ada"))`. Calling a fixture twice gives two independent instances.
@@ -278,6 +331,134 @@ counts now count each failed fixture teardown.
 Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--allow-empty`, in local, worker, and collect-only modes.
 
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
+
+## Collection failures
+
+Default console diagnostics identify the selected file/filter, original exception,
+and user source rather than framework plumbing. Syntax carets, causes, notes,
+and exception groups remain useful. Rerun the same command with
+`--full-traceback` to include framework/dependency frames, including with
+`--collect-only` or workers. Both modes are bounded and mark truncation; full
+detail is not a locals dump. The flag does not change JSON schema version 1 or
+captured collection output/warnings; use `--json-output` for those structured
+diagnostics. Collection still exits 2 and finishes before any body runs; fix the
+import/declaration instead of weakening validation or adding `--allow-empty`.
+
+## Parameter values and case names
+
+Use `Param(value=..., name=...)`. `Param(value="sqlite")` and `Param("sqlite")`
+both lack the required name: write `Param(value="sqlite", name="sqlite")`.
+`Param(1, 2, name="pair")` is not a two-value case: write
+`Param(value=(1, 2), name="pair")` and accept one tuple argument. Positional
+construction with both required fields remains supported.
+
+```python
+from snektest import Param, assert_eq, test
+
+
+@test(
+    [
+        Param(value=(2, 3, 5), name="small"),
+        Param(value=(100, 200, 300), name="large"),
+    ],
+    mark="fast",
+)
+def test_tuple_value(case: tuple[int, int, int]) -> None:
+    # One Param passes one tuple argument, not three separate arguments.
+    left, right, expected = case
+    assert_eq(left + right, expected)
+```
+
+A tuple-valued list selects related inputs as one argument; two parameter lists
+supply two arguments and form a Cartesian product, not pairwise zip. Each list
+must be non-empty; names must be non-empty, unique within that list, and exclude
+`, `, `[` and `]`. Explicit stable names become selector IDs; never infer them
+from arbitrary value reprs. One decorated test may expand to at most 10,000 cases;
+split larger matrices or sample with Hypothesis. `@test` checks parameter types
+through two lists; three or more use its variadic `Any` fallback.
+
+Print the complete scalar/tuple/two-axis example with
+`snektest --example parametrize > test_parametrize.py`, then inspect selectors:
+
+```bash
+snektest test_parametrize.py --collect-only
+snektest 'test_parametrize.py::test_tuple_value[small]'
+snektest 'test_parametrize.py::test_cartesian_product[hello, world]'
+```
+
+An unconstrained axis may widen literal values to `str`. When the test accepts
+`Literal` values, preserve them by annotating the axis as `list[Param[Backend]]`
+(or use explicit `Param[Backend](...)` constructors); avoid casts or `Any`:
+
+```python
+from typing import Literal
+
+from snektest import Param, assert_in, test
+
+
+type Backend = Literal["sqlite", "mariadb"]
+
+BACKENDS: list[Param[Backend]] = [
+    Param(value="sqlite", name="sqlite"),
+    Param(value="mariadb", name="mariadb"),
+]
+
+
+@test(BACKENDS, mark="fast")
+def test_literal_backend(backend: Backend) -> None:
+    assert_in(backend, ("sqlite", "mariadb"))
+```
+
+## Narrowing and assertion argument order
+
+Bind narrowing helpers' return values when using the checked value later. This
+both asserts and gives the checker a non-`None` or instance-specific value;
+calling a helper without binding its result is not the recommended narrowing
+pattern. Discard with `_ = assert_isinstance(value, SomeType)` for a pure check.
+Keep the observed/computed value first in subsequent comparisons:
+
+```python
+from snektest import assert_eq, assert_is_not_none, assert_isinstance, test
+
+
+@test(mark="fast")
+def test_bound_narrowing_helpers() -> None:
+    settings: dict[str, object] = {"suite": "SNEKTEST"}
+    configured = assert_is_not_none(settings.get("suite"))
+    name = assert_isinstance(configured, str)
+    assert_eq(name.lower(), "snektest")
+```
+
+## Exception text and original causes
+
+Use `match=` for regex search, or capture `.exception` and assert its exact text.
+`msg=` only overrides a failing assertion's diagnostic: it does not match text.
+Matching never searches causes or notes. Inspect the original cause explicitly:
+
+```python
+from snektest import assert_eq, assert_in, assert_isinstance, assert_raises, test
+
+
+def _parse_port(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        message = "invalid port"
+        raise RuntimeError(message) from error
+
+
+@test(mark="fast")
+def test_exception_cause() -> None:
+    with assert_raises(RuntimeError, msg="port conversion should fail") as caught:
+        _ = _parse_port("not-a-number")
+
+    assert_eq(str(caught.exception), "invalid port")
+    cause = assert_isinstance(caught.exception.__cause__, ValueError)
+    assert_in("not-a-number", str(cause))
+```
+
+The deliberately different `msg=` does not prevent this test from passing.
+Print the complete assertion examples with `snektest --example basic`.
 
 ## Skips and known defects
 
@@ -519,6 +700,43 @@ snektest --update-benchmark-baseline .snektest-benchmarks.json tests/performance
 snektest --benchmark-baseline .snektest-benchmarks.json tests/performance
 ```
 
+## Managed temporary directories
+
+Call `temporary_directory(base=..., retention="never" | "on-failure" | "always")`
+inside sync/async tests or fixture setup; it returns `Path` immediately, not a
+fixture handle. Default "never" cleans even failed tests. "on-failure" uses final
+outcomes including teardown/task/background failures, not exceptions consumed by
+`assert_raises`, SKIP or XFAIL. "always" retains successful evidence too.
+
+```python
+from snektest import assert_eq, temporary_directory, test
+
+
+@test(mark="medium")
+def test_owned_file() -> None:
+    root = temporary_directory(retention="on-failure")
+    target = root / "payload.txt"
+    _ = target.write_text("payload", encoding="utf-8")
+    assert_eq(target.read_text(encoding="utf-8"), "payload")
+```
+
+Ordinary resource teardown and task cleanup precede directory policy. Session setup
+infers session ownership: roots survive between cases; retention considers any
+failure in that execution process and its session teardown, not other workers or
+later run-fixture errors. Every call is fresh; use a cached session fixture to
+share one path. Run fixtures/standalone context-manager use are unsupported.
+
+Supply an existing short private `base` to avoid tmpfs quotas/socket limits; pass
+paths or child environments explicitly and stop/reap consumers first. Never infer
+ownership of library-created paths. Global TMPDIR and reusable data are unchanged.
+Completed console/JSON results expose retained paths, not contents; the run's
+`retained_directories` aggregates individual-test and session records. Removal
+errors are fixture errors without replacing the test's failure. Large removal
+runs in a thread and waits through caller cancellation, but threads cannot be
+interrupted: a filesystem hang needs an outer timeout. Crashes/SIGKILL can orphan
+roots, interruptions may prevent the final path report, and intentional retention
+still accumulates. No automatic pruning is offered. Print `--example temporary`.
+
 ## Explicit log capture
 
 Use `with capture_logs(logger, level=logging.DEBUG) as logs` inside either sync
@@ -559,6 +777,7 @@ Print one example:
 ```bash
 snektest --example basic
 snektest --example fixtures
+snektest --example temporary
 snektest --example async
 snektest --example benchmark
 snektest --example memory
@@ -572,10 +791,12 @@ snektest --example graphql
 """
 
 EXAMPLE_FILES: dict[str, str] = {
+    "anyio": "anyio_tests.py",
     "async": "async_tests.py",
     "basic": "basic_test.py",
     "benchmark": "benchmark.py",
     "fixtures": "fixtures.py",
+    "temporary": "temporary.py",
     "graphql": "graphql.py",
     "logging": "log_capture.py",
     "memory": "memory.py",

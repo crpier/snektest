@@ -297,6 +297,48 @@ keeps fixture setup unconditional, makes teardown ownership obvious, and avoids
 hiding fixture setup behind an earlier assertion failure or branch. Only load a
 fixture later in a test when delayed fixture loading is the behavior being tested.
 
+### Managed temporary directories
+
+`temporary_directory(*, base=None, retention="never") -> Path` works in sync or
+async tests/fixture setup without `await` or `load_fixture`. Each call returns a
+unique private absolute path; ordinary resource teardown and test-task/background
+classification finish before directory policy runs.
+
+```python
+from snektest import assert_eq, temporary_directory, test
+
+
+@test(mark="medium")
+def test_owned_file() -> None:
+    root = temporary_directory(retention="on-failure")
+    target = root / "payload.txt"
+    _ = target.write_text("payload", encoding="utf-8")
+    assert_eq(target.read_text(encoding="utf-8"), "payload")
+```
+
+Default `"never"` attempts cleanup even on failure. `"on-failure"` retains FAIL,
+ERROR, XPASS, setup/teardown and background failures, but not consumed exceptions
+or SKIP/XFAIL. `"always"` keeps successful artifacts too. Completed console runs
+report paths only; JSON schema version 1 adds optional `retained_directories`
+arrays on individual tests and the run aggregate. Cleanup errors remain fixture
+errors alongside the original test failure; no artifact contents are attached.
+
+Use `base=` with an **existing**, short, private directory to avoid a small tmpfs
+or long socket paths. Pass the allocated path explicitly to dependencies/children;
+Snektest never changes global `TMPDIR`, sweeps unrelated data, or stops processes.
+Stop/reap consumers before deletion. Roots allocated during session-fixture setup
+survive that process's session teardown; session retain-on-failure considers any
+failure observed by that process, not other workers or later run-fixture errors.
+Run-fixture and standalone context-manager ownership are unsupported.
+
+Recursive removal runs off the shared event loop and waits through caller
+cancellation. Filesystem threads cannot be interrupted, so a stalled removal can
+exceed `--timeout` and still needs an outer process/CI deadline. Crashes/SIGKILL
+can orphan roots, and interrupted runs may lack a completed path report. Retained
+or orphaned roots require deliberate owner-checked cleanup; there is no automatic
+historical pruning. Print `snektest --example temporary` and read
+[temporary-directory policy](docs/temporary-directories.md) for ordering and limits.
+
 ### Rich Assertions
 
 `assert_eq(actual, expected)` keeps the observed value first and preserves Python's
@@ -437,6 +479,45 @@ is bounded too; resistance and cleanup errors become fixture teardown diagnostic
 Function setup left pending when its test returns counts as abandoned fixture
 work and is cleaned before the next test. Use `try`/`finally` around background-task setup as well as the
 fixture's `yield` to stop tasks yourself on either path.
+
+#### AnyIO on asyncio
+
+For AnyIO APIs or libraries that use them, install the optional integration:
+
+```bash
+uv add 'snektest[anyio]'
+```
+
+Snektest still runs on **asyncio**. Await AnyIO operations directly; do not call
+`anyio.run()` inside a test or start another event loop:
+
+```python
+from anyio.to_thread import run_sync
+
+from snektest import assert_eq, test
+
+
+@test(mark="medium")
+async def test_anyio_offload() -> None:
+    assert_eq(await run_sync(lambda: 42), 42)
+```
+
+Task groups and cancel scopes must enter and exit in the same task. Keep them
+inside a test or a single fixture setup/teardown phase, **not across a fixture's
+`yield`**: fixture setup and teardown may run in different tasks. Independently
+awaited AnyIO operations work in both phases; print `snektest --example anyio`.
+
+Idle AnyIO pool workers registered with the current loop are not thread leaks.
+This is identity-based, not a thread-name exemption. New busy/abandoned workers
+and raw lookalike threads still fail the ordinary thread check. Existing-thread
+work is not comprehensively tracked, and no thread can be forcibly stopped.
+AnyIO remains optional and is not imported by core execution merely to inspect
+threads. The extra selects AnyIO `>=4.14.2,<5`.
+
+There is **no backend selector or Trio support** in this first integration slice.
+Local runs, workers, and programmatic runners retain their asyncio lifecycle.
+See [backend policy and limitations](docs/async-backends.md), including the
+requirements for a future explicit runtime choice.
 
 ### Skips and known defects
 
@@ -610,8 +691,23 @@ def test_needs_a_timing_budget() -> None:
 
 ### Parameterized Tests
 
-Run the same test with different inputs. Every parameter list must be non-empty.
-Case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
+Use the canonical spelling `Param(value=..., name=...)`: each `Param` contains
+**one value**, passed to one test argument. Use a tuple for related inputs and an
+expected output; use separate parameter lists for independent arguments and every
+combination of their values.
+
+Names are explicit, stable case IDs used in rerun selectors, not inferred from
+value reprs (which may be unstable or sensitive). Common construction mistakes:
+
+| Attempt | Correction |
+| --- | --- |
+| `Param(value="sqlite")` or `Param("sqlite")` | Supply the required name: `Param(value="sqlite", name="sqlite")`. |
+| `Param(1, 2, name="pair")` | A `Param` holds one value: `Param(value=(1, 2), name="pair")`, consumed by one tuple-annotated argument. |
+
+This is usage guidance, not a constructor change: positional construction with
+both required fields remains supported.
+
+Every parameter list must be non-empty. Within a list, case names must be unique and non-empty, and cannot contain `, `, `[` or `]` so
 rendered case filters remain unambiguous. Multiple lists form a Cartesian
 product. One decorated test may expand to at most 10,000 cases; larger products
 raise `BadRequestError` during collection. Split exhaustive matrices or use
@@ -633,15 +729,69 @@ def test_string_length(value: str) -> None:
     assert_eq(len(value), 5)
 
 
-# Test with multiple parameter combinations (cartesian product)
+@test(
+    [
+        Param(value=(2, 3, 5), name="small"),
+        Param(value=(100, 200, 300), name="large"),
+    ],
+    mark="fast",
+)
+def test_tuple_value(case: tuple[int, int, int]) -> None:
+    """One Param passes one tuple argument, not three separate arguments."""
+    left, right, expected = case
+    assert_eq(left + right, expected)
+
+
+# Two lists produce four cases, not two paired cases.
 @test(
     [Param(value="hello", name="hello"), Param(value="hi", name="hi")],
     [Param(value=" world", name="world"), Param(value=" there", name="there")],
     mark="fast",
 )
-def test_concatenation(greeting: str, target: str) -> None:
+def test_cartesian_product(greeting: str, target: str) -> None:
     result = greeting + target
     assert_eq(result[0], greeting[0])
+```
+
+Save the block as `test_parametrize.py`. Its tuple test has two cases, each
+receiving one tuple; its two-axis test has four cases, each receiving two strings.
+Quote selectors containing brackets or spaces when using a shell:
+
+```bash
+snektest 'test_parametrize.py::test_tuple_value[small]'
+snektest 'test_parametrize.py::test_cartesian_product[hello, world]'
+```
+
+Use `snektest --collect-only test_parametrize.py` to list selectors, and
+`snektest --example parametrize` to print a complete copyable example. The embedded
+`snektest --agent-docs` guide covers the same conventions.
+
+#### Preserving literal parameter types
+
+An unconstrained list can infer `Param[str]` even when the test argument expects
+`Literal["sqlite", "mariadb"]`. A function accepting that literal union cannot
+accept every `str`; annotate the axis as `list[Param[Backend]]` so its values
+retain the intended type. Alternatively construct each value explicitly as
+`Param[Backend](value="sqlite", name="sqlite")`. Neither approach needs `Any`,
+casts, nor type-checker ignores:
+
+```python
+from typing import Literal
+
+from snektest import Param, assert_in, test
+
+
+type Backend = Literal["sqlite", "mariadb"]
+
+BACKENDS: list[Param[Backend]] = [
+    Param(value="sqlite", name="sqlite"),
+    Param(value="mariadb", name="mariadb"),
+]
+
+
+@test(BACKENDS, mark="fast")
+def test_literal_backend(backend: Backend) -> None:
+    assert_in(backend, ("sqlite", "mariadb"))
 ```
 
 ### Static Type Checking
@@ -744,6 +894,44 @@ Internal invariant failures are not exported from the top-level package.
 
 ## Running Tests
 
+Standalone CLI commands enable **context-aware warnings** before collection,
+including in workers. Explicit Python settings win: use
+`python -X context_aware_warnings=0 -m snektest ...` or set
+`PYTHON_CONTEXT_AWARE_WARNINGS=0` to opt out. `-X` takes precedence over the
+environment; `-E`/`-I` ignore the environment, not the CLI default. Already-enabled
+interpreters and explicit opt-outs do not restart.
+
+Otherwise the CLI relaunches the same interpreter, preserving its venv, options,
+arguments and streams. POSIX keeps the PID and inherited ignored signals; Windows
+uses a waiting parent and propagates the child exit status. Interpreter/site
+startup hooks may repeat; collection starts only after the policy is established.
+Library imports, programmatic runners, and direct `snektest.cli.main` calls leave
+the embedding application's startup policy untouched. See
+[CLI startup policy](docs/cli-startup.md) for process, signal, and startup-hook
+limits. There is no new Snektest configuration key or flag.
+
+### Collection errors
+
+A collection failure exits 2 and shows the selected file/filter, original error,
+and useful user-code source context instead of a framework traceback. Syntax
+source/carets, meaningful causes, notes, and exception-group members remain
+visible. Common parameter-construction errors include corrective guidance.
+
+Rerun with `--full-traceback` for framework and dependency frames:
+
+```sh
+snektest --full-traceback tests/test_example.py
+snektest --full-traceback --collect-only tests/test_example.py
+snektest --full-traceback --workers 2 tests/test_example.py
+```
+
+Both displays are bounded and explicitly mark truncation; full detail does not
+dump locals or mean unlimited output. `--full-traceback` does not change JSON
+schema version 1, captured collection diagnostics, selection, or execution.
+Use `--json-output` to retain structured exceptions and captured import
+output/warnings. See [collection error diagnostics](docs/collection-errors.md)
+for frame selection, display limits, and worker behavior.
+
 ### Release health
 
 Run the complete release gate before opening a pull request:
@@ -772,8 +960,11 @@ capture enabled, JSON records import output and warnings separately from test
 output. They cannot prefix or otherwise corrupt the JSON document.
 
 ```sh
-# Run all tests
+# Run all tests (context-aware warnings enabled by default)
 snektest
+
+# Explicitly test Python's legacy warnings behavior instead
+python -X context_aware_warnings=0 -m snektest tests/test_example.py
 
 # Run specific file
 snektest tests/test_myfeature.py
@@ -829,13 +1020,19 @@ snektest -s --json-output
 # Write a JUnit XML report while retaining normal console output
 snektest --junit-output reports/snektest.xml
 
-# Print AI-agent usage guide
+# Before authoring tests, read the guide and copy the relevant example
 snektest --agent-docs
 python -m snektest --agent-docs
 
 # List or print bundled examples
 snektest --examples
 snektest --example async
+snektest --example parametrize > test_parametrize.py
+snektest --example basic > test_basic.py
+
+# Inspect exact case names before running one quoted selector
+snektest test_parametrize.py --collect-only
+snektest 'test_parametrize.py::test_tuple_value[small]'
 
 # Drop into post-mortem debugging on first failure
 snektest --pdb
@@ -1019,7 +1216,8 @@ An unhandled exception from a thread during a test, or an exception reported by
 `sys.unraisablehook`, makes an otherwise passing test an error. A new non-daemon
 thread still alive after function-fixture teardown makes an otherwise passing
 test fail; joined threads pass, daemon threads are ignored, and persistent
-workers owned by the event loop's default executor are exempt. Existing process
+workers owned by the event loop's default executor and registered idle AnyIO
+workers on that loop are exempt. Existing process
 hooks are called and restored. When the body already failed or errored,
 additional background failures remain visible in console output and the JSON
 `background_failures` field.
@@ -1544,6 +1742,24 @@ signature: `assert_eq(actual, expected)`, `assert_in(member, container)`,
 - `assert_not_isinstance(obj, classinfo)` — assert that `isinstance(obj, classinfo)` is false
 - `assert_len(obj, expected_length)` — assert that `len(obj) == expected_length`
 
+Bind narrowing helpers' return values when using the checked value later. This
+both asserts and gives the checker a non-`None` or instance-specific value;
+calling a helper without binding its result is not the recommended narrowing
+pattern. Discard with `_ = assert_isinstance(value, SomeType)` for a pure check.
+Keep the observed/computed value first in subsequent comparisons:
+
+```python
+from snektest import assert_eq, assert_is_not_none, assert_isinstance, test
+
+
+@test(mark="fast")
+def test_bound_narrowing_helpers() -> None:
+    settings: dict[str, object] = {"suite": "SNEKTEST"}
+    configured = assert_is_not_none(settings.get("suite"))
+    name = assert_isinstance(configured, str)
+    assert_eq(name.lower(), "snektest")
+```
+
 ### Exception Assertions
 
 **`assert_raises(*expected_exceptions, msg=None, match=None)`** - Assert that code raises an expected exception, optionally matching its message
@@ -1568,7 +1784,7 @@ exception after exit:
 ```python
 import re
 
-from snektest import assert_eq, assert_raises, test
+from snektest import assert_eq, assert_in, assert_isinstance, assert_raises, test
 
 
 @test(mark="fast")
@@ -1597,7 +1813,31 @@ def test_compiled_message_pattern() -> None:
     pattern = re.compile(r"^invalid field: name$", re.IGNORECASE)
     with assert_raises(ValueError, match=pattern, msg="expected a field error"):
         raise ValueError("INVALID FIELD: NAME")
+
+
+def _parse_port(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        message = "invalid port"
+        raise RuntimeError(message) from error
+
+
+@test(mark="fast")
+def test_exception_cause() -> None:
+    with assert_raises(RuntimeError, msg="port conversion should fail") as caught:
+        _ = _parse_port("not-a-number")
+
+    assert_eq(str(caught.exception), "invalid port")
+    cause = assert_isinstance(caught.exception.__cause__, ValueError)
+    assert_in("not-a-number", str(cause))
 ```
+
+The cause is a separate exception object: message matching does not search it.
+Inspect `.exception.__cause__` explicitly, binding the value returned by
+`assert_isinstance` before using it. In the example, `msg="port conversion should
+fail"` is only a diagnostic override, not a requirement on the exception text.
+Print these patterns with `snektest --example basic`.
 
 ### Memory Assertions
 

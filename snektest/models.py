@@ -30,6 +30,11 @@ class CollectionError(SnektestError):
 
     def __init__(self, message: str) -> None:
         self.collection_diagnostic: ExceptionDiagnostic | None = None
+        self.collection_full_traceback: str | None = None
+        self.collection_console: str | None = None
+        self.collection_file: str | None = None
+        self.collection_filter: str | None = None
+        self.collection_wrapped = False
         self.collection_output = ""
         self.collection_warnings: tuple[str, ...] = ()
         self.uncaptured_output = ""
@@ -520,6 +525,16 @@ type TestStatus = Literal[
 
 
 @dataclass(frozen=True)
+class RetainedDirectory:
+    """Path-only evidence retained by runner-owned temporary-directory policy."""
+
+    path: str
+    retention: Literal["never", "on-failure", "always"]
+    reason: Literal["always", "failure", "cleanup_error"]
+    scope: Literal["function", "session"]
+
+
+@dataclass(frozen=True)
 class TestResult:
     captured_output: str
     duration: float
@@ -538,6 +553,7 @@ class TestResult:
     warnings: tuple[str, ...]
     ordinal: int = 0
     background_failures: tuple[BackgroundFailure, ...] = ()
+    retained_directories: tuple[RetainedDirectory, ...] = ()
 
     @property
     def is_actionable_failure(self) -> bool:
@@ -602,6 +618,7 @@ class RunResult:
     selected_tests: int = 0
     stopped_early: bool = False
     total_duration: float = 0.0
+    retained_directories: tuple[RetainedDirectory, ...] = ()
 
     def __post_init__(self) -> None:
         if self.selected_tests == 0 and self.total_tests > 0:
@@ -622,6 +639,7 @@ class RunResult:
         selected_tests: int | None = None,
         collection_output: str = "",
         collection_warnings: tuple[str, ...] = (),
+        retained_directories: tuple[RetainedDirectory, ...] = (),
     ) -> RunResult:
         """Normalize execution details and calculate status counts once."""
         return cls(
@@ -641,6 +659,14 @@ class RunResult:
             ),
             collection_output=collection_output,
             collection_warnings=collection_warnings,
+            retained_directories=(
+                *(
+                    directory
+                    for result in test_results
+                    for directory in result.retained_directories
+                ),
+                *retained_directories,
+            ),
             run_teardown_failed=len(run_teardown_failures),
             session_teardown_failed=len(session_teardown_failures),
             run_teardown_failures=run_teardown_failures,

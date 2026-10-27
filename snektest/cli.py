@@ -1,7 +1,6 @@
 lazy import asyncio
 lazy import json
 lazy import sys
-lazy import traceback
 lazy from collections.abc import Callable, Coroutine
 lazy from contextlib import nullcontext
 lazy from dataclasses import dataclass
@@ -17,6 +16,7 @@ lazy from snektest.agent_docs import (
 )
 lazy from snektest.benchmark_baseline import BenchmarkBaseline, discover_project_root
 lazy from snektest.collection import collect_test_plan
+lazy from snektest.collection_errors import format_collection_error
 lazy from snektest.configuration import ProjectConfig, load_project_config
 lazy from snektest.diagnostics import snapshot_exception
 lazy from snektest.execution import run_tests
@@ -100,6 +100,7 @@ class CliOptions:
     example_name: str | None = None
     fail_fast: bool = False
     filters: tuple[str, ...] = ()
+    full_traceback: bool = False
     json_output: bool = False
     junit_output: str | None = None
     pdb_on_failure: bool = False
@@ -127,6 +128,9 @@ VALID_MARKER_VALUES = {"fast", "medium", "slow"}
 HELP_TEXT = """Usage: snektest [OPTIONS] [FILTER ...]
 
 Run snektest tests.
+Standalone startup enables context-aware warnings unless Python startup settings
+explicitly override it. Opt out with PYTHON_CONTEXT_AWARE_WARNINGS=0 or use
+python -X context_aware_warnings=0 -m snektest. Library calls retain host policy.
 
 Filters:
   .                                      Run tests below current directory
@@ -151,6 +155,7 @@ Options:
                     Write a JUnit XML report
   --no-junit-output Disable a configured JUnit report
   --collect-only    List selected test identifiers without running test bodies
+  --full-traceback  Include framework frames in collection error diagnostics
   --allow-empty     Exit successfully when no tests are selected
   --benchmark-baseline PATH
                     Compare opted-in benchmarks with a machine-bound baseline
@@ -358,6 +363,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     collect_only = False
     example_name: str | None = None
     fail_fast = False
+    full_traceback = False
     json_output = project_config.json_output if project_config else False
     json_option_seen = False
     junit_output = project_config.junit_output if project_config else None
@@ -410,6 +416,8 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
             json_option_seen = True
         elif arg == "--collect-only":
             collect_only = True
+        elif arg == "--full-traceback":
+            full_traceback = True
         elif arg == "--junit-output":
             if junit_option_seen:
                 return ParseError("Only one --junit-output value is supported")
@@ -546,6 +554,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         example_name=example_name,
         fail_fast=fail_fast,
         filters=tuple(filters),
+        full_traceback=full_traceback,
         json_output=json_output,
         junit_output=junit_output,
         mark=mark,
@@ -1070,11 +1079,12 @@ def main_inner(  # noqa: C901, PLR0911, PLR0912
     except CollectionError as error:
         if json_requested:
             return render_error(error, category="collection", exit_code=2)
-        if error.__cause__ is None:
-            print_error(f"Collection error: {error}")
-        else:
-            formatted = "".join(traceback.format_exception(error)).rstrip()
-            print_error(f"Collection error:\n{formatted}")
+        print_error(
+            format_collection_error(
+                error, full_traceback="--full-traceback" in arguments
+            ),
+            soft_wrap=True,
+        )
         return 2
     except BadRequestError as error:
         if json_requested:
@@ -1106,4 +1116,6 @@ def main_inner(  # noqa: C901, PLR0911, PLR0912
 
 
 if __name__ == "__main__":
-    main()
+    lazy from snektest._bootstrap import main as bootstrap_main
+
+    bootstrap_main()

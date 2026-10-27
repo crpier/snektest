@@ -4,6 +4,15 @@
 
 snektest is a Python testing framework with first class support for async and static typing.
 
+## Authoring tests
+
+Before adding tests, read `uv run snektest --agent-docs` and print the relevant
+bundled example (`uv run snektest --example parametrize` or `--example basic`).
+Copy canonical shapes rather than assuming pytest-compatible constructor or
+assertion arguments. Validate new parameter selectors with `--collect-only` and
+run the chosen case; documentation snippets must also pass the existing strict
+ty/execution checks in `tests/meta/test_doc_blocks.py`.
+
 ## Development Commands
 
 ### Complete release gate
@@ -101,7 +110,16 @@ User-facing changes belong in `CHANGELOG.md`; private security reports follow
 
 ### Test Collection & Execution Flow
 
-1. **CLI Entry** (`cli.py:main`): Parse args, create filter items, start async event loop
+1. **CLI Entry** (`_bootstrap.py:main`): Establish standalone startup policy before
+   calling `cli.py:main` to parse args, create filters, and start the event loop.
+   Executable and module entry points default context-aware warnings to enabled;
+   opt out with `-X context_aware_warnings=0` or
+   `PYTHON_CONTEXT_AWARE_WARNINGS=0`, with Python's normal precedence and `-E`/`-I`
+   semantics. Imports, programmatic runners, and direct `cli.main` calls retain
+   host policy. When changing startup precedence, relaunch, streams, entry points,
+   or signal handling, read `docs/cli-startup.md` and exercise real CLI, embedding,
+   and independently installed artifact seams. Keep opt-outs and workers aligned;
+   retain inherited ignored signals rather than broadening signal policy here.
 2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
 3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop. Fail-fast stops after a failure, error, XPASS, or function teardown failure; SKIP and XFAIL continue.
 4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent
@@ -180,6 +198,18 @@ async def my_fixture() -> AsyncGenerator[str]:
     yield "value"
     # teardown
 ```
+
+### Managed temporary directories
+
+`temporary.py` owns `temporary_directory` allocation, retention and off-loop
+removal; `FixtureRegistry` supplies active test/session lifetime. Finalize function
+roots only after ordinary fixture/task/background classification, session roots
+after ordinary session teardown. When changing lifetime inference, outcome rules,
+ownership checks, cancellation, worker transport or retained-path reporting, read
+`docs/temporary-directories.md` and exercise real local/worker CLI/JSON, embedding
+cancellation/progress, and installed-wheel seams. Preserve path-only reporting,
+explicit base placement and cleanup-error attribution without global TMPDIR
+mutation or claims of cleanup after process death/stalled filesystem IO.
 
 ### Keyword selection
 
@@ -332,7 +362,9 @@ Execution temporarily installs and chains `threading.excepthook` and
 `sys.unraisablehook` around each canonically sequential test, including function
 teardown and task cleanup. An unhandled thread or unraisable exception turns a
 pass into an error. New non-daemon threads alive afterward turn a pass into a
-failure; daemon and current event-loop default-executor threads are exempt.
+failure; daemon and current event-loop default-executor threads are exempt. Registered idle
+AnyIO workers on that loop are also exempt by identity, never by thread name.
+New busy AnyIO workers and raw lookalikes retain the ordinary leak diagnostic.
 Additional background failures on an existing failure/error remain process-safe
 `BackgroundFailure` diagnostics in console and JSON. Broken exception message formatters cannot hide thread or unraisable failures; diagnostics use a safe fallback and still chain the previous hooks. Hooks are process-global,
 so concurrent direct `execute_test` calls are unsupported. The standard runner
@@ -345,6 +377,18 @@ be cancelled. A timed-out `to_thread` await leaves its function running and it
 may delay event-loop shutdown. Raw leaked threads, sync or CPU-bound hangs,
 imports, and sync teardown still need an outer process/CI timeout. There is no
 threaded test executor.
+
+### AnyIO and backend policy
+
+When changing AnyIO thread recognition, fixture integration, or async runtime
+selection, read `docs/async-backends.md`. This first #100 slice supports awaited
+AnyIO operations on asyncio, not Trio or a backend selector. Keep task-local
+AnyIO scopes inside a single test/setup/teardown task, not across fixture yield.
+`thread_observation.py` isolates the private AnyIO RunVar identity lookup, reads
+only an already-loaded backend, and fails closed on unknown registry shapes.
+Preserve raw-thread/busy-new-worker leak checks; do not prewarm, daemonize, rename,
+or shut down a caller-owned pool. Existing-thread work is not fully tracked.
+The optional extra and explicit dev dependency select AnyIO `>=4.14.2,<5`.
 
 ### Timeouts
 
@@ -395,6 +439,23 @@ Interactions:
   limited use for locating a timeout.
 
 ### Parameterization
+
+Use `Param(value=..., name=...)`: one named value per argument. A tuple value
+carries related inputs/expected output to one tuple-annotated argument; separate
+lists supply separate arguments and their Cartesian product, never pairwise zip.
+Missing names (`Param(value="sqlite")` / `Param("sqlite")`) require an explicit
+stable name; multiple values (`Param(1, 2, name="pair")`) require a tuple value.
+Positional construction with both required fields remains supported. Never infer
+IDs from value reprs. Print `--example parametrize`, save it as
+`test_parametrize.py`, and use `--collect-only` to obtain exact rerun selectors;
+quote bracketed/multi-axis selectors in shells. `--agent-docs` is the embedded
+usage guide, not a separate workflow to maintain.
+
+For a `Literal`-annotated argument, preserve the union in the axis type, e.g.
+`type Backend = Literal["sqlite", "mariadb"]` and
+`BACKENDS: list[Param[Backend]] = [...]`, or use `Param[Backend](...)` explicitly.
+An unconstrained axis may widen to `Param[str]`, which cannot safely feed that
+narrower argument; casts, `Any`, and checker ignores are not the remedy.
 
 Tests can accept multiple parameter sets via `@test([...], [...], mark=...)`,
 each non-empty list built from `Param(value=..., name=...)`. Static checking
@@ -534,6 +595,14 @@ project directory. CLI filters and flags, including inverse output and marker
 flags, override configured values. `--output-schema-versions` lists supported
 JSON schema versions.
 
+`collection_errors.py` owns bounded, user-first collection console reports.
+`--full-traceback` adds framework/dependency frames, including child-host details,
+without changing JSON snapshots or collection behavior. When changing frame
+selection, syntax/cause/group rendering, work/output limits, or host transport,
+read `docs/collection-errors.md` and exercise real local/worker console and JSON
+subprocesses in `tests/meta/test_collection_diagnostics.py`. Preserve selected-file
+context, original error types, explicit truncation, and the exit-2/no-body contract.
+
 Console summary lines intentionally keep exception details compact: only the first
 exception message line is shown and long lines may be ellipsized. Use the full
 failure details or `--json-output` for exact diagnostics.
@@ -583,7 +652,11 @@ and compiled `re.Pattern[str]` values. `match` searches `str(exception)` only af
 type validation, preserves compiled flags, and accepts an empty pattern for any
 renderable message. `msg` overrides assertion failure text, not matching behavior.
 Capture `.exception` for the original typed object and use `assert_eq` on its text
-for exact equality. Mismatches or broken message formatters raise
+for exact equality. Match does not inspect notes or causes: bind
+`cause = assert_isinstance(caught.exception.__cause__, ExpectedError)` and assert
+on that original cause explicitly. A different `msg=` does not prevent a passing
+match or replace assertions on the raised text. Print `--example basic` for exact
+text, regex, and cause examples. Mismatches or broken message formatters raise
 `AssertionFailure` with the original exception as cause; fallback text is never
 matched. Invalid regexes and bytes patterns raise `BadRequestError` at context
 construction, before the body. The top-level stub re-exports the implementation's

@@ -19,6 +19,7 @@ lazy from typing import Any, Literal, cast
 lazy from snektest.annotations import AsyncFixture, Coroutine
 lazy from snektest.benchmark_baseline import BenchmarkBaseline
 lazy from snektest.collection import collect_tests_from_filters
+lazy from snektest.collection_errors import format_collection_error
 lazy from snektest.decorators import RunFixtureIdentity, get_run_fixture_catalog
 lazy from snektest.diagnostics import snapshot_exception
 lazy from snektest.execution import execute_test, teardown_session_fixtures
@@ -34,6 +35,7 @@ lazy from snektest.models import (
     ExceptionDiagnostic,
     FilterItem,
     InvalidTestDefinitionError,
+    RetainedDirectory,
     RunInfrastructureError,
     RunResult,
     RunTeardownDiagnostics,
@@ -81,6 +83,8 @@ class _BootstrapFailed:
     exception_type: str
     message: str
     diagnostic: ExceptionDiagnostic | None = None
+    collection_full_traceback: str | None = None
+    collection_console: str | None = None
     collection_output: str = ""
     collection_warnings: tuple[str, ...] = ()
 
@@ -101,6 +105,7 @@ class _Shutdown: ...
 
 @dataclass(frozen=True)
 class _WorkerStopped:
+    retained_directories: tuple[RetainedDirectory, ...]
     session_teardown_failures: tuple[TeardownFailure, ...]
     session_teardown_output: str | None
     session_teardown_warnings: tuple[str, ...]
@@ -197,6 +202,16 @@ def _host_main(  # noqa: PLR0913, PLR0917
                     type(exc).__name__,
                     str(exc),
                     diagnostic=snapshot_exception(type(exc), exc, exc.__traceback__),
+                    collection_console=(
+                        format_collection_error(exc)
+                        if isinstance(exc, CollectionError)
+                        else None
+                    ),
+                    collection_full_traceback=(
+                        format_collection_error(exc, full_traceback=True)
+                        if isinstance(exc, CollectionError)
+                        else None
+                    ),
                     collection_output=output.getvalue(),
                     collection_warnings=tuple(warnings),
                 )
@@ -349,6 +364,7 @@ def _run_worker(  # noqa: PLR0913, PLR0917
                 )
                 connection.send(
                     _WorkerStopped(
+                        retained_directories=registry.temporary_directories.retained_session,
                         session_teardown_failures=tuple(failures),
                         session_teardown_output=output,
                         session_teardown_warnings=warnings,
@@ -425,6 +441,10 @@ async def _receive_bootstrap(
             collection_error = CollectionError(message.message)
         if collection_error is not None:
             collection_error.collection_diagnostic = message.diagnostic
+            collection_error.collection_full_traceback = (
+                message.collection_full_traceback
+            )
+            collection_error.collection_console = message.collection_console
             collection_error.collection_output = message.collection_output
             collection_error.collection_warnings = message.collection_warnings
             raise collection_error
@@ -725,6 +745,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if fail_fast and test_result.is_actionable_failure:
                     pending.clear()
 
+        retained_directories: list[RetainedDirectory] = []
         session_failures: list[TeardownFailure] = []
         session_outputs: list[str] = []
         session_warnings: list[str] = []
@@ -735,6 +756,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if not isinstance(message, _WorkerStopped):
                 msg = f"worker {worker.identifier + 1} failed during shutdown"
                 raise RunInfrastructureError(msg)
+            retained_directories.extend(message.retained_directories)
             session_failures.extend(message.session_teardown_failures)
             if message.session_teardown_output:
                 session_outputs.append(message.session_teardown_output)
@@ -760,6 +782,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.session_warnings = tuple(session_warnings)
         publication.raise_if_interrupted()
         completed_run = RunResult.from_execution(
+            retained_directories=tuple(retained_directories),
             collection_output=canonical_bootstrap.collection_output,
             collection_warnings=canonical_bootstrap.collection_warnings,
             run_teardown_failures=run_failures,
