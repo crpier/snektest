@@ -216,18 +216,41 @@ def _assert_standalone_cli_startup(artifact: Path, *, target: Path, cwd: Path) -
     environment = dict(os.environ)
     environment.pop("COVERAGE_PROCESS_START", None)
     environment.pop("PYTHON_CONTEXT_AWARE_WARNINGS", None)
-    for entry in ([str(executable)], [str(python), "-I", "-m", "snektest"]):
-        executed = subprocess.run(
-            [*entry, "--json-output", str(consumer)],
-            cwd=cwd,
-            env=environment,
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=_TIMEOUT_SECONDS,
-        )
-        assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
-        assert_eq(json.loads(executed.stdout)["passed"], 1)
+    for index, entry in enumerate(
+        ([str(executable)], [str(python), "-I", "-m", "snektest"])
+    ):
+        for workers in ([], ["--workers", "1"]):
+            events = cwd / f"{target.name}-progress-{index}-{len(workers)}.jsonl"
+            executed = subprocess.run(
+                [
+                    *entry,
+                    "--json-output",
+                    "--progress-output",
+                    str(events),
+                    *workers,
+                    str(consumer),
+                ],
+                cwd=cwd,
+                env=environment,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=_TIMEOUT_SECONDS,
+            )
+            assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+            assert_eq(json.loads(executed.stdout)["passed"], 1)
+            records = [json.loads(line) for line in events.read_text().splitlines()]
+            assert_eq(records[0]["event"], "run_started")
+            assert_eq(records[-1]["event"], "run_finished")
+            assert_eq(records[-1]["status"], "completed")
+            assert_eq(
+                [
+                    record["ordinal"]
+                    for record in records
+                    if record["event"] == "test_started"
+                ],
+                [0],
+            )
 
     if os.name != "nt":
         consumer.write_text(

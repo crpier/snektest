@@ -587,6 +587,25 @@ and the reproducible benchmark command live in
 `docs/large-suite-memory.md`. Lazy first-use initialization has a separate cold-run
 budget; the warmed noisy-output run retains its original allocation limit.
 
+### Lifecycle progress
+
+`progress.py` owns opt-in `--progress-output PATH` JSONL observation, native
+cross-process append locking, bounded metadata/snapshots/output, and heartbeat
+threads independent of result reporters and descriptor capture. Fresh paths only;
+`--progress-interval` is finite and at least 0.05 seconds (default 5). When changing
+phase instrumentation, record identity, truncation, writer retirement, child spawn,
+or terminal semantics, read `docs/progress.md` and exercise real gated subprocesses
+in `tests/meta/test_progress.py` plus independently installed artifact entry points.
+Keep selector/ordinal/attempt and worker-incarnation identities distinct. No locks
+span awaits; teardown events use the cleanup caller's context, not an async
+fixture driver's stale setup context. Retired writers ignore late collection-thread
+events. Missing terminal events and unmatched child spans remain meaningful;
+terminal observation does not certify fixture cleanup or physical process exit.
+Preserve stdout JSON version 1 and the existing completion reporter interface.
+Heartbeat threads cannot enforce hard deadlines or prove deadlock, and must not
+inspect frames, locals, captured output, or exception messages. No persistent
+progress config or top-level observer types are introduced by this slice.
+
 ### Structured output
 
 Warning message formatters that raise use a safe text fallback. Capture always restores standard streams and debugger hooks even if exit-time warning rendering fails.

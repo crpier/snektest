@@ -359,6 +359,39 @@ Empty parameter-case brackets such as `test_cases[]` are invalid, even with `--a
 
 - Recursive directory discovery excludes Git-ignored files; explicitly named test files still run. Outside a Git worktree, every matching `test_*.py` file is checked. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
 
+## Live lifecycle progress
+
+Use `--progress-output PATH` with a new path for a version-1 JSONL sidecar, separate
+from final stdout JSON and captured output:
+
+```bash
+snektest --json-output --progress-output progress-001.jsonl tests/ >results.json
+# In another terminal:
+tail -f progress-001.jsonl
+```
+
+`--progress-interval SECONDS` sets still-running snapshots (default 5 seconds,
+finite and at least 0.05). Records cover collection/current file, test start/finish,
+managed fixture setup/teardown, and worker incarnation. Canonical selectors retain
+occurrence ordinals and a reserved attempt identity. `run_finished` terminates an
+ordinary stream; absence means incomplete observation. Worker crashes/coordinator
+interruption may leave unmatched child phases even with a terminal event; neither
+terminal events nor interruption JSON prove fixture cleanup.
+
+Existing paths are protected; writing uses a companion `.lock` file. Metadata is
+bounded and explicitly marks clipped selectors. Active snapshots are bounded;
+16 MiB of events triggers an explicit truncation marker, reserving terminal space.
+No locals, captured user output, exception messages, or stacks are published.
+Names/paths can still contain sensitive user metadata. Still-running snapshots use
+an observer thread, not a hard deadline or deadlock detector. An event-loop
+heartbeat cannot run while its loop is blocked synchronously; the observer thread
+can also lose GIL/CPU access or stall on filesystem IO. Keep an outer timeout.
+SIGKILL/hard interruption need not clean up or emit final events/JSON, and arbitrary
+subprocess trees are not contained. See `docs/progress.md` for the record contract
+and failure/privacy/platform limits; print `--example basic` for the command recipe.
+The existing completion reporter interface and JSON result schema version 1 remain
+unchanged. No persistent progress configuration is added.
+
 ## Collection failures
 
 Default console diagnostics identify the selected file/filter, original exception,

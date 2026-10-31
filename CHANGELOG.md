@@ -31,6 +31,7 @@ Notable user-facing changes are recorded here.
 
 - Make console collection errors user-first, with selected file/filter context, original types, source/carets, causes, notes, groups, and corrective `Param` guidance. Add `--full-traceback` for bounded framework/dependency details in local and worker modes; preserve JSON schema/output and collection semantics. Broken exception message formatters use a safe fallback instead of hiding the original collection error. (#102)
 
+- Add opt-in `--progress-output PATH` lifecycle JSONL sidecars and `--progress-interval` still-running snapshots without changing stdout JSON or completion reporters. Observe collection/files, test occurrences, fixture setup/teardown, and worker incarnations; preserve partial evidence across interruption/crashes with explicit termination, privacy, metadata and output limits. (#101)
 - Define the POSIX CLI signal contract: preserve inherited ignores rather than reset background-job policy; document custom-handler exec/spawn boundaries, a SIGINT-only background launcher, application-child ownership, and coordinator-only worker interruption limits. Add real shell/local/worker/subprocess and embedding coverage. (#108)
 - Enable context-aware warnings by default at standalone CLI startup, including spawned/replacement workers. Honor explicit Python startup opt-outs and precedence; preserve interpreter options, venv, argument boundaries, streams and exits across relaunch, while leaving library/programmatic policy unchanged. Interpreter/site startup hooks may repeat. (#107)
 
