@@ -35,6 +35,7 @@ lazy from snektest.models import (
     TestName,
 )
 lazy from snektest.output import maybe_capture_output
+lazy from snektest.progress import activity
 lazy from snektest.utils import (
     get_test_function_markers,
     get_test_function_mutex,
@@ -374,6 +375,20 @@ def collect_tests_from_filters(
     mark: str | None = None,
     keyword: str | None = None,
 ) -> list[TestCase]:
+    """Observe collection without retaining or duplicating the canonical plan."""
+    with activity("collection"):
+        return _collect_tests_from_filters(
+            filter_items, allow_empty=allow_empty, mark=mark, keyword=keyword
+        )
+
+
+def _collect_tests_from_filters(
+    filter_items: list[FilterItem],
+    *,
+    allow_empty: bool = False,
+    mark: str | None = None,
+    keyword: str | None = None,
+) -> list[TestCase]:
     """Build one complete canonical plan before any selected test executes."""
     expression = KeywordExpression(keyword) if keyword is not None else None
     collected_cases: list[TestCase] = []
@@ -392,13 +407,14 @@ def collect_tests_from_filters(
             selection_names: set[TestName] = set()
             for file_path in generate_file_list(filter_item):
                 active_file = str(file_path)
-                collected_file = collect_tests_from_file(
-                    file_path=file_path,
-                    filter_item=filter_item,
-                    mark=mark if expression is None else None,
-                    collection_root=Path.cwd().resolve(),
-                    module_loader=module_loader,
-                )
+                with activity("import", file=str(file_path)):
+                    collected_file = collect_tests_from_file(
+                        file_path=file_path,
+                        filter_item=filter_item,
+                        mark=mark if expression is None else None,
+                        collection_root=Path.cwd().resolve(),
+                        module_loader=module_loader,
+                    )
                 function_matched = (
                     function_matched or collected_file.stats.function_matched
                 )

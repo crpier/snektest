@@ -12,7 +12,7 @@ lazy from collections.abc import (
 lazy from contextlib import contextmanager
 lazy from contextvars import ContextVar
 lazy from dataclasses import dataclass
-lazy from inspect import isasyncgen, isgenerator, signature
+lazy from inspect import isasyncgen, isfunction, isgenerator, signature
 lazy from os import PathLike
 lazy from pathlib import Path
 lazy from pickle import HIGHEST_PROTOCOL, dumps, loads
@@ -31,6 +31,7 @@ lazy from snektest.models import (
     TeardownFailure,
     UnreachableError,
 )
+lazy from snektest.progress import activity
 lazy from snektest.task_cleanup import (
     cancel_owned_tasks,
     cancel_tasks,
@@ -109,13 +110,17 @@ async def teardown_fixture(
     generator: object,
     *,
     cleanup_timeout: float = DEFAULT_CLEANUP_TIMEOUT_SECONDS,
+    scope: str | None = None,
     exc_info_provider: Callable[
         [], tuple[object | None, object | None, TracebackType | None]
     ] = sys.exc_info,
 ) -> TeardownFailure | None:
     """Advance one fixture (sync or async) through teardown, capturing failure."""
     try:
-        with task_scope(generator):
+        with (
+            task_scope(generator),
+            activity("fixture_teardown", fixture=fixture_name, scope=scope),
+        ):
             if isinstance(generator, AsyncFixtureDriver):
                 await generator.teardown(cleanup_timeout)
                 return None
@@ -318,13 +323,21 @@ class FixtureRegistry:
         raise FixtureError(msg)
 
     @contextmanager
-    def _fixture_setup_scope(self, key: object, name: str) -> Generator[None]:
+    def _fixture_setup_scope(
+        self, key: object, name: str, scope: str
+    ) -> Generator[None]:
         """Track setup dependencies and reject cycles before recursing."""
         stack = self._setup_stack.get()
         self._reject_dependency_cycle(key, name)
         token = self._setup_stack.set((*stack, (key, name)))
         try:
-            yield
+            with activity(
+                "fixture_setup",
+                fixture=name,
+                scope=scope,
+                file=key.__code__.co_filename if isfunction(key) else None,
+            ):
+                yield
         finally:
             self._setup_stack.reset(token)
 
@@ -378,7 +391,7 @@ class FixtureRegistry:
             )
         gen = handle.make()
         with (
-            self._fixture_setup_scope(handle.key, handle.name),
+            self._fixture_setup_scope(handle.key, handle.name, "function"),
             task_scope(gen),
         ):
             try:
@@ -395,7 +408,7 @@ class FixtureRegistry:
         self._ensure_function_loading_allowed()
 
         async def setup() -> R:
-            with self._fixture_setup_scope(key, name):
+            with self._fixture_setup_scope(key, name, "function"):
                 try:
                     return await anext(agen)
                 finally:
@@ -471,7 +484,7 @@ class FixtureRegistry:
         generator = handle.make()
         try:
             with (
-                self._fixture_setup_scope(handle.key, handle.name),
+                self._fixture_setup_scope(handle.key, handle.name, "run"),
                 self._run_setup_scope(handle.name),
                 task_scope(generator),
             ):
@@ -493,7 +506,7 @@ class FixtureRegistry:
         async def setup() -> bytes:
             try:
                 with (
-                    self._fixture_setup_scope(handle.key, handle.name),
+                    self._fixture_setup_scope(handle.key, handle.name, "run"),
                     self._run_setup_scope(handle.name),
                 ):
                     descriptor = await anext(generator)
@@ -561,7 +574,7 @@ class FixtureRegistry:
         _ensure_session_fixture_has_no_parameters(handle.key, handle.name)
         gen = handle.make()
         with (
-            self._fixture_setup_scope(handle.key, handle.name),
+            self._fixture_setup_scope(handle.key, handle.name, "session"),
             self._session_setup_scope(handle.name),
             task_scope(gen),
         ):
@@ -590,7 +603,7 @@ class FixtureRegistry:
             setup_completed = False
             try:
                 with (
-                    self._fixture_setup_scope(key, name),
+                    self._fixture_setup_scope(key, name, "session"),
                     self._session_setup_scope(name),
                 ):
                     result = await anext(agen)
@@ -634,7 +647,7 @@ class FixtureRegistry:
             )
             for fixture_name, generator in reversed(self._function_stack):
                 failure = await teardown_fixture(
-                    fixture_name, generator, cleanup_timeout=timeout
+                    fixture_name, generator, cleanup_timeout=timeout, scope="function"
                 )
                 if failure is not None:
                     failures.append(failure)
@@ -666,7 +679,7 @@ class FixtureRegistry:
             )
             for name, generator in reversed(self._session_stack):
                 failure = await teardown_fixture(
-                    name, generator, cleanup_timeout=timeout
+                    name, generator, cleanup_timeout=timeout, scope="session"
                 )
                 if failure is not None:
                     failures.append(failure)
@@ -702,7 +715,7 @@ class FixtureRegistry:
                 if isinstance(cached, _PendingAsyncRunFixtureSetup):
                     continue
                 failure = await teardown_fixture(
-                    name, generator, cleanup_timeout=timeout
+                    name, generator, cleanup_timeout=timeout, scope="run"
                 )
                 if failure is not None:
                     failures.append(failure)

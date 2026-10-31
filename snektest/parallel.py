@@ -45,6 +45,7 @@ lazy from snektest.models import (
     TestResult,
 )
 lazy from snektest.output import maybe_capture_output
+lazy from snektest.progress import ProgressSettings, observe_process, progress_settings
 lazy from snektest.reporting import RunReporter, result_for_retention
 lazy from snektest.run_fixture_publication import (
     LoadRunFixture,
@@ -406,6 +407,17 @@ def _run_worker(  # noqa: PLR0913, PLR0917
     connection.close()
 
 
+def _observed_child(
+    target: Callable[..., object],
+    connection: ProcessConnection,
+    args: tuple[object, ...],
+    settings: ProgressSettings | None,
+    name: str,
+) -> None:
+    with observe_process(settings, name):
+        target(connection, *args)
+
+
 def _spawn_process(
     context: SpawnContext,
     target: Callable[..., object],
@@ -415,8 +427,8 @@ def _spawn_process(
 ) -> tuple[BaseProcess, ProcessConnection]:
     parent_connection, child_connection = context.Pipe(duplex=True)
     process = context.Process(
-        target=target,
-        args=(child_connection, *args),
+        target=_observed_child,
+        args=(target, child_connection, args, progress_settings(), name),
         daemon=False,
         name=name,
     )

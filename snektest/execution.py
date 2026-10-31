@@ -43,6 +43,7 @@ lazy from snektest.models import (
     _SkipSignal,
 )
 lazy from snektest.output import maybe_capture_output
+lazy from snektest.progress import activity, case_context
 lazy from snektest.reporting import (
     ConsoleRunReporter,
     RunReporter,
@@ -156,6 +157,31 @@ async def execute_test(
     ] = sys.exc_info,
 ) -> TestResult:
     """Execute one test while observing failures outside its call stack."""
+    with (
+        case_context(str(test_case.name), test_case.ordinal),
+        activity("test") as observation,
+    ):
+        result = await _execute_observed_test(
+            test_case,
+            capture_output=capture_output,
+            timeout=timeout,
+            benchmark_baseline=benchmark_baseline,
+            exc_info_provider=exc_info_provider,
+        )
+        observation.status = result.status
+        return result
+
+
+async def _execute_observed_test(
+    test_case: TestCase,
+    *,
+    capture_output: bool,
+    timeout: float | None,  # noqa: ASYNC109
+    benchmark_baseline: BenchmarkBaseline | None,
+    exc_info_provider: Callable[
+        [], tuple[object | None, object | None, TracebackType | None]
+    ],
+) -> TestResult:
     registry = current_registry()
     registry.start_test()
     directories = registry.temporary_directories
@@ -222,9 +248,10 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
     ):
         test_start = time.monotonic()
         try:
-            res = test_case.call()
-            if iscoroutine(res):
-                await _await_test_body(res, timeout)
+            with activity("body"):
+                res = test_case.call()
+                if iscoroutine(res):
+                    await _await_test_body(res, timeout)
             duration = time.monotonic() - test_start
             if test_case.expected_failure_reason is None:
                 result = PassedResult(

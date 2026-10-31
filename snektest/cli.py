@@ -36,6 +36,7 @@ lazy from snektest.models import (
 lazy from snektest.output import DescriptorOutputCapture
 lazy from snektest.parallel import run_tests_parallel
 lazy from snektest.presenter import print_error
+lazy from snektest.progress import note_interruption, observe_run
 lazy from snektest.reporting import (
     ConsoleRunReporter,
     DeferredRunReporter,
@@ -87,6 +88,7 @@ type CliAction = Literal[
 type WorkerCount = int | Literal["auto"]
 
 _DEFAULT_TIMEOUT_SECONDS = 60.0
+_MIN_PROGRESS_INTERVAL = 0.05
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,8 @@ class CliOptions:
     json_output: bool = False
     junit_output: str | None = None
     pdb_on_failure: bool = False
+    progress_output: str | None = None
+    progress_interval: float = 5.0
     keyword: str | None = None
     mark: str | None = None
     timeout: float | None = _DEFAULT_TIMEOUT_SECONDS
@@ -154,6 +158,10 @@ Options:
   --junit-output PATH
                     Write a JUnit XML report
   --no-junit-output Disable a configured JUnit report
+  --progress-output PATH
+                    Write lifecycle JSONL to a new sidecar (never stdout)
+  --progress-interval SECONDS
+                    Still-running interval, at least 0.05 seconds (default: 5)
   --collect-only    List selected test identifiers without running test bodies
   --full-traceback  Include framework frames in collection error diagnostics
   --allow-empty     Exit successfully when no tests are selected
@@ -372,6 +380,9 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     mark = project_config.mark if project_config else None
     mark_option_seen = False
     pdb_on_failure = False
+    progress_output: str | None = None
+    progress_interval = 5.0
+    progress_interval_seen = False
     configured_timeout = project_config.timeout if project_config else None
     timeout: float | None = (
         None
@@ -414,6 +425,36 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         elif arg == "--no-json-output":
             json_output = False
             json_option_seen = True
+        elif arg in {"--progress-output", "--progress-interval"}:
+            if (arg == "--progress-output" and progress_output is not None) or (
+                arg == "--progress-interval" and progress_interval_seen
+            ):
+                return ParseError(f"Only one {arg} value is supported")
+            consumed = _consume_flag_value(argv, index, arg)
+            if isinstance(consumed, ParseError):
+                return consumed
+            value, index = consumed
+            if arg == "--progress-output":
+                if value == "-":
+                    return ParseError(
+                        "--progress-output requires a file path, not stdout"
+                    )
+                progress_output = value
+            else:
+                try:
+                    progress_interval = float(value)
+                except ValueError:
+                    return ParseError(
+                        "--progress-interval must be finite seconds >= 0.05"
+                    )
+                if (
+                    not isfinite(progress_interval)
+                    or progress_interval < _MIN_PROGRESS_INTERVAL
+                ):
+                    return ParseError(
+                        "--progress-interval must be finite seconds >= 0.05"
+                    )
+                progress_interval_seen = True
         elif arg == "--collect-only":
             collect_only = True
         elif arg == "--full-traceback":
@@ -544,6 +585,8 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         if not filters:
             filters.append(".")
 
+    if progress_interval_seen and progress_output is None:
+        return ParseError("--progress-interval requires --progress-output")
     return CliOptions(
         action=action,
         allow_empty=allow_empty,
@@ -560,11 +603,24 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
         mark=mark,
         keyword=keyword,
         pdb_on_failure=pdb_on_failure,
+        progress_output=progress_output,
+        progress_interval=progress_interval,
         timeout=timeout,
         typing_config=typing_config,
         update_benchmark_baseline=update_benchmark_baseline,
         workers=workers,
     )
+
+
+def _validate_progress_outputs(options: CliOptions) -> None:
+    if options.progress_output is not None:
+        progress_path = Path(options.progress_output).resolve()
+        if any(
+            value is not None and Path(value).resolve() == progress_path
+            for value in (options.junit_output, options.update_benchmark_baseline)
+        ):
+            msg = "Lifecycle progress output must differ from report and baseline output paths"
+            raise BadRequestError(msg)
 
 
 async def _run_tests_with_collected_plan(  # noqa: PLR0913
@@ -689,7 +745,63 @@ async def run_tests_programmatic(  # noqa: PLR0913
     )
 
 
-async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
+async def run_script(
+    argv: list[str] | None = None,
+    *,
+    run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
+    | None = None,
+) -> int:
+    """Own the optional observation lifetime, including final output persistence."""
+    arguments = sys.argv[1:] if argv is None else argv
+    options = parse_cli_args(arguments)
+    if (
+        not isinstance(options, CliOptions)
+        or options.action is not None
+        or options.progress_output is None
+    ):
+        return await _run_script(
+            arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
+        )
+    with observe_run(
+        Path(options.progress_output), interval=options.progress_interval
+    ) as progress:
+        code = 2
+        status = "error"
+        try:
+            code = await _run_script(
+                arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
+            )
+            status = "completed" if code == 0 else "failed" if code == 1 else "error"
+        except SystemExit as error:
+            status = "interrupted"
+            code = (
+                error.code
+                if isinstance(error.code, int)
+                else 0
+                if error.code is None
+                else 1
+            )
+            raise
+        except asyncio.CancelledError, KeyboardInterrupt:
+            status = "interrupted"
+            raise
+        except (
+            CollectionError,
+            BadRequestError,
+            RunInfrastructureError,
+            UnreachableError,
+        ):
+            raise
+        except Exception:
+            code = 1
+            raise
+        finally:
+            if progress is not None:
+                progress.complete(status, code)
+        return code
+
+
+async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
     argv: list[str] | None = None,
     *,
     run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
@@ -751,6 +863,9 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         else:
             print_error(str(error))
         return 2
+
+    if options.progress_output is not None:
+        await asyncio.to_thread(_validate_progress_outputs, options)
 
     if options.collect_only:
         collection_diagnostics = CollectionDiagnostics()
@@ -863,6 +978,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 ),
             )
         except asyncio.CancelledError as error:
+            note_interruption()
             if not options.json_output:
                 return 2
             structured_error = _json_error_document(
@@ -918,6 +1034,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 type_name=type(error).__name__,
             )
         except SystemExit as error:
+            note_interruption()
             if not options.json_output:
                 raise
             structured_exit_code = error.code if isinstance(error.code, int) else 2
@@ -929,6 +1046,7 @@ async def run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 type_name=type(error).__name__,
             )
         except KeyboardInterrupt as error:
+            note_interruption()
             if not options.json_output:
                 raise
             structured_error = _json_error_document(

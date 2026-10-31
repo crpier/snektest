@@ -19,6 +19,23 @@ teardown. SIGKILL/hard interruption need not clean up or emit final JSON. There
 is no arbitrary process-tree containment or signal-reset flag. See
 docs/cli-startup.md for the tested SIGINT-only background launcher recipe.
 
+Observe live activity without mixing progress into stdout JSON:
+    snektest --json-output --progress-output progress-001.jsonl test_basic.py >results.json
+Then, in another terminal: tail -f progress-001.jsonl
+Use a new sidecar path each run; --progress-interval defaults to 5 seconds
+(finite, minimum 0.05). Collection/file, test/occurrence/attempt, fixture phases,
+and worker incarnation are version-1 metadata events, not captured user output.
+Missing run_finished means incomplete observation. Worker crashes/interruption
+can leave unmatched child spans even with a terminal event; cleanup is not proven.
+Text/snapshots and output are bounded with explicit clipping/truncation markers;
+a companion .lock file serializes writes. No locals, exception messages, or stacks
+are captured. The observer thread is not a hard deadline/deadlock detector;
+an event-loop heartbeat cannot run on a synchronously blocked loop, and the thread
+can also stall on GIL/native/IO work. Keep an outer timeout. SIGKILL/hard interruption
+may prevent final JSON/events or cleanup; arbitrary subprocess trees are not
+contained. See docs/progress.md for full semantics, privacy and platform limits.
+Existing completion reporters and stdout JSON schema remain unchanged.
+
 Pass observed values first and expected values second in comparisons. Bind the
 return values of narrowing helpers; use `_ =` when only checking a value's type.
 For exception text, `match=` is regex search, capture plus assert_eq is exact,

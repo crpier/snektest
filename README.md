@@ -941,6 +941,39 @@ SIGINT-only background reset recipe and foreground/background/custom-handler
 semantics. There is no signal-normalization flag; use an explicit launcher when
 interruptible background execution is desired.
 
+### Live lifecycle progress
+
+Use a **new sidecar path** to see activity before a result is available, including
+with JSON stdout and process workers:
+
+```bash
+snektest --json-output --progress-output progress-001.jsonl tests/ >results.json
+# In another terminal:
+tail -f progress-001.jsonl
+```
+
+`--progress-interval SECONDS` sets still-running snapshots (default 5 seconds,
+finite and at least 0.05). Version-1 JSONL records identify collection/current
+file, test start/finish, managed fixture setup/teardown, and worker incarnation.
+Canonical selectors have occurrence ordinals and a reserved attempt identity.
+The final `run_finished` records completion/interruption; its absence means an
+incomplete stream. Worker crashes or coordinator interruption can leave unmatched
+child phases even with a terminal event—this is not proof of fixture cleanup.
+
+Progress never interleaves with stdout JSON or includes captured user output,
+exception messages, locals, or stacks. Metadata text, active snapshots, and output
+are bounded (16 MiB plus truncation/terminal markers). Oversized selectors are
+explicitly clipped; use ordinals and final results to recover their full spelling.
+Existing paths are protected; a companion `.lock` file is used while writing.
+Still-running snapshots come from an observer thread, not a hard deadline or proof
+of deadlock. An event-loop heartbeat cannot run on a synchronously blocked loop;
+the observer thread can also be stalled by GIL/native/IO work. SIGKILL/hard
+interruption need not emit final events/JSON or clean up subprocess trees.
+See [lifecycle progress](docs/progress.md) for record semantics, failure handling,
+privacy, resource limits, and platform validation boundaries. Print `--example basic`
+for the bundled command recipe. The existing completion reporter interface and
+JSON result schema version 1 are unchanged; no persistent progress config is added.
+
 ### Collection errors
 
 A collection failure exits 2 and shows the selected file/filter, original error,
