@@ -54,6 +54,7 @@ lazy from snektest.task_cleanup import (
     task_scope,
 )
 lazy from snektest.thread_observation import observe_background_failures
+lazy from snektest.type_contracts import typing_configuration
 
 
 async def _await_test_body(
@@ -586,6 +587,7 @@ async def run_tests(  # noqa: PLR0913
     resolver: Callable[[Path], Path] = Path.resolve,
     benchmark_baseline: BenchmarkBaseline | None = None,
     teardown_diagnostics: RunTeardownDiagnostics | None = None,
+    typing_config: Path | None = None,
 ) -> RunResult:
     """Run a completed test plan and report one normalized completion."""
     if reporter is None:
@@ -600,7 +602,11 @@ async def run_tests(  # noqa: PLR0913
     diagnostic_context = (
         use_live_diagnostic_store(live_diagnostics) if pdb_on_failure else nullcontext()
     )
-    with diagnostic_context, use_registry(FixtureRegistry()):
+    with (
+        diagnostic_context,
+        use_registry(FixtureRegistry()),
+        typing_configuration(typing_config),
+    ):
         try:
             for test_case in test_cases:
                 test_result = await execute_test(

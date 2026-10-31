@@ -313,6 +313,47 @@ tasks from an unrelated embedding application have no test owner and are left
 alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
 the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
+### Python-native typing contracts
+
+`type_contracts.py` owns bare `@test_typing` and `assert_type_error(rule)`.
+Bodies are statically analyzed, never executed; function parameters are symbolic
+inputs. Both top-level and implementation-module stubs expose the decorator as
+`typing.no_type_check` for ordinary checks, including direct submodule imports. Static runs replace only that declaration through a temporary
+partial stub and analyze original source with the optional pinned ty binary.
+Preserve original imports/locations, exact per-block diagnostic cardinality,
+innermost ownership, selected-function isolation, and shared positive controls.
+Resolve direct Snektest imports with Python symbol tables, including local
+imports and closures, rather than mutable runtime globals. Marker values copied,
+re-exported, or dynamically looked up are unsupported. Ownership uses body-only
+line/Unicode-column spans; with-header diagnostics cannot certify rejection.
+Select declarations by code name/first line, not mutable function names. Source
+fingerprints are captured at registration and checked before/after ty; detected
+edits are errors, not atomic protection against concurrent filesystem writers.
+Broken imports cannot certify a rejection. Keep checker imports/invocation out of
+collection and runtime-only runs. Each checker subprocess has bounded output and
+must be killed/reaped on cancellation; this does not bound local collection.
+A private session fixture retains at most one validated file report per execution
+process/run. Key reuse by source fingerprint and explicit config content; later
+runs/replacement workers start fresh. `--typing-config FILE` and programmatic
+`typing_config=Path(...)` accept native ty config, not persistent Snektest config.
+Default to the current interpreter unless native `environment.python` explicitly
+selects another; preserve native extra-paths. Stage only the framework package,
+never its hosting site-packages directory, so selected environments cannot inherit
+unrelated host libraries or shadow target versions. Non-standard sys.path additions
+need explicit native extra-paths. The deprecated/type-assertion-failure/
+unresolved-import error invariants remain enforced. Inspect every per-file rule
+override: native overrides outrank CLI severities, so reject relaxations of the
+protected rules (including all=ignore/warn without explicit restoration) as run
+errors. Keep native syntax/type diagnostics and fail closed on uninspectable
+configuration. Preserve run-local context through worker
+replacement. Require a single bare decorator; other contexts do not declare
+expected errors. The temporary stub uses an internal deprecated reference probe
+to reject known copied/re-exported marker escapes without executing Python.
+Drain cancelled report streams before returning, not just the process exit:
+paused transports can retain pipe descriptors. For checker changes, read
+`docs/type-contracts.md` and exercise the public marker/decorator, real runner,
+and independently installed artifact seams.
+
 ### Explicit log capture
 
 `log_capture.py` owns `capture_logs` / `LogCapture`: opt-in stdlib capture with

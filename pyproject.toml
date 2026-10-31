@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+typing = ["ty==0.0.84"]
 anyio = ["anyio>=4.14.2,<5"]
 schema = [
     "schemathesis>=4.25.2,<4.26",
