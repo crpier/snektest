@@ -119,7 +119,13 @@ User-facing changes belong in `CHANGELOG.md`; private security reports follow
    host policy. When changing startup precedence, relaunch, streams, entry points,
    or signal handling, read `docs/cli-startup.md` and exercise real CLI, embedding,
    and independently installed artifact seams. Keep opt-outs and workers aligned;
-   retain inherited ignored signals rather than broadening signal policy here.
+   retain inherited ignored SIGINT/SIGQUIT/SIGHUP rather than broadening signal
+   policy here. Caught handlers follow exec/spawn semantics; avoid bootstrap exec
+   for intentional in-process custom handlers. Test real shell background jobs
+   and child signal state, not just runner handlers. Coordinator-only SIGINT in
+   worker mode may terminate children without fixture teardown; final interruption
+   JSON is not evidence of graceful worker cleanup. The tested SIGINT-only reset
+   launcher and signal matrix live in `docs/cli-startup.md`.
 2. **Canonical Collection** (`collect_tests_from_filters`): Resolve one canonical path identity for absolute or relative filters, support package-relative imports through an isolated synthetic namespace, import each module once per run, sort directory candidates by normalized path, preserve source and filter order, finish all imports before execution, reject empty filters/plans unless explicitly allowed, reject invalid or colliding parameter cases, and assign an ordinal to every occurrence. Later in-process runs import modules fresh; failed imports roll back. Imported decorated functions are excluded by module ownership. Captured import output and warnings remain separate collection diagnostics in normalized runs and structured output. Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors. Explicit files bypass Git ignore checks; repeated filters remain repeated cases. Bare `@test` raises during collection rather than disappearing.
 3. **Local Execution**: With workers omitted, pass the complete plan directly to `run_tests`, with no cross-thread callback queue. It executes sequentially in process on one event loop. Fail-fast stops after a failure, error, XPASS, or function teardown failure; SKIP and XFAIL continue.
 4. **Process Execution** (`parallel.py`): Explicit workers use spawn. One persistent

@@ -40,6 +40,26 @@ status. Interpreter/site startup hooks may repeat, before collection. Importing
 Snektest, programmatic runners, and direct `snektest.cli.main` calls keep the host
 policy unchanged. This is startup policy, not hard interruption or cleanup.
 
+## POSIX signals and background jobs
+
+The CLI preserves inherited ignored SIGINT, SIGQUIT and SIGHUP; it does not
+normalize background-job signals. Noninteractive shell `&` jobs commonly ignore
+SIGINT/SIGQUIT; `nohup` concerns SIGHUP, not a SIGINT reset. Normal SIGINT requests
+interruption (exit 2, an `interrupted` JSON error when shutdown completes).
+Caught custom handlers cannot survive exec or worker spawn; an in-process custom
+handler is preserved when no bootstrap relaunch is needed. Application signal
+tests should explicitly establish their child's signal state before exec instead
+of changing runner-global handlers. This applies locally and with workers.
+
+A SIGINT sent only to the worker coordinator may terminate children without
+fixture teardown. Local cooperative cleanup is bounded for async work, not hard
+interruption of arbitrary sync code. SIGKILL/hard interruption may prevent cleanup
+and final JSON; Snektest does not contain arbitrary subprocess trees.
+See [CLI startup policy](docs/cli-startup.md#posix-signal-policy-108) for the tested
+SIGINT-only background reset recipe and foreground/background/custom-handler
+semantics. There is no signal-normalization flag; use an explicit launcher when
+interruptible background execution is desired.
+
 ## AnyIO and async runtimes
 
 Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`. Snektest runs on asyncio;

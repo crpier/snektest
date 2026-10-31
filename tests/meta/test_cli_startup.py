@@ -123,7 +123,9 @@ def test_library_import_and_programmatic_run_leave_host_policy_unchanged() -> No
         name="test_embedded_policy",
     )
     source = dedent(f"""
-        import asyncio, contextlib, io, os, sys
+        import asyncio, contextlib, io, os, signal, sys
+        handler = lambda signum, frame: None
+        signal.signal(signal.SIGINT, handler)
         original = os.environ.get('PYTHON_CONTEXT_AWARE_WARNINGS')
         from snektest import assert_eq
         from snektest.cli import main, run_tests_programmatic
@@ -139,6 +141,7 @@ def test_library_import_and_programmatic_run_leave_host_policy_unchanged() -> No
                 assert_eq(error.code, 0)
         assert_eq(sys.flags.context_aware_warnings, 0)
         assert_eq(os.environ.get('PYTHON_CONTEXT_AWARE_WARNINGS'), original)
+        assert_eq(signal.getsignal(signal.SIGINT), handler)
         print('embedding unchanged')
     """)
     environment = dict(os.environ)
@@ -433,8 +436,13 @@ def test_cli_preserves_unsuccessful_exit_codes_and_one_json_document(
         assert_eq(document["error"]["category"], "interrupted")
 
 
-@test(mark="slow")
-def test_posix_cli_keeps_pid_and_handles_external_interrupt_after_startup() -> None:
+@test(
+    [Param(value=(), name="local"), Param(value=("--workers", "1"), name="worker")],
+    mark="slow",
+)
+def test_posix_cli_keeps_pid_and_handles_external_interrupt_after_startup(
+    workers: tuple[str, ...],
+) -> None:
     if os.name == "nt":
         skip(
             "External POSIX signal delivery; portable SIGINT exit coverage is separate"
@@ -467,7 +475,7 @@ def test_posix_cli_keeps_pid_and_handles_external_interrupt_after_startup() -> N
     source = dedent(f"""
         import runpy, signal, sys
         signal.signal(signal.SIGINT, signal.default_int_handler)
-        sys.argv = ['snektest', '--json-output', {str(path)!r}]
+        sys.argv = ['snektest', '--json-output', *{workers!r}, {str(path)!r}]
         runpy.run_module('snektest', run_name='__main__')
     """)
     environment = dict(os.environ)
@@ -488,7 +496,8 @@ def test_posix_cli_keeps_pid_and_handles_external_interrupt_after_startup() -> N
             ):
                 time.sleep(0.01)
             assert_eq(ready.exists(), True, msg="CLI did not reach the waiting body")
-            assert_eq(int(ready.read_text()), process.pid)
+            if not workers:
+                assert_eq(int(ready.read_text()), process.pid)
             process.send_signal(signal.SIGINT)
             stdout, stderr = process.communicate(timeout=15)
         finally:
@@ -497,11 +506,17 @@ def test_posix_cli_keeps_pid_and_handles_external_interrupt_after_startup() -> N
                 _ = process.communicate(timeout=5)
     assert_eq(process.returncode, 2, msg=stdout + stderr)
     assert_eq(json.loads(stdout)["error"]["category"], "interrupted")
-    assert_eq(cleaned.read_text(), "cleaned")
+    if not workers:
+        assert_eq(cleaned.read_text(), "cleaned")
 
 
-@test(mark="slow")
-def test_posix_cli_preserves_inherited_ignored_signals() -> None:
+@test(
+    [Param(value=(), name="local"), Param(value=("--workers", "1"), name="worker")],
+    mark="slow",
+)
+def test_posix_cli_preserves_inherited_ignored_signals(
+    workers: tuple[str, ...],
+) -> None:
     if os.name == "nt":
         skip("POSIX inherited signal dispositions")
     directory = load_fixture(tmp_dir_fixture())
@@ -510,14 +525,25 @@ def test_posix_cli_preserves_inherited_ignored_signals() -> None:
     path = create_test_file(
         directory,
         dedent("""
-        import signal, sys
+        import signal, subprocess, sys
         from snektest import assert_eq, test
 
-        @test(mark='fast')
+        @test(mark='slow')
         def inherited_ignores() -> None:
             assert_eq(sys.flags.context_aware_warnings, 1)
             assert_eq(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
             assert_eq(signal.getsignal(signal.SIGQUIT), signal.SIG_IGN)
+            assert_eq(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+            signal.raise_signal(signal.SIGINT)
+            child = subprocess.run(
+                [sys.executable, '-c',
+                 'import signal; from snektest import assert_eq; '
+                 'assert_eq(signal.getsignal(signal.SIGINT), signal.SIG_IGN); '
+                 'signal.raise_signal(signal.SIGINT); print("survived")'],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            assert_eq(child.returncode, 0, msg=child.stderr)
+            assert_eq(child.stdout.strip(), 'survived')
         """),
         name="test_startup_ignored_signals",
     )
@@ -529,13 +555,137 @@ def test_posix_cli_preserves_inherited_ignored_signals() -> None:
             _ = marker.write_text('selected')
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             signal.signal(signal.SIGQUIT, signal.SIG_IGN)
-        sys.argv = ['snektest', '--json-output', {str(path)!r}]
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        sys.argv = ['snektest', '--json-output', *{workers!r}, {str(path)!r}]
         runpy.run_module('snektest', run_name='__main__')
     """)
     environment = dict(os.environ)
     environment.pop("PYTHON_CONTEXT_AWARE_WARNINGS", None)
     completed = subprocess.run(
         [sys.executable, "-c", source],
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+        timeout=15,
+    )
+    assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+    assert_eq(json.loads(completed.stdout)["passed"], 1)
+
+
+@test(
+    [Param(value=(), name="local"), Param(value=("--workers", "1"), name="worker")],
+    [
+        Param(value=False, name="shell-background"),
+        Param(value=True, name="explicit-reset"),
+    ],
+    mark="slow",
+)
+def test_posix_background_shell_signal_policy(
+    workers: tuple[str, ...],
+    reset: bool,  # noqa: FBT001 -- parameterized policy
+) -> None:
+    if os.name == "nt":
+        skip("POSIX noninteractive shell background jobs")
+    directory = load_fixture(tmp_dir_fixture())
+    path = create_test_file(
+        directory,
+        dedent(f"""
+        import signal, subprocess, sys
+        from snektest import assert_eq, test
+
+        @test(mark='slow')
+        def background_policy() -> None:
+            assert_eq(callable(signal.getsignal(signal.SIGINT)), {reset!r})
+            assert_eq(signal.getsignal(signal.SIGQUIT), signal.SIG_IGN)
+            child = subprocess.run(
+                [sys.executable, '-c',
+                 'import signal; from snektest import assert_eq; '
+                 'assert_eq(signal.getsignal(signal.SIGINT), '
+                 'signal.default_int_handler if {reset!r} else signal.SIG_IGN)'],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            assert_eq(child.returncode, 0, msg=child.stderr)
+        """),
+        name="test_background_policy",
+    )
+    # Reset in a Python launcher: a shell can refuse to reset signals ignored on
+    # its own entry. exec keeps the shell's $! PID as the actual CLI PID.
+    launcher = (
+        "import os, signal, sys; "
+        "signal.signal(signal.SIGINT, signal.SIG_DFL); "
+        "os.execv(sys.executable, [sys.executable, '-m', 'snektest', *sys.argv[1:]])"
+    )
+    command = (
+        [sys.executable, "-c", launcher]
+        if reset
+        else [sys.executable, "-m", "snektest"]
+    )
+    environment = dict(os.environ)
+    environment.pop("PYTHON_CONTEXT_AWARE_WARNINGS", None)
+    completed = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            '"$@" </dev/null & child=$!; wait "$child"',
+            "signal-test",
+            *command,
+            "--json-output",
+            *workers,
+            str(path),
+        ],
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+        timeout=20,
+    )
+    assert_eq(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+    assert_eq(json.loads(completed.stdout)["passed"], 1)
+    assert_eq(completed.stderr, "")
+
+
+@test(
+    [Param(value=False, name="no-relaunch"), Param(value=True, name="relaunch")],
+    mark="slow",
+)
+def test_posix_custom_sigint_follows_python_exec_semantics(relaunch: bool) -> None:  # noqa: FBT001 -- parameterized policy
+    if os.name == "nt":
+        skip("POSIX exec signal semantics")
+    directory = load_fixture(tmp_dir_fixture())
+    marker = directory / "custom-handler-installed"
+    marker.unlink(missing_ok=True)
+    path = create_test_file(
+        directory,
+        dedent(f"""
+        import signal
+        from snektest import assert_eq, test
+
+        @test(mark='fast')
+        def custom_policy() -> None:
+            if not {relaunch!r}:
+                signal.raise_signal(signal.SIGINT)
+        """),
+        name="test_custom_policy",
+    )
+    source = dedent(f"""
+        import runpy, signal, sys
+        from pathlib import Path
+        marker = Path({str(marker)!r})
+        if not marker.exists():
+            _ = marker.write_text('installed')
+            signal.signal(signal.SIGINT, lambda signum, frame: None)
+        from snektest import assert_eq
+        if sys.flags.context_aware_warnings:
+            assert_eq(signal.getsignal(signal.SIGINT) is signal.default_int_handler, {relaunch!r})
+        sys.argv = ['snektest', '--json-output', {str(path)!r}]
+        runpy.run_module('snektest', run_name='__main__')
+    """)
+    environment = dict(os.environ)
+    environment.pop("PYTHON_CONTEXT_AWARE_WARNINGS", None)
+    options = [] if relaunch else ["-X", "context_aware_warnings=1"]
+    completed = subprocess.run(
+        [sys.executable, *options, "-c", source],
         capture_output=True,
         check=False,
         env=environment,

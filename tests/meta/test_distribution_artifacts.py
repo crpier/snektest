@@ -229,6 +229,50 @@ def _assert_standalone_cli_startup(artifact: Path, *, target: Path, cwd: Path) -
         assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
         assert_eq(json.loads(executed.stdout)["passed"], 1)
 
+    if os.name != "nt":
+        consumer.write_text(
+            "import signal, subprocess, sys\n"
+            "from snektest import assert_eq, test\n"
+            "@test(mark='slow')\n"
+            "def inherited_signals() -> None:\n"
+            "    for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP):\n"
+            "        assert_eq(signal.getsignal(sig), signal.SIG_IGN)\n"
+            "    signal.raise_signal(signal.SIGINT)\n"
+            "    child = subprocess.run([sys.executable, '-c', "
+            "'import signal; signal.raise_signal(signal.SIGINT); print(42)'], "
+            "capture_output=True, text=True, check=False, timeout=5)\n"
+            "    assert_eq(child.returncode, 0, msg=child.stderr)\n"
+            "    assert_eq(child.stdout.strip(), '42')\n"
+        )
+        launcher = (
+            "import os, signal, sys; "
+            "[signal.signal(sig, signal.SIG_IGN) for sig in "
+            "(signal.SIGINT, signal.SIGQUIT, signal.SIGHUP)]; "
+            "os.execv(sys.argv[1], sys.argv[1:])"
+        )
+        for entry in ([str(executable)], [str(python), "-I", "-m", "snektest"]):
+            for workers in ([], ["--workers", "1"]):
+                executed = subprocess.run(
+                    [
+                        str(python),
+                        "-c",
+                        launcher,
+                        *entry,
+                        "--json-output",
+                        *workers,
+                        str(consumer),
+                    ],
+                    cwd=cwd,
+                    env=environment,
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    timeout=_TIMEOUT_SECONDS,
+                )
+                assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+                assert_eq(json.loads(executed.stdout)["passed"], 1)
+                assert_eq(executed.stderr, "")
+
     _assert_optional_anyio(artifact, python=python, constraints=constraints, cwd=cwd)
 
 
