@@ -502,10 +502,21 @@ async def test_anyio_offload() -> None:
     assert_eq(await run_sync(lambda: 42), 42)
 ```
 
-Task groups and cancel scopes must enter and exit in the same task. Keep them
-inside a test or a single fixture setup/teardown phase, **not across a fixture's
-`yield`**: fixture setup and teardown may run in different tasks. Independently
-awaited AnyIO operations work in both phases; print `snektest --example anyio`.
+Each managed **async fixture** keeps setup, `yield`, and teardown in one
+fixture-owned task, for function, session, and run scopes. AnyIO task groups,
+cancel scopes, and library async context managers can span its `yield`. Protect
+the yield with `try`/`finally` and stop background services during teardown;
+a task group does not automatically stop a forever-running child on normal exit.
+Print `snektest --example anyio` for a fixture-backed service.
+
+The fixture initially inherits its loader's context, but its `ContextVar`
+changes stay in the fixture task; they do not bind the test's context. Return
+resources/context explicitly through yielded values. Its cancel scopes govern
+the fixture and its children, not the test body. Synchronous generator fixtures
+retain synchronous loading; task-local runtime scopes spanning `yield` require
+an async fixture. Dependency teardown order, shared cached setup, and cleanup
+budgets remain unchanged. Function loads after function teardown starts are
+rejected, including from abandoned-task finalizers.
 
 Idle AnyIO pool workers registered with the current loop are not thread leaks.
 This is identity-based, not a thread-name exemption. New busy/abandoned workers
@@ -514,7 +525,7 @@ work is not comprehensively tracked, and no thread can be forcibly stopped.
 AnyIO remains optional and is not imported by core execution merely to inspect
 threads. The extra selects AnyIO `>=4.14.2,<5`.
 
-There is **no backend selector or Trio support** in this first integration slice.
+There is still **no backend selector or Trio support**.
 Local runs, workers, and programmatic runners retain their asyncio lifecycle.
 See [backend policy and limitations](docs/async-backends.md), including the
 requirements for a future explicit runtime choice.

@@ -56,16 +56,23 @@ async def test_anyio_offload() -> None:
     assert_eq(await run_sync(lambda: 42), 42)
 ```
 
-Keep task groups and cancel scopes within a test or a single fixture phase;
-**never span a fixture's `yield`** with them, because setup and teardown may run
-in different tasks. Separate awaited operations work in either phase. Idle pool
+Managed async fixtures keep setup, yield, and teardown in one fixture-owned
+task in every scope. AnyIO task groups, cancel scopes, and library async context
+managers may span their yield. Use try/finally and stop forever-running children
+before leaving the task group. Fixture tasks inherit their loader's context,
+but their ContextVar changes stay fixture-local; yield resources/context values
+explicitly instead of implicitly binding the test's context. Fixture cancel
+scopes govern fixture work, not the test body. Synchronous fixtures still load
+synchronously; runtime scopes spanning yield require async fixtures. Function
+loads after function teardown starts are rejected, even in task finalizers.
+Idle pool
 workers registered with the current asyncio loop are exempt from thread-leak
 checks by identity, not by name. New busy/abandoned workers and raw lookalikes
 remain failures. Existing-thread work is not comprehensively tracked; threads
 cannot be forcibly stopped. AnyIO is optional and core observation does not
-import it. Print `--example anyio` for task groups and fixture operations.
+import it. Print `--example anyio` for a fixture-backed async service.
 
-This first slice adds neither a backend selector nor Trio support. Local runs,
+These integration slices add neither a backend selector nor Trio support. Local runs,
 workers, and programmatic runners stay on asyncio. A future backend choice must
 be explicit and command-wide, apply to host/original/replacement workers and
 fixture/task/timeout lifetimes, preserve asyncio by default, reject missing or

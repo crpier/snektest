@@ -241,7 +241,9 @@ def test_core_execution_does_not_import_anyio(workers: int | None) -> None:
 
 
 @test([Param(value=None, name="local"), Param(value=1, name="worker")], mark="slow")
-def test_task_local_anyio_scope_cannot_span_fixture_yield(workers: int | None) -> None:
+def test_task_local_anyio_scope_can_span_async_fixture_yield(
+    workers: int | None,
+) -> None:
     directory = load_fixture(tmp_dir_fixture())
     path = create_test_file(
         directory,
@@ -256,18 +258,16 @@ def test_task_local_anyio_scope_cannot_span_fixture_yield(workers: int | None) -
                 yield
 
         @test(mark="fast")
-        async def test_unsupported_scope() -> None:
+        async def test_supported_scope() -> None:
             await load_fixture(scoped())
         """),
         name="test_task_local_anyio_fixture_scope",
     )
     arguments = [] if workers is None else ["--workers", str(workers)]
     result = run_test_subprocess(path, *arguments, timeout=15)
-    assert_eq(result["returncode"], 1, msg=result["stdout"] + result["stderr"])
-    assert_eq(result["fixture_teardown_failed"], 1)
-    failure = result["tests"][0]["fixture_teardown_failures"][0]
-    assert_eq(failure["exception"]["type"], "RuntimeError")
-    assert_in("different task", failure["exception"]["message"])
+    assert_eq(result["returncode"], 0, msg=result["stdout"] + result["stderr"])
+    assert_eq(result["fixture_teardown_failed"], 0)
+    assert_eq(result["passed"], 1)
 
 
 @test([Param(value=None, name="local"), Param(value=2, name="workers")], mark="slow")

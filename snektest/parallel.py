@@ -16,7 +16,7 @@ lazy from multiprocessing.process import BaseProcess
 lazy from pathlib import Path
 lazy from typing import Any, Literal, cast
 
-lazy from snektest.annotations import AsyncFixture, Coroutine
+lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
 lazy from snektest.benchmark_baseline import BenchmarkBaseline
 lazy from snektest.collection import collect_tests_from_filters
 lazy from snektest.collection_errors import format_collection_error
@@ -219,14 +219,35 @@ def _host_main(  # noqa: PLR0913, PLR0917
         connection.close()
         return
 
+    asyncio.run(
+        _serve_host(connection, catalog, capture_output=capture_output, timeout=timeout)
+    )
+    connection.close()
+
+
+def _host_setup_output(output: StringIO | None, warnings: Sequence[str]) -> str:
+    # Publication already transports setup output, not a separate warnings field.
+    # Preserve host setup warnings there instead of discarding its recorder.
+    text = output.getvalue() if output is not None else ""
+    return text + "".join(f"{warning}\n" for warning in warnings)
+
+
+async def _serve_host(
+    connection: ProcessConnection,
+    catalog: dict[RunFixtureIdentity, Callable[[], Fixture[Any] | AsyncFixture[Any]]],
+    *,
+    capture_output: bool,
+    timeout: float | None,  # noqa: ASYNC109
+) -> None:
+    """Keep hosted async resources running while command reception is idle."""
     registry = FixtureRegistry()
-    with use_registry(registry), asyncio.Runner() as runner:
+    with use_registry(registry):
         while True:
-            message = connection.recv()
+            message = await asyncio.to_thread(connection.recv)
             if isinstance(message, _Shutdown):
                 with maybe_capture_output(capture_output) as (output, warnings):
-                    failures = runner.run(
-                        registry.teardown_run_fixtures(cleanup_timeout=timeout)
+                    failures = await registry.teardown_run_fixtures(
+                        cleanup_timeout=timeout
                     )
                 connection.send(
                     _HostStopped(
@@ -243,16 +264,13 @@ def _host_main(  # noqa: PLR0913, PLR0917
                 connection.send(RunFixtureFailed(("", ""), msg))
                 continue
             output = None
+            setup_warnings: list[str] = []
             try:
-                with maybe_capture_output(capture_output) as (output, _):
+                with maybe_capture_output(capture_output) as (output, setup_warnings):
                     handle = catalog[message.identity]()
                     if isinstance(handle, AsyncFixture):
-                        payload = runner.run(
-                            _load_async_run_fixture_payload(
-                                registry,
-                                handle,
-                                message.setup_timeout,
-                            )
+                        payload = await _load_async_run_fixture_payload(
+                            registry, handle, message.setup_timeout
                         )
                     else:
                         payload = cast("bytes", registry.load_run_payload(handle))
@@ -269,7 +287,7 @@ def _host_main(  # noqa: PLR0913, PLR0917
                             f"{message.identity[1]} publication failed: "
                             f"{diagnostic.type_name}: {diagnostic.message}"
                         ),
-                        output.getvalue() if output is not None else "",
+                        _host_setup_output(output, setup_warnings),
                         interruption=type(exc).__name__ if interrupted else None,
                         # SystemExit accepts arbitrary objects despite its code annotation.
                         exit_code=(
@@ -286,11 +304,10 @@ def _host_main(  # noqa: PLR0913, PLR0917
                 connection.send(
                     RunFixtureLoaded(
                         message.identity,
-                        output.getvalue(),
+                        _host_setup_output(output, setup_warnings),
                         payload,
                     )
                 )
-    connection.close()
 
 
 def _worker_main(  # noqa: PLR0913, PLR0917

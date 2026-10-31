@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Give every managed async fixture one owning task for setup, yield, and teardown, allowing AnyIO scopes and async services to span yield in all fixture scopes. Keep the run-fixture host loop live between requests, retain warning diagnostics and unfinished-setup cleanup, report malformed yields without losing structured output, and reject function loads after teardown starts. Fixture ContextVar changes are now isolated from tests; pass context/resources through yielded values. Sync loading is unchanged. This is the next #100 prerequisite, not backend selection or Trio support.
+
 - Begin optional Python-native typing contracts with bare `@test_typing`, native
   `typing.assert_type`, and exact `assert_type_error("rule")` blocks. Analyze
   original sync/async source without executing bodies; preserve selectors and
