@@ -4,7 +4,9 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
-- Give every managed async fixture one owning task for setup, yield, and teardown, allowing AnyIO scopes and async services to span yield in all fixture scopes. Keep the run-fixture host loop live between requests, retain warning diagnostics and unfinished-setup cleanup, report malformed yields without losing structured output, and reject function loads after teardown starts. Fixture ContextVar changes are now isolated from tests; pass context/resources through yielded values. Sync loading is unchanged. This is the next #100 prerequisite, not backend selection or Trio support.
+- Add explicit command-wide `--backend asyncio|trio`, project `backend`, and programmatic selection with optional `snektest[trio]`. Preserve asyncio by default; use native Trio for fixture/task lifetimes, original/replacement workers, Hypothesis/schema handoffs, ty subprocesses, measurements, and progress. Reject unavailable or mismatched runtimes without fallback. Trio cleanup is cooperative and fail-stops before another case if owned work survives its budget; shielding/shutdown still require an outer deadline. (#100)
+
+- Give every managed async fixture one owning task for setup, yield, and teardown, allowing AnyIO scopes and async services to span yield in all fixture scopes. Keep the run-fixture host loop live between requests, retain warning diagnostics and unfinished-setup cleanup, report malformed yields without losing structured output, and reject function loads after teardown starts. Fixture ContextVar changes are now isolated from tests; pass context/resources through yielded values. Sync loading is unchanged. (#100)
 
 - Begin optional Python-native typing contracts with bare `@test_typing`, native
   `typing.assert_type`, and exact `assert_type_error("rule")` blocks. Analyze
@@ -25,7 +27,7 @@ Notable user-facing changes are recorded here.
   fake checkers. Hard collection/synchronous deadlines still require an external
   command timeout; OS-specific fault evidence remains qualified. (#96)
 
-- Recognize idle AnyIO asyncio pool workers by current-loop registration and identity, without importing AnyIO, prewarming/shutting down pools, or exempting thread names or newly created busy workers. Add the optional `snektest[anyio]` extra, executable examples, and explicit task-local fixture-scope/backend limitations. This is the first #100 slice: backend selection and Trio remain unimplemented.
+- Recognize idle AnyIO asyncio pool workers by current-loop registration and identity, without importing AnyIO, prewarming/shutting down pools, or exempting thread names or newly created busy workers. Add the optional `snektest[anyio]` extra, executable examples, and explicit task-local fixture-scope/backend limitations. (#100)
 
 - Add typed `temporary_directory(base=..., retention=...)` with inferred test/session ownership, default cleanup even on failure, explicit on-failure/always retention, off-loop recursive removal, ownership checks, and path-only console/programmatic/JSON reporting. Keep resource teardown before deletion and cleanup errors alongside original failures. Session policy is process-local; no global TMPDIR mutation, process management, historical pruning or hard-kill cleanup guarantees. (#97)
 

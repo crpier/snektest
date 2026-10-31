@@ -316,8 +316,9 @@ with `try`/`finally`.
 A fixture that returns while its tasks remain pending receives an attributed
 teardown failure. Test-owned leaks are cancelled after function teardown. Owned-task cleanup re-scans cancellation-created descendants under one deadline. Forced finalizers run in their original task context so descendants retain ownership. If tasks survive the final close/reap attempt, the command stops rather than starting another test. Unrelated embedding tasks are left alone. New
 tasks from an unrelated embedding application have no test owner and are left
-alone. Cancellation waits are bounded; a resistant coroutine is force-closed and
-the owning test or fixture fails. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
+alone. Asyncio cancellation waits are bounded; a resistant coroutine is force-closed
+and the owning test or fixture fails. Trio instead fail-stops if owned work
+survives the budget; native shutdown still needs an external deadline. Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
 ### Python-native typing contracts
 
@@ -400,8 +401,16 @@ threaded test executor.
 ### AnyIO and backend policy
 
 When changing AnyIO thread recognition, fixture integration, or async runtime
-selection, read `docs/async-backends.md`. The #100 integration supports AnyIO on
-asyncio, not Trio or a backend selector. Async fixture tasks may keep scopes
+selection, read `docs/async-backends.md`. `--backend asyncio|trio`, project
+`backend`, and programmatic `backend=` are explicit and command-wide; asyncio
+remains default. Require a matching embedding host and optional Trio dependency;
+reject unavailable/unknown engines before imports without fallback. Propagate
+choice through host/original/replacement workers and publication. `runtime.py`
+and `runtime_tasks.py` own native engine/task seams. Trio cleanup is cooperative:
+owned work surviving its budget raises infrastructure failure before another
+case, never cross-task coroutine closure. Shielding may postpone body deadlines;
+native shutdown can still need an outer process timeout. Preserve asyncio's
+existing cleanup behavior and unrelated embedding tasks. Async fixture tasks may keep scopes
 across yield; fixture-local context/cancellation is not the test's context.
 Warnings are buffered by their fixture task and relayed at setup/teardown;
 later fixture-background warnings belong to its teardown. Run-host setup
@@ -411,14 +420,18 @@ lifetime warning catchers when context-aware warnings are explicitly disabled.
 only an already-loaded backend, and fails closed on unknown registry shapes.
 Preserve raw-thread/busy-new-worker leak checks; do not prewarm, daemonize, rename,
 or shut down a caller-owned pool. Existing-thread work is not fully tracked.
-The optional extra and explicit dev dependency select AnyIO `>=4.14.2,<5`.
+The optional extra and explicit dev dependency select AnyIO `>=4.14.2,<5`;
+`snektest[trio]` selects Trio `>=0.34,<0.35`. Trio's native daemon thread cache
+follows the existing daemon exemption; abandoned offloads may outlive the runtime.
+Exercise real local/worker/embedding, Hypothesis/schema/typing/memory/progress,
+and independently installed core-only/extra seams when changing these adapters.
 
 ### Timeouts
 
 CLI runs apply a 60-second timeout to every async test by default.
 `--timeout SECONDS` accepts a finite positive value, while `--no-timeout`
 disables the test-body limit. The CLI passes that run-wide ceiling to
-`execute_test`, which wraps the awaited test body in `asyncio.timeout`. It is
+`execute_test`, which wraps the awaited body in the selected native deadline. It is
 async-only and best-effort: the timeout only fires while the test is suspended
 on an `await`, so a hung `await` becomes an error (`TestTimeoutError`, reported
 as ERROR) and the run continues. Synchronous or CPU-bound work cannot be
@@ -446,10 +459,13 @@ requires an outer process or CI timeout.
 Interactions:
 
 - **`@test_hypothesis`.** An async property test runs every example inside a
-  single `await asyncio.to_thread(run_hypothesis)` (`decorators.py`), so the
-  timeout wraps the whole property run, not each example. If it fires while an
+  single native thread offload (`decorators.py`), so the
+  timeout wraps the whole property run, not each example. Copy sender ContextVars
+  per handoff, not a frozen loop-entry context. Hypothesis thread-local controls
+  (`note`/`event`/`target`/`st.data().draw`) remain unsupported in async bodies;
+  preserving those thread locals needs a separate integration, not a context copy. If it fires while an
   example is suspended, task cancellation completes the cross-thread handoff and
-  lets the Hypothesis worker stop. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Blocking thread work still needs an outer timeout. Synchronous or CPU-bound work in that thread
+  lets the Hypothesis worker stop. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Asyncio resistant examples are force-closed under the cleanup budget, and finalizer errors remain task_cleanup diagnostics; Trio fail-stops instead. Blocking thread work still needs an outer timeout. Synchronous or CPU-bound work in that thread
   remains uninterruptible. Sync property tests are not coroutines, so the timeout
   never applies. Prefer Hypothesis's own `deadline`/`max_examples` for per-example
   bounds; use `--no-timeout` if the complete property run must remain unbounded.
@@ -631,7 +647,7 @@ results by duration and prints exact rerun selectors. `RunResult.selected_tests`
 and `stopped_early` distinguish the selected plan from cases that ran.
 
 `configuration.py` finds the nearest `pyproject.toml` and validates
-`[tool.snektest]`. It accepts `test_paths`, `timeout`, `mark`, `capture_output`,
+`[tool.snektest]`. It accepts `test_paths`, `backend`, `timeout`, `mark`, `capture_output`,
 `json_output`, and `junit_output`; unknown keys fail. Relative paths use the
 project directory. CLI filters and flags, including inverse output and marker
 flags, override configured values. `--output-schema-versions` lists supported

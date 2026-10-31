@@ -1,6 +1,5 @@
 """Fixture registry: per-run ownership of caching, setup, and teardown."""
 
-lazy import asyncio
 lazy import sys
 lazy from collections.abc import (
     AsyncGenerator,
@@ -28,10 +27,14 @@ lazy from snektest.models import (
     FixtureError,
     FixtureTaskLeakError,
     FixtureTeardownTimeoutError,
+    RunInfrastructureError,
     TeardownFailure,
     UnreachableError,
 )
 lazy from snektest.progress import activity
+lazy from snektest.runtime import cancelled_errors
+lazy from snektest.runtime import timeout as runtime_timeout
+lazy from snektest.runtime_tasks import Task
 lazy from snektest.task_cleanup import (
     cancel_owned_tasks,
     cancel_tasks,
@@ -41,7 +44,7 @@ lazy from snektest.task_cleanup import (
 lazy from snektest.temporary import TemporaryDirectories
 
 type _FixtureGenerator = AsyncFixtureDriver[Any] | AsyncGenerator[Any] | Generator[Any]
-type _PendingSetup = asyncio.Task[Any] | AsyncFixtureDriver[Any]
+type _PendingSetup = Task[Any] | AsyncFixtureDriver[Any]
 type _SessionSlot = tuple[_FixtureGenerator, object, str]
 type _RunFixtureHandle = Fixture[Any] | AsyncFixture[Any]
 type _RunFixtureLoader = Callable[[_RunFixtureHandle], object]
@@ -95,7 +98,7 @@ async def _teardown_async_fixture(
     cleanup_timeout: float,
 ) -> None:
     """Advance async teardown and distinguish its own timeout from user errors."""
-    cancel_scope = asyncio.timeout(cleanup_timeout)
+    cancel_scope = runtime_timeout(cleanup_timeout)
     try:
         async with cancel_scope:
             await anext(generator)
@@ -132,6 +135,8 @@ async def teardown_fixture(
         raise BadRequestError(msg)  # noqa: TRY301
     except StopAsyncIteration, StopIteration:
         return None
+    except RunInfrastructureError:
+        raise
     except Exception, BadRequestError:
         exc_type, exc_value, traceback = exc_info_provider()
         if exc_type is None or exc_value is None or traceback is None:
@@ -185,8 +190,8 @@ async def _cleanup_fixture_tasks(
 
 def _request_setup_cancellation(
     pending: Iterable[tuple[_PendingSetup, str]],
-) -> list[tuple[asyncio.Task[Any], str]]:
-    setups: list[tuple[asyncio.Task[Any], str]] = []
+) -> list[tuple[Task[Any], str]]:
+    setups: list[tuple[Task[Any], str]] = []
     for item, name in tuple(pending):
         task = item.task if isinstance(item, AsyncFixtureDriver) else item
         if task.done():
@@ -541,7 +546,7 @@ class FixtureRegistry:
     ) -> _RunFixtureInterruption | _RunFixturePublicationFailure:
         """Retain cleanup ownership without relabeling interruption as publication."""
         failure: _RunFixtureInterruption | _RunFixturePublicationFailure
-        if isinstance(error, (SystemExit, KeyboardInterrupt, asyncio.CancelledError)):
+        if isinstance(error, (SystemExit, KeyboardInterrupt, *cancelled_errors())):
             failure = _RunFixtureInterruption(error)
         else:
             diagnostic = snapshot_exception(type(error), error, error.__traceback__)

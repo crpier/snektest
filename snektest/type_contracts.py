@@ -3,6 +3,7 @@
 lazy import ast
 lazy import asyncio
 lazy import inspect
+lazy import subprocess
 lazy import symtable
 lazy import sys
 lazy import tomllib
@@ -19,10 +20,12 @@ lazy from tempfile import TemporaryDirectory
 lazy from types import ModuleType
 lazy from typing import Any, cast
 
+lazy import trio
 lazy from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 lazy from snektest.decorators import fixture, load_fixture
 lazy from snektest.models import AssertionFailure, BadRequestError, SnektestError
+lazy from snektest.runtime import current_backend, timeout
 lazy from snektest.task_cleanup import cleanup_budget, defer_cancellation
 lazy from snektest.utils import mark_test_function
 
@@ -451,20 +454,28 @@ def _project_root(path: Path) -> Path:
     return package_root
 
 
-async def _read_report(stream: asyncio.StreamReader) -> bytes:
+async def _read_report(stream: asyncio.StreamReader | trio.abc.ReceiveStream) -> bytes:
     chunks: list[bytes] = []
     size = 0
-    while chunk := await stream.read(_READ_BYTES):
+    read = (
+        stream.read if isinstance(stream, asyncio.StreamReader) else stream.receive_some
+    )
+    while chunk := await read(_READ_BYTES):
         size += len(chunk)
         if size > _MAX_REPORT_BYTES:
             msg = "ty output exceeded the 4 MiB report limit"
             raise SnektestError(msg)
-        chunks.append(chunk)
+        chunks.append(bytes(chunk))
     return b"".join(chunks)
 
 
-async def _discard_report(stream: asyncio.StreamReader) -> None:
-    while await stream.read(_READ_BYTES):
+async def _discard_report(
+    stream: asyncio.StreamReader | trio.abc.ReceiveStream,
+) -> None:
+    read = (
+        stream.read if isinstance(stream, asyncio.StreamReader) else stream.receive_some
+    )
+    while await read(_READ_BYTES):
         pass
 
 
@@ -484,6 +495,8 @@ async def _reap(process: asyncio.subprocess.Process) -> None:
 
 
 async def _invoke(command: list[str], root: Path) -> tuple[int, bytes, bytes]:
+    if current_backend() == "trio":
+        return await _invoke_trio(command, root)
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=root,
@@ -507,6 +520,54 @@ async def _invoke(command: list[str], root: Path) -> tuple[int, bytes, bytes]:
         raise
     finally:
         await _reap(process)
+
+
+@defer_cancellation
+async def _reap_trio(process: trio.Process) -> None:
+    if process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.kill()
+    try:
+        async with (
+            timeout(min(_REAP_SECONDS, cleanup_budget.get())),
+            trio.open_nursery() as nursery,
+        ):
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    nursery.start_soon(_discard_report, stream)
+            _ = await process.wait()
+    finally:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                await stream.aclose()
+
+
+async def _invoke_trio(command: list[str], root: Path) -> tuple[int, bytes, bytes]:
+    process = await trio.lowlevel.open_process(
+        command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    output = [b"", b""]
+
+    async def read(stream: trio.abc.ReceiveStream, index: int) -> None:
+        output[index] = await _read_report(stream)
+
+    try:
+        if process.stdout is None or process.stderr is None:
+            msg = "ty output pipes could not be opened"
+            raise SnektestError(msg)
+        async with timeout(cleanup_budget.get()), trio.open_nursery() as nursery:
+            nursery.start_soon(read, process.stdout, 0)
+            nursery.start_soon(read, process.stderr, 1)
+            status = await process.wait()
+        return status, output[0], output[1]
+    except ExceptionGroup as error:
+        if len(error.exceptions) == 1 and isinstance(
+            error.exceptions[0], SnektestError
+        ):
+            raise error.exceptions[0] from None
+        raise
+    finally:
+        await _reap_trio(process)
 
 
 def _configuration_arguments(config: Path) -> list[str]:

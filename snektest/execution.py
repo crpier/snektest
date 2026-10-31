@@ -1,6 +1,5 @@
 """Test execution, fixture teardown, debugging, and run orchestration."""
 
-lazy import asyncio
 lazy import pdb  # noqa: T100
 lazy import sys
 lazy import time
@@ -30,6 +29,7 @@ lazy from snektest.models import (
     ExpectedFailureResult,
     FailedResult,
     PassedResult,
+    RunInfrastructureError,
     RunResult,
     RunTeardownDiagnostics,
     SkippedResult,
@@ -49,6 +49,9 @@ lazy from snektest.reporting import (
     RunReporter,
     result_for_retention,
 )
+lazy from snektest.runtime import cancelled_errors
+lazy from snektest.runtime import timeout as runtime_timeout
+lazy from snektest.runtime_tasks import current_task
 lazy from snektest.task_cleanup import (
     cancel_owned_tasks,
     collect_cleanup,
@@ -72,7 +75,7 @@ async def _await_test_body(
     if timeout is None:
         await coro
         return
-    cancel_scope = asyncio.timeout(timeout)
+    cancel_scope = runtime_timeout(timeout)
     try:
         async with cancel_scope:
             await coro
@@ -303,10 +306,10 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
                     benchmarks=tuple(benchmark_capture.measurements),
                     benchmark_comparisons=tuple(benchmark_capture.comparisons),
                 )
-        except asyncio.CancelledError as error:
+        except cancelled_errors() as error:
             duration = time.monotonic() - test_start
-            current_task = asyncio.current_task()
-            if current_task is not None and current_task.cancelling():
+            task = current_task()
+            if task is not None and task.cancelling():
                 interruption = error
             else:
                 exc_type, exc_value, traceback = exc_info_provider()
@@ -325,6 +328,9 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
         except BadRequestError as error:
             duration = time.monotonic() - test_start
             bad_request = error
+        except RunInfrastructureError as error:
+            duration = time.monotonic() - test_start
+            interruption = error
         except Exception:
             duration = time.monotonic() - test_start
             exc_type, exc_value, traceback = exc_info_provider()
@@ -356,7 +362,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
             fixture_teardown_failures = await registry.teardown_function_fixtures(
                 cleanup_timeout=timeout
             )
-        except asyncio.CancelledError as error:
+        except cancelled_errors() as error:
             if interruption is None:
                 interruption = error
 
@@ -367,7 +373,7 @@ async def _execute_test(  # noqa: C901, PLR0912, PLR0915
         task_cleanup = await cancel_owned_tasks(
             test_task_owner, timeout=cleanup_timeout
         )
-    except asyncio.CancelledError:
+    except cancelled_errors():
         if interruption is not None:
             raise interruption from None
         raise

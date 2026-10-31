@@ -1,4 +1,3 @@
-lazy import asyncio
 lazy import re
 lazy from collections.abc import Generator
 lazy from contextvars import Token
@@ -22,6 +21,7 @@ lazy from snektest.models import (
     MemoryMeasurement,
     UnreachableError,
 )
+lazy from snektest.runtime import CheckpointProbe, next_checkpoint
 
 
 def assert_raises[T](
@@ -241,14 +241,14 @@ class MemoryContext:
         self._rounds_iter: Generator[int] | None = None
         self._exhausted: bool = False
         self._guard_token: Token[bool] | None = None
-        self._loop_probe: asyncio.Handle | None = None
+        self._loop_probe: CheckpointProbe | None = None
         self._loop_advanced: bool = False
         self.has_exited: bool = False
         self._entered: bool = False
         self._peak_bytes: int | None = None
         self._growth_slope: float | None = None
 
-    def __enter__(self) -> Self:  # noqa: C901
+    def __enter__(self) -> Self:
         if self._entered:
             msg = "assert_memory contexts are single-use; create a new context."
             raise BadRequestError(msg)
@@ -284,12 +284,7 @@ class MemoryContext:
         try:
             self._backend.start()
             self._backend.reset_peak()
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-            else:
-                self._loop_probe = loop.call_soon(self._mark_loop_advanced)
+            self._loop_probe = next_checkpoint(self._mark_loop_advanced)
         except BaseException:
             try:
                 self._backend.stop()

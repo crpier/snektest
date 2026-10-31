@@ -4,7 +4,6 @@ Each process appends under a native advisory lock. No scheduler/publication
 connection carries observation traffic, and no queue or live frame is retained.
 """
 
-lazy import asyncio
 lazy import json
 lazy import os
 lazy import sys
@@ -19,6 +18,7 @@ lazy from typing import IO
 lazy from uuid import uuid4
 
 lazy from snektest.models import BadRequestError
+lazy from snektest.runtime import host_cancelled_errors
 
 if sys.platform == "win32":
     lazy import msvcrt
@@ -343,7 +343,12 @@ def activity(
             "interrupted"
             if isinstance(
                 error,
-                (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit),
+                (
+                    *host_cancelled_errors(),
+                    KeyboardInterrupt,
+                    SystemExit,
+                    GeneratorExit,
+                ),
             )
             else "error"
         )

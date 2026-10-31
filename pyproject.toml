@@ -34,6 +34,9 @@ anyio = ["anyio>=4.14.2,<5"]
 schema = [
     "schemathesis>=4.25.2,<4.26",
 ]
+trio = [
+    "trio>=0.34,<0.35",
+]
 
 [dependency-groups]
 dev = [
@@ -44,6 +47,7 @@ dev = [
     "ruff>=0.17.2",
     "schemathesis>=4.25.2,<4.26",
     "ty==0.0.84",
+    "trio>=0.34,<0.35",
 ]
 
 [project.scripts]

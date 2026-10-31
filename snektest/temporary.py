@@ -1,6 +1,5 @@
 """Owned temporary paths and off-loop, ownership-checked recursive cleanup."""
 
-lazy import asyncio
 lazy import shutil
 lazy import tempfile
 lazy from dataclasses import dataclass
@@ -17,6 +16,7 @@ lazy from snektest.models import (
     TeardownFailure,
     UnreachableError,
 )
+lazy from snektest.runtime import run_sync
 lazy from snektest.task_cleanup import defer_cancellation
 
 
@@ -119,7 +119,7 @@ class TemporaryDirectories:
                 )
                 continue
             try:
-                await asyncio.to_thread(_remove_owned, directory)
+                await run_sync(_remove_owned, directory)
             except Exception as error:
                 failed = True
                 failures.append(

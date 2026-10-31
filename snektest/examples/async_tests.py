@@ -1,4 +1,4 @@
-"""Async snektest examples.
+"""Asyncio-specific snektest examples; use --example anyio for both backends.
 
 Cleanup follows cancellation-created descendants under one owner deadline, leaving
 unrelated tasks alone. Unreapable owned tasks stop the run before another test.
@@ -11,6 +11,9 @@ test returns is abandoned fixture work, cleaned before the next test.
 
 Hypothesis cancellation stops new examples, releases cross-thread handoffs and
 bounds resistant async-example cleanup. Blocking thread work needs an outer timeout.
+Handoffs copy per-example ContextVars, but Hypothesis thread-local controls such
+as note/event/target and st.data().draw remain unsupported in async bodies; use
+pre-drawn strategies on either backend.
 
 Thread and unraisable failures remain errors even if their message formatter fails.
 

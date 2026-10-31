@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-lazy import asyncio
 lazy from collections.abc import Callable, Collection, Sequence
 lazy from dataclasses import dataclass
 lazy from functools import wraps
@@ -25,6 +24,7 @@ lazy from snektest.decorators import (
 )
 lazy from snektest.import_policy import initializing_imports
 lazy from snektest.models import AssertionFailure, BadRequestError, Param, SnektestError
+lazy from snektest.runtime import run_sync
 lazy from snektest.utils import mark_test_function
 
 
@@ -407,7 +407,7 @@ def test_graphql(  # noqa: PLR0913
                     msg = f"{operation.label}\n{description}\nGenerated query:\n{case.body}"
                     raise AssertionFailure(msg) from None
 
-            await asyncio.to_thread(
+            await run_sync(
                 _run_hypothesis,
                 wrapper,
                 (operation.as_strategy(),),
@@ -526,7 +526,7 @@ def test_schema(  # noqa: PLR0913
                     )
                     raise SchemaGenerationError(msg) from exc
 
-            await asyncio.to_thread(run_hypothesis)
+            await run_sync(run_hypothesis)
 
         mark_test_function(wrapper, (operation_params,), markers)
         return cast("Callable[[], Coroutine[None]]", wrapper)
@@ -642,7 +642,7 @@ def test_schema_workflow(  # noqa: C901, PLR0913
                 None,
             )
             try:
-                await asyncio.to_thread(
+                await run_sync(
                     Workflow.run,
                     settings=hypothesis_settings,
                 )

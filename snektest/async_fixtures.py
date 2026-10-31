@@ -1,6 +1,5 @@
 """Keep an async generator's entire fixture lifetime in its owning task."""
 
-lazy import asyncio
 lazy import warnings
 lazy from collections.abc import AsyncGenerator, Callable, Coroutine
 lazy from contextlib import suppress
@@ -14,7 +13,18 @@ lazy from snektest.models import (
     FixtureTeardownTimeoutError,
 )
 lazy from snektest.output import fixture_warning_capture, relay_fixture_warnings
-lazy from snektest.task_cleanup import task_scope
+lazy from snektest.runtime import cancelled_errors, current_backend
+lazy from snektest.runtime import timeout as runtime_timeout
+lazy from snektest.runtime_tasks import (
+    ResultCell,
+    Task,
+    TrioTask,
+    event,
+    shield,
+    spawn,
+    wait,
+)
+lazy from snektest.task_cleanup import cancel_tasks, task_scope
 
 
 @dataclass(frozen=True)
@@ -42,22 +52,20 @@ class AsyncFixtureDriver[T]:
     ) -> None:
         self.name = name
         self.generator = generator
-        self._ready: asyncio.Future[_Value[T] | _Failure] = (
-            asyncio.get_running_loop().create_future()
-        )
+        self._ready = ResultCell[_Value[T] | _Failure]()
         self._warnings: list[warnings.WarningMessage] = []
-        self._release = asyncio.Event()
+        self._release = event()
         self._timeout = DEFAULT_CLEANUP_TIMEOUT_SECONDS
         self._yielded = False
         self._setup_observed = False
         self._cleanup_cancelled = False
         with task_scope(generator):
-            self.task = asyncio.create_task(
+            self.task = spawn(
                 self._run(setup), name=f"snektest fixture {name}", eager_start=False
             )
         self.task.add_done_callback(self._consume_error)
 
-    def _consume_error(self, task: asyncio.Task[BaseException | None]) -> None:
+    def _consume_error(self, task: Task[BaseException | None]) -> None:
         if not self._ready.done():
             _ = self._ready.cancel()
         if not task.cancelled():
@@ -75,7 +83,7 @@ class AsyncFixtureDriver[T]:
         try:
             value = await setup()
         except BaseException as error:
-            if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
+            if isinstance(error, (*cancelled_errors(), GeneratorExit)):
                 _ = self._ready.cancel()
             else:
                 self._ready.set_result(_Failure(error))
@@ -93,7 +101,7 @@ class AsyncFixtureDriver[T]:
         try:
             try:
                 await self._release.wait()
-            except asyncio.CancelledError as error:
+            except cancelled_errors() as error:
                 # A fixture's own task group/scope can interrupt its suspended
                 # yield. Unwind it in this same task, not at loop shutdown.
                 with suppress(StopAsyncIteration):
@@ -106,36 +114,46 @@ class AsyncFixtureDriver[T]:
         return None
 
     async def _advance(self) -> None:
-        limit = asyncio.timeout(self._timeout)
+        if isinstance(self.task, TrioTask):
+            # The task's OUTER scope owns this deadline. Inserting a new scope
+            # beneath a generator's suspended user scope corrupts Trio's LIFO.
+            try:
+                await self._advance_generator()
+            except cancelled_errors():
+                if self.task.deadline_expired():
+                    raise FixtureTeardownTimeoutError(
+                        self.name, self._timeout
+                    ) from None
+                raise
+            return
+        limit = runtime_timeout(self._timeout)
         try:
             async with limit:
-                try:
-                    _ = await anext(self.generator)
-                except StopAsyncIteration:
-                    return
-                # Inject an ordinary error before closing: a task group wraps
-                # aclose()'s GeneratorExit in BaseExceptionGroup otherwise.
-                msg = f"Incorrect fixture function {self.name} yielded more than once"
-                error = BadRequestError(msg)
-                try:
-                    with suppress(StopAsyncIteration):
-                        _ = await self.generator.athrow(error)
-                finally:
-                    # A malformed generator may catch our error and yield yet
-                    # again. Suppress only closure control flow, including its
-                    # task-group wrapper; real finalizer errors still propagate.
-                    with suppress(GeneratorExit):
-                        await self.generator.aclose()
-                raise error
+                await self._advance_generator()
         except TimeoutError:
             if limit.expired():
                 raise FixtureTeardownTimeoutError(self.name, self._timeout) from None
             raise
 
+    async def _advance_generator(self) -> None:
+        try:
+            _ = await anext(self.generator)
+        except StopAsyncIteration:
+            return
+        msg = f"Incorrect fixture function {self.name} yielded more than once"
+        error = BadRequestError(msg)
+        try:
+            with suppress(StopAsyncIteration):
+                _ = await self.generator.athrow(error)
+        finally:
+            with suppress(GeneratorExit):
+                await self.generator.aclose()
+        raise error
+
     async def wait_setup(self, *, cancel_with_waiter: bool = False) -> T:
         try:
-            outcome = await asyncio.shield(self._ready)
-        except asyncio.CancelledError:
+            outcome = await shield(self._ready)
+        except cancelled_errors():
             if self._ready.cancelled():
                 self._setup_observed = True
             if cancel_with_waiter:
@@ -162,9 +180,17 @@ class AsyncFixtureDriver[T]:
         ):
             return
         self._timeout = cleanup_timeout
+        if isinstance(self.task, TrioTask) and not self.task.done():
+            self.task.set_deadline(cleanup_timeout)
         self._release.set()
         try:
-            error = await asyncio.shield(self.task)
+            if current_backend() == "trio":
+                _, pending = await wait({self.task}, timeout_seconds=cleanup_timeout)
+                if pending:
+                    _ = self.task.cancel()
+                    _ = await cancel_tasks({self.task}, timeout=cleanup_timeout)
+                    raise FixtureTeardownTimeoutError(self.name, cleanup_timeout)
+            error = await shield(self.task)
             if error is not None:
                 raise error
         finally:

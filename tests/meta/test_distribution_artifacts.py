@@ -182,6 +182,10 @@ def _assert_standalone_cli_startup(artifact: Path, *, target: Path, cwd: Path) -
             "--no-dev",
             "--extra",
             "anyio",
+            "--extra",
+            "trio",
+            "--extra",
+            "typing",
             "--no-emit-project",
             "--no-hashes",
             "--output-file",
@@ -297,6 +301,7 @@ def _assert_standalone_cli_startup(artifact: Path, *, target: Path, cwd: Path) -
                 assert_eq(executed.stderr, "")
 
     _assert_optional_anyio(artifact, python=python, constraints=constraints, cwd=cwd)
+    _assert_optional_trio(artifact, python=python, constraints=constraints, cwd=cwd)
 
 
 def _assert_optional_anyio(
@@ -373,6 +378,138 @@ def _assert_optional_anyio(
             assert_eq(json.loads(executed.stdout)["passed"], 1)
 
 
+def _assert_optional_trio(
+    artifact: Path, *, python: Path, constraints: Path, cwd: Path
+) -> None:
+    """Reject unavailable engines, then exercise native tasks and ty in each archive."""
+    absent = _run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "from importlib.util import find_spec; from snektest import assert_is_none; assert_is_none(find_spec('trio'))",
+        ],
+        cwd=cwd,
+    )
+    assert_eq(absent.returncode, 0, msg=absent.stdout + absent.stderr)
+    consumer = cwd / f"test_{python.parent.parent.name.replace('-', '_')}_trio.py"
+    imported = consumer.with_suffix(".imported")
+    consumer.write_text(
+        "from pathlib import Path\n"
+        f"_ = Path({str(imported)!r}).write_text('imported')\n"
+        "import asyncio, trio\n"
+        "from collections.abc import AsyncGenerator\n"
+        "from snektest import assert_eq, assert_raises, fixture, load_fixture, test\n"
+        "@fixture(scope='run')\n"
+        "async def resource() -> AsyncGenerator[int]:\n"
+        "    owner = trio.lowlevel.current_task()\n"
+        "    with trio.CancelScope():\n"
+        "        yield await trio.to_thread.run_sync(lambda: 42)\n"
+        "        assert_eq(trio.lowlevel.current_task(), owner)\n"
+        "@test(mark='medium')\n"
+        "async def native() -> None:\n"
+        "    assert_eq(await load_fixture(resource()), 42)\n"
+        "    with assert_raises(RuntimeError):\n"
+        "        _ = asyncio.get_running_loop()\n"
+        "    await trio.sleep(0)\n"
+    )
+    unavailable = _run(
+        [
+            str(python),
+            "-I",
+            "-m",
+            "snektest",
+            "--backend",
+            "trio",
+            "--json-output",
+            str(consumer),
+        ],
+        cwd=cwd,
+    )
+    assert_eq(unavailable.returncode, 2, msg=unavailable.stdout + unavailable.stderr)
+    assert_in(
+        "optional Trio dependency", json.loads(unavailable.stdout)["error"]["message"]
+    )
+    assert_eq(imported.exists(), False)
+    installed = _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--constraints",
+            str(constraints),
+            f"{artifact}[trio]",
+        ],
+        cwd=cwd,
+    )
+    assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
+    for mode in ("normal", "all"):
+        for workers in ([], ["--workers", "1"]):
+            executed = _run(
+                [
+                    str(python),
+                    "-I",
+                    "-X",
+                    f"lazy_imports={mode}",
+                    "-m",
+                    "snektest",
+                    "--backend",
+                    "trio",
+                    "--json-output",
+                    *workers,
+                    str(consumer),
+                ],
+                cwd=cwd,
+            )
+            assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+            assert_eq(json.loads(executed.stdout)["passed"], 1)
+            assert_eq(executed.stderr, "")
+    installed = _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--constraints",
+            str(constraints),
+            f"{artifact}[typing]",
+        ],
+        cwd=cwd,
+    )
+    assert_eq(installed.returncode, 0, msg=installed.stdout + installed.stderr)
+    with consumer.open("a") as stream:
+        _ = stream.write(
+            "from typing import assert_type\n"
+            "from snektest import assert_type_error, test_typing\n"
+            "@test_typing\n"
+            "def static(number: int) -> None:\n"
+            "    assert_type(number + 1, int)\n"
+            "    with assert_type_error('invalid-argument-type'):\n"
+            "        len(number)\n"
+        )
+    for workers in ([], ["--workers", "1"]):
+        executed = _run(
+            [
+                str(python),
+                "-I",
+                "-m",
+                "snektest",
+                "--backend",
+                "trio",
+                "--json-output",
+                *workers,
+                str(consumer),
+            ],
+            cwd=cwd,
+        )
+        assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
+        assert_eq(json.loads(executed.stdout)["passed"], 2)
+        assert_eq(executed.stderr, "")
+
+
 def _assert_wheel_manifest_and_metadata(
     wheel: Path, expected_package_files: set[str]
 ) -> None:
@@ -410,6 +547,7 @@ def _assert_wheel_manifest_and_metadata(
     assert_eq(metadata["License-Expression"], "MIT")
     assert_eq(metadata["Requires-Python"], ">=3.15")
     assert_in("anyio", metadata.get_all("Provides-Extra"))
+    assert_in("trio", metadata.get_all("Provides-Extra"))
     project_urls = metadata.get_all("Project-URL")
     assert_in("Repository, https://github.com/crpier/snektest", project_urls)
     assert_in("Issues, https://github.com/crpier/snektest/issues", project_urls)
