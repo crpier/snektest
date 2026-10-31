@@ -9,6 +9,16 @@ ignore the environment. Default startup may relaunch the same interpreter/venv
 and repeat site hooks. Already-enabled/explicitly opted-out startup is unchanged;
 library imports and programmatic runners never restart or change host policy.
 
+POSIX CLI startup preserves ignored SIGINT/SIGQUIT/SIGHUP, including workers and
+application subprocesses. Shell background jobs commonly ignore SIGINT/SIGQUIT;
+nohup concerns SIGHUP. Application signal tests should set their child's policy
+explicitly before exec, not reset runner-global handlers. Caught handlers do not
+survive exec/spawn. Normal SIGINT exits 2 with interruption JSON if shutdown
+completes; worker coordinator interruption can terminate children without fixture
+teardown. SIGKILL/hard interruption need not clean up or emit final JSON. There
+is no arbitrary process-tree containment or signal-reset flag. See
+docs/cli-startup.md for the tested SIGINT-only background launcher recipe.
+
 Pass observed values first and expected values second in comparisons. Bind the
 return values of narrowing helpers; use `_ =` when only checking a value's type.
 For exception text, `match=` is regex search, capture plus assert_eq is exact,
