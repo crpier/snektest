@@ -1,112 +1,128 @@
-# AnyIO integration, async fixture lifetimes, and backend policy (#100)
+# Native async backends and AnyIO (#100)
 
-## Implemented: AnyIO operations on asyncio
+## Explicit command-wide choice
 
-Snektest has one async runtime: asyncio. The optional `snektest[anyio]` extra
-selects AnyIO `>=4.14.2,<5`; core installation/execution does not require AnyIO.
-Await AnyIO operations directly from async tests and fixture setup/teardown.
-Do not call `anyio.run()` or start a nested event loop inside them. Print
-`snektest --example anyio` for a runnable example of thread offloads, task groups,
-and a fixture-backed async service. Local, spawned-worker, and programmatic runs
-keep their existing results, JSON schema, and best-effort timeouts.
-An embedding caller may run the programmatic runner under
-`anyio.run(..., backend="asyncio")`; that caller still owns its runtime/pool.
+Asyncio remains the default and needs no optional engine. Install
+`snektest[trio]` for native Trio `>=0.34,<0.35`, then select
+`--backend trio`. `--backend asyncio` explicitly selects the default. The nearest
+`pyproject.toml` may set `[tool.snektest] backend = "trio"`; a CLI choice overrides
+that default. Unknown names, repeated flags, unavailable engines, and invalid
+configuration fail before selected modules are imported. Informational commands
+need neither project configuration nor an optional engine.
 
-## Task-affine async fixtures
+The choice covers local execution, collection/run-fixture host, original workers,
+replacement workers, fixture/task ownership, deadlines, and thread handoffs.
+There is no per-test backend decorator or automatic fallback. Asyncio-specific
+APIs still require asyncio; selecting Trio does not translate arbitrary asyncio
+libraries. Existing normalized result/status types and JSON schema version 1 are
+unchanged; progress remains an independent opt-in sidecar.
 
-Each managed async generator fixture has one persistent owning task. Setup,
-its suspended yield, and teardown all run in that task, in function, session,
-and run scopes. AnyIO cancel scopes, task groups, and library context managers
-holding them may span an async fixture's yield. Each dependency has its own
-task/scope stack, so a function fixture can open a scope before lazily loading a
-longer-lived dependency without violating cancellation-scope LIFO ordering.
-The process fixture host keeps its loop running while awaiting commands, so
-async services remain responsive between setup and shutdown requests.
+Embedding applications pass `backend="trio"` to
+`snektest.cli.run_tests_programmatic` while running their own native Trio or
+AnyIO-with-Trio runtime. Omitting it still means asyncio, not host autodetection.
+The selected engine must match the caller's running runtime. Snektest neither
+replaces that runtime nor nests another event loop. Startup configuration IO and
+standalone assertion suspension probes can observe the actual host without
+changing the explicit execution choice.
 
-The task inherits the loader's initial context. ContextVar updates remain
-fixture-local; setting one does not implicitly bind the test task. Pass
-resources/context explicitly as yielded values. A scope surrounding the yield
-governs the fixture and its descendants, **not the test body**. A background
-task-group error is attributed to that fixture at its scope teardown; it does
-not automatically cancel the test. Protect service setup/yield with try/finally
-and cancel or finish long-running children during teardown. Normal task-group
-exit waits for children; it is not a request to stop a server.
+`runtime.py` owns engine validation, standalone entry, context-copying offloads,
+deadlines, and startup adapters. `runtime_tasks.py` owns managed tasks, result
+cells, events, shielded completion, native task inventory, and waits. Core paths
+do not import Trio or AnyIO merely because those packages are installed.
 
-Synchronous generator fixtures still load synchronously. Task-local runtime
-scopes spanning yield require async fixtures. Standalone handle context-manager
-use continues to run in the caller's task; this owning-task policy applies to
-registry-managed fixtures only.
+## AnyIO and task-affine fixtures
 
-Shared cached setup survives cancellation of an individual waiter. Function
-setup follows its waiter cancellation and still receives fixture cleanup.
-Unfinished function loads are accounted for even before their owning task first
-runs. Function loads after function teardown starts are rejected, including
-from abandoned-task finalizers. Every attempted setup retains cleanup ownership;
-dependency order, descriptor publication, outcome classification and configured
-cleanup budgets remain in force. Cancellation is cooperative, not a hard limit.
+Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`, or
+`snektest[anyio,trio]` to use its Trio backend. Await AnyIO APIs directly in tests
+and fixtures; no nested `anyio.run()` is needed. Print `--example anyio` for a
+portable fixture-backed service, runnable with either selected backend.
 
-Setup warnings are relayed when a value/error reaches its waiter. Subsequent
-fixture-owned warnings are relayed during fixture teardown (including cancelled
-descendants), rather than lost in an expired setup warning context. Function
-warnings join that test's warnings; session/run teardown warnings use their
-existing fields. In process mode, run-host setup warnings travel with existing
-run-fixture setup output. Capture-disabled runs keep normal warning delivery.
-When context-aware warnings are explicitly disabled, stdlib's process-global
-capture stays phase-local; no lifetime-spanning catcher is installed.
+Each managed async generator has one persistent owning task for setup, yield,
+and teardown in every scope. AnyIO/Trio cancel scopes, nurseries, task groups,
+and library context managers may span yield. Each dependency has its own task
+and scope stack. The fixture host keeps its native loop live while waiting for
+commands, so run-fixture services remain responsive between requests. Trio
+teardown deadlines live on the managed task's **outer** cancel scope; inserting
+another scope beneath a suspended user scope would violate native LIFO rules.
+
+The task inherits its loader's context; ContextVar changes remain fixture-local.
+Yield resources/context explicitly. Scopes surrounding yield govern fixture work
+and its descendants, not the test body. Protect setup/yield with try/finally and
+stop forever-running children during teardown; ordinary nursery/task-group exit
+waits for them. Sync fixtures remain synchronous; runtime scopes across yield
+require async fixtures. Standalone handle context managers run in their caller's
+task rather than using this registry-owned driver.
+
+Shared cached setup survives a cancelled waiter. Function setup follows its
+waiter's cancellation. Every attempted setup retains cleanup ownership, including
+before its task first runs. Function loads after teardown starts remain rejected.
+Dependency ordering, descriptor-copy publication, and warning attribution stay
+unchanged. Setup warnings reach the waiter; later fixture-background warnings
+join teardown diagnostics. Explicit context-aware-warning opt-outs retain
+phase-local capture rather than lifetime-spanning global catchers.
+
+## Cancellation and fail-stop boundaries
+
+Deadlines translate only their own cancellation into stdlib `TimeoutError`;
+application-raised timeouts and parent cancellation retain their identities.
+Body timeouts are cooperative and async-only. Trio shielding can postpone a
+body timeout; blocking imports, sync/CPU-bound bodies, and sync teardown still
+require an outer process/CI deadline.
+
+Asyncio retains its existing budgeted cleanup and resistant-coroutine closure.
+**Trio never force-closes a coroutine from another task or mutates task
+internals.** Managed task cancellation/fixture cleanup gets the configured
+budget (60 seconds when body limits are disabled). If owned work remains alive,
+`RunInfrastructureError` aborts before another selected case starts. Native
+unmanaged descendants carrying the owner context have no safe public per-task
+cancel operation; the runner inventories them without cancelling a nursery that might also own unrelated
+embedding work. Such work must finish within the cleanup budget or fail-stop.
+Native runtime shutdown can still wait on shielded work and require the external
+deadline. Worker infrastructure failures are announced before native shutdown,
+so the coordinator can stop dispatch and retire children; forced retirement does
+not certify graceful fixture teardown.
+
+Real probes showed that cross-task `coro.close()` corrupts Trio cancel-scope
+stacks and that shielded children can block nursery shutdown. The backend-specific
+contract is deliberate, not an equivalent hard-termination claim. See
+[the hard-timeout boundary](adr/0001-hard-timeout-boundary.md).
+
+Hypothesis handoffs retain/drain their thread completion and owned examples,
+and copy each sender's current ContextVars rather than a frozen entry context.
+Hypothesis thread-local controls (`note`, `event`, `target`, and `st.data().draw`)
+remain unsupported inside async bodies on either backend. A real untouched-main
+probe confirmed this existing limitation; copying ContextVars cannot bridge
+`threading.local`. Use pre-drawn strategies. Synchronous properties/schema
+callbacks retain their native Hypothesis context.
+Worker publication readers likewise drain before another command can receive
+from their connection. Native ty subprocess cancellation kills/reaps the checker,
+drains both bounded report streams, and closes Trio's pipe streams. Memory
+assertions observe native task suspension without retaining task references
+after the measurement exits. Progress classifies native cancellation without
+publishing exception messages or task frames.
 
 ## Thread observability
 
-AnyIO's asyncio backend keeps non-daemon workers alive while idle. Returning
-from a completed `await anyio.to_thread.run_sync(...)` is not a thread leak.
-`thread_observation.py` recognizes only workers present in both the current
-loop's registered-worker set and idle-worker deque, with matching loop identity.
-It reads the already-loaded backend; it does not import AnyIO merely because
-it is installed, submit warmup work, change daemon flags, or stop pools.
+AnyIO's asyncio pool retains non-daemon idle workers. The existing private RunVar
+adapter exempts only identities registered as idle on the current asyncio loop;
+unknown registry shapes fail closed. It reads an already-loaded backend without
+prewarming, renaming, daemonizing, or shutting down a caller-owned pool. Newly
+busy workers and raw lookalikes retain ordinary leak diagnostics.
 
-There is no public AnyIO thread-identity query. The private RunVar lookup is
-isolated in one helper; unknown registry shapes fail closed (no exemption),
-rather than falling back to thread names or allowing all backend threads.
-Dependency updates must rerun public local/worker/installed-archive regressions.
-A renamed idle worker is still recognized, a raw thread named `AnyIO worker
-thread` still fails, and a new worker executing abandoned work is not exempted.
-Unhandled-thread/unraisable hooks and exception/error classification are
-unchanged. AnyIO task-group exception groups remain ordinary errors.
+Trio's native thread cache uses daemon threads and follows the existing daemon
+exemption. Offload cancellation is not thread termination: abandoned Trio jobs
+may outlive the runtime, while asyncio executor shutdown may wait. Neither engine
+comprehensively attributes jobs on pre-existing threads. Application hooks remain
+chained; threads cannot be forcibly stopped. Keep an external command deadline.
 
-The observation window still measures **new threads**, not every outstanding
-job on pre-existing threads. Busy work on a previously observed pool worker is
-not comprehensively attributed. This integration does not claim to detect every
-abandoned offload. Threads cannot be cancelled or forcibly reaped. Cancellation
-and timeouts may stop awaiting while work continues and delays shutdown; use an
-outer process/CI deadline. See [the hard-timeout boundary](adr/0001-hard-timeout-boundary.md).
+## Validation boundaries
 
-## Not implemented: choosing another runtime
-
-There is no backend CLI flag, configuration key, decorator setting, or
-programmatic selector yet. In particular, AnyIO API compatibility
-**does not imply Trio support**. The runner, fixture/task cleanup, Hypothesis
-cross-thread handoffs, timeouts, and persistent child event loops use asyncio.
-Passing an asyncio test through `anyio.run(..., backend="trio")` does not adapt
-those lifetimes, and silently falling back to asyncio would conceal the choice.
-
-Requirements for a future runtime-selection design, not current API promises:
-
-- Preserve asyncio as the default; validate an explicit command-wide choice
-  before imports/execution. Avoid implicit backend detection or per-case runtime
-  switching within one fixture cache.
-- Apply that choice to local execution, fixture host, original execution workers,
-  and replacement workers. Recollection/replay must retain the same runtime.
-- Own fixture setup/teardown, task discovery/ownership, cancellation, timeouts,
-  thread handoffs, and shutdown through a coherent runtime boundary. Preserve
-  task-affine async fixture lifetimes and explicit context isolation.
-- Keep normalized results, process-neutral failures, selection/order, and
-  structured reporting independent of the chosen backend.
-- Require the selected optional dependency and reject an unavailable/unsupported
-  backend clearly, without silent fallback. Default asyncio must remain usable
-  without Trio or AnyIO installed.
-- Respect an embedding application's running loop; a programmatic runner cannot
-  replace its caller's runtime or nest an incompatible event loop.
-- Preserve the external hard-timeout requirement; another backend is not
-  process-per-case isolation.
-
-Backend selection and Trio remain follow-up work on #100; these integration
-increments must not be treated as completion of that broader request.
+`tests/test_runtime.py`, `tests/meta/test_trio_runtime.py`, and
+`tests/meta/test_trio_adapters.py` exercise real native engines, explicit selection,
+local/worker fixture lifetimes and TCP services, context isolation, shared setup,
+cooperative deadlines, resistant work, Hypothesis handoffs, real ty, memory and
+benchmark assertions, and OpenAPI/workflow/GraphQL services. Existing asyncio
+regressions remain part of the same canonical suite. Installed wheel/source
+archives must independently exercise both core-only rejection and optional engine
+selection. Linux results do not establish native macOS/Windows signal, process,
+or pipe-fault behavior.

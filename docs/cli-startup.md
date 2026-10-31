@@ -75,7 +75,11 @@ requires native Windows validation; Linux tests cannot establish it.
 flag or configuration key. Foreground versus background placement does not itself
 select a Snektest policy; the dispositions supplied by the launcher do. This is
 not a claim that inherited ignores violate POSIX. The Python interpreter and
-`asyncio.Runner` still provide their ordinary interrupt handling.
+the selected native runtime still provide their ordinary interrupt handling.
+Asyncio is the default; `--backend trio` keeps the same inherited-ignore contract
+without introducing a signal reset. Native runtime selection occurs after
+bootstrap policy and before test imports; progress observation starts before
+project configuration is read.
 
 | SIGINT on entry | Standalone CLI and test-created children |
 | --- | --- |

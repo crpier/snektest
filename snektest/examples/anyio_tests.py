@@ -1,11 +1,17 @@
-"""AnyIO operations and fixture-owned services on the asyncio runner.
+"""AnyIO operations and fixture-owned services on either native backend.
 
-Install snektest[anyio]; await APIs directly without nesting anyio.run().
+Install snektest[anyio] for default asyncio, or snektest[anyio,trio] for Trio.
+Save this example to test_anyio.py, then run:
+    snektest test_anyio.py
+    snektest --backend trio test_anyio.py
+Await APIs directly without nesting anyio.run().
 Managed async fixtures keep setup/yield/teardown in one task. Task-local scopes
 may span yield, but govern fixture work rather than the test; yield resources
 explicitly instead of relying on fixture ContextVar changes reaching the test.
 Stop background services in finally. Threads still require an outer timeout.
-There is no Trio backend or runtime selector yet.
+The choice is command-wide, including workers. Resistant Trio cleanup aborts
+before the next case without force-closing tasks; shutdown can need an outer
+deadline. Asyncio-specific libraries still require the asyncio backend.
 """
 
 lazy from collections.abc import AsyncGenerator

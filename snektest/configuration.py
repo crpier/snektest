@@ -8,8 +8,10 @@ lazy from tomllib import TOMLDecodeError, load
 lazy from typing import Any, Literal, cast
 
 lazy from snektest.models import BadRequestError
+lazy from snektest.runtime import Backend, backend_name
 
 _CONFIG_KEYS = {
+    "backend",
     "capture_output",
     "json_output",
     "junit_output",
@@ -24,6 +26,7 @@ _CONFIG_KEYS = {
 class ProjectConfig:
     """Validated defaults read from one `[tool.snektest]` table."""
 
+    backend: Backend = "asyncio"
     capture_output: bool = True
     json_output: bool = False
     junit_output: str | None = None
@@ -81,6 +84,10 @@ def load_project_config(*, start: Path) -> ProjectConfig:  # noqa: C901
         ):
             message = "`tool.snektest.mark` must be fast, medium, or slow"
             raise BadRequestError(message)
+        raw_backend: Any = table.get("backend", "asyncio")
+        if not isinstance(raw_backend, str) or raw_backend not in {"asyncio", "trio"}:
+            message = "`tool.snektest.backend` must be asyncio or trio"
+            raise BadRequestError(message)
         raw_timeout: Any = table.get("timeout")
         if (
             raw_timeout is not None
@@ -97,6 +104,7 @@ def load_project_config(*, start: Path) -> ProjectConfig:  # noqa: C901
             )
             raise BadRequestError(message)
         return ProjectConfig(
+            backend=backend_name(raw_backend),
             capture_output=raw_capture_output,
             json_output=raw_json_output,
             junit_output=(

@@ -81,6 +81,9 @@ Stdout/stderr each have a 4 MiB limit. Cancellation and report-limit failure kil
 and reap the checker and **drain both pipes** under the cleanup budget. A process
 exit alone is insufficient: a paused asyncio transport can retain an open pipe
 once its original reader is cancelled. Discarded chunks remain bounded in size.
+The selected backend owns subprocess IO: asyncio retains its transport-draining
+path, while native Trio drains and explicitly closes both pipe streams after
+kill/reap. Report limits and cache invalidation are identical.
 Async test timeouts are best-effort; synchronous collection, imports, and local
 source parsing still require an external whole-command timeout.
 

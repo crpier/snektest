@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-lazy import asyncio
 lazy import os
 lazy import sys
 lazy import time
 lazy from collections.abc import Callable, Sequence
 lazy from contextlib import suppress
 lazy from dataclasses import dataclass
+lazy from functools import partial
 lazy from io import StringIO
 lazy from multiprocessing import get_context
 lazy from multiprocessing.context import SpawnContext
@@ -50,11 +50,23 @@ lazy from snektest.reporting import RunReporter, result_for_retention
 lazy from snektest.run_fixture_publication import (
     LoadRunFixture,
     ProcessConnection,
+    RunAborted,
     RunFixtureFailed,
     RunFixtureLoaded,
     RunFixturePublication,
     WorkerRunFixtures,
 )
+lazy from snektest.runtime import (
+    Backend,
+    bootstrap_runtime,
+    cancelled_errors,
+    current_backend,
+    run,
+    run_sync,
+)
+lazy from snektest.runtime import timeout as runtime_timeout
+lazy from snektest.runtime_tasks import Task, spawn, wait
+lazy from snektest.task_cleanup import defer_cancellation
 lazy from snektest.type_contracts import typing_configuration
 
 
@@ -166,7 +178,7 @@ async def _load_async_run_fixture_payload(
     timeout: float | None,  # noqa: ASYNC109
 ) -> bytes:
     """Await host setup within the publication module's allocated budget."""
-    async with asyncio.timeout(timeout):
+    async with runtime_timeout(timeout):
         return await cast("Coroutine[bytes]", registry.load_run_payload(handle))
 
 
@@ -220,10 +232,32 @@ def _host_main(  # noqa: PLR0913, PLR0917
         connection.close()
         return
 
-    asyncio.run(
-        _serve_host(connection, catalog, capture_output=capture_output, timeout=timeout)
+    run(
+        partial(
+            _host_commands,
+            connection,
+            partial(
+                _serve_host,
+                connection,
+                catalog,
+                capture_output=capture_output,
+                timeout=timeout,
+            ),
+        ),
+        backend=current_backend(),
     )
     connection.close()
+
+
+async def _host_commands(
+    connection: ProcessConnection, serve: Callable[[], Coroutine[None]]
+) -> None:
+    try:
+        await serve()
+    except RunInfrastructureError as error:
+        diagnostic = snapshot_exception(type(error), error, error.__traceback__)
+        connection.send(RunAborted(diagnostic.message))
+        raise
 
 
 def _host_setup_output(output: StringIO | None, warnings: Sequence[str]) -> str:
@@ -244,7 +278,7 @@ async def _serve_host(
     registry = FixtureRegistry()
     with use_registry(registry):
         while True:
-            message = await asyncio.to_thread(connection.recv)
+            message = await run_sync(connection.recv)
             if isinstance(message, _Shutdown):
                 with maybe_capture_output(capture_output) as (output, warnings):
                     failures = await registry.teardown_run_fixtures(
@@ -275,10 +309,12 @@ async def _serve_host(
                         )
                     else:
                         payload = cast("bytes", registry.load_run_payload(handle))
+            except RunInfrastructureError:
+                raise
             except BaseException as exc:
                 diagnostic = snapshot_exception(type(exc), exc, exc.__traceback__)
                 interrupted = isinstance(
-                    exc, (SystemExit, KeyboardInterrupt, asyncio.CancelledError)
+                    exc, (SystemExit, KeyboardInterrupt, *cancelled_errors())
                 )
                 connection.send(
                     RunFixtureFailed(
@@ -364,57 +400,82 @@ def _run_worker(  # noqa: PLR0913, PLR0917
         connection.close()
         return
 
+    run(
+        partial(
+            _serve_worker,
+            connection,
+            test_cases,
+            capture_output=capture_output,
+            timeout=timeout,
+            benchmark_baseline=benchmark_baseline,
+            typing_config=typing_config,
+        ),
+        backend=current_backend(),
+    )
+    connection.close()
+
+
+async def _serve_worker(  # noqa: PLR0913
+    connection: ProcessConnection,
+    test_cases: Sequence[TestCase],
+    *,
+    capture_output: bool,
+    timeout: float | None,  # noqa: ASYNC109
+    benchmark_baseline: BenchmarkBaseline | None,
+    typing_config: Path | None,
+) -> None:
     registry = FixtureRegistry()
-    run_fixture_loader = WorkerRunFixtures(connection)
+    loader = WorkerRunFixtures(connection)
     with (
         use_registry(registry),
         typing_configuration(typing_config),
-        use_run_fixture_loader(run_fixture_loader),
-        asyncio.Runner() as runner,
+        use_run_fixture_loader(loader),
     ):
-        while True:
-            message = runner.run(run_fixture_loader.receive_command())
-            if isinstance(message, _Shutdown):
-                failures, output, warnings = runner.run(
-                    teardown_session_fixtures(
+        try:
+            while True:
+                message = await loader.receive_command()
+                if isinstance(message, _Shutdown):
+                    failures, output, warnings = await teardown_session_fixtures(
                         capture_output=capture_output, cleanup_timeout=timeout
                     )
-                )
-                connection.send(
-                    _WorkerStopped(
-                        retained_directories=registry.temporary_directories.retained_session,
-                        session_teardown_failures=tuple(failures),
-                        session_teardown_output=output,
-                        session_teardown_warnings=warnings,
+                    connection.send(
+                        _WorkerStopped(
+                            retained_directories=registry.temporary_directories.retained_session,
+                            session_teardown_failures=tuple(failures),
+                            session_teardown_output=output,
+                            session_teardown_warnings=warnings,
+                        )
                     )
-                )
-                break
-            if not isinstance(message, _Execute):
-                msg = f"Execution worker received unexpected {type(message).__name__}"
-                raise RunInfrastructureError(msg)
-            test_case = test_cases[message.ordinal]
-            result = runner.run(
-                run_fixture_loader.run_case(
+                    return
+                if not isinstance(message, _Execute):
+                    msg = (
+                        f"Execution worker received unexpected {type(message).__name__}"
+                    )
+                    raise RunInfrastructureError(msg)  # noqa: TRY301 -- report fatal worker errors before native shutdown
+                result = await loader.run_case(
                     execute_test(
-                        test_case,
+                        test_cases[message.ordinal],
                         capture_output=capture_output,
                         timeout=timeout,
                         benchmark_baseline=benchmark_baseline,
                     )
                 )
-            )
-            connection.send(_ExecutionFinished(result))
-    connection.close()
+                connection.send(_ExecutionFinished(result))
+        except RunInfrastructureError as error:
+            diagnostic = snapshot_exception(type(error), error, error.__traceback__)
+            connection.send(RunAborted(diagnostic.message))
+            raise
 
 
-def _observed_child(
+def _observed_child(  # noqa: PLR0913, PLR0917
     target: Callable[..., object],
     connection: ProcessConnection,
     args: tuple[object, ...],
     settings: ProgressSettings | None,
     name: str,
+    backend: Backend,
 ) -> None:
-    with observe_process(settings, name):
+    with bootstrap_runtime(backend), observe_process(settings, name):
         target(connection, *args)
 
 
@@ -428,7 +489,14 @@ def _spawn_process(
     parent_connection, child_connection = context.Pipe(duplex=True)
     process = context.Process(
         target=_observed_child,
-        args=(target, child_connection, args, progress_settings(), name),
+        args=(
+            target,
+            child_connection,
+            args,
+            progress_settings(),
+            name,
+            current_backend(),
+        ),
         daemon=False,
         name=name,
     )
@@ -445,13 +513,8 @@ async def _receive_bootstrap(
     timeout: float | None,  # noqa: ASYNC109
 ) -> _BootstrapReady:
     try:
-        if timeout is None:
-            message = await asyncio.to_thread(connection.recv)
-        else:
-            message = await asyncio.wait_for(
-                asyncio.to_thread(connection.recv),
-                timeout=timeout,
-            )
+        async with runtime_timeout(timeout):
+            message = await run_sync(connection.recv)
     except TimeoutError:
         msg = f"{child_name} did not finish bootstrap within {timeout:g}s"
         raise RunInfrastructureError(msg) from None
@@ -488,14 +551,15 @@ async def _receive_bootstrap(
     return message
 
 
+@defer_cancellation
 async def _stop_process(process: BaseProcess, connection: ProcessConnection) -> None:
     connection.close()
     if process.is_alive():
         process.terminate()
-    await asyncio.to_thread(process.join, 5)
+    await run_sync(process.join, 5)
     if process.is_alive():
         process.kill()
-        await asyncio.to_thread(process.join)
+        await run_sync(process.join)
 
 
 async def _start_worker(  # noqa: PLR0913
@@ -656,7 +720,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         pending = list(range(len(canonical_manifest)))
         active_mutexes: set[str] = set()
-        receive_tasks: dict[asyncio.Task[object], _Worker] = {}
+        receive_tasks: dict[Task[object], _Worker] = {}
         results_by_ordinal: dict[int, TestResult] = {}
         reported_results: list[TestResult] = []
         next_report_ordinal = 0
@@ -674,9 +738,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     if not worker.waiting_for_run_fixture:
                         continue
                     worker.waiting_for_run_fixture = False
-                    receive_task = asyncio.create_task(
-                        asyncio.to_thread(worker.connection.recv)
-                    )
+                    receive_task = spawn(run_sync(worker.connection.recv))
                     receive_tasks[receive_task] = worker
 
             if replacements_needed and not receive_tasks and pending:
@@ -721,9 +783,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     worker.active_ordinal = ordinal
                     if (mutex := canonical_manifest[ordinal].mutex) is not None:
                         active_mutexes.add(mutex)
-                    receive_task = asyncio.create_task(
-                        asyncio.to_thread(worker.connection.recv)
-                    )
+                    receive_task = spawn(run_sync(worker.connection.recv))
                     receive_tasks[receive_task] = worker
 
             if not receive_tasks and pending:
@@ -734,9 +794,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if not receive_tasks:
                 break
 
-            completed, _ = await asyncio.wait(
-                receive_tasks, return_when=asyncio.FIRST_COMPLETED
-            )
+            completed, _ = await wait(receive_tasks, first_completed=True)
             for receive_task in completed:
                 worker = receive_tasks.pop(receive_task)
                 ordinal = cast("int", worker.active_ordinal)
@@ -746,7 +804,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     worker.active_ordinal = None
                     if (mutex := canonical_manifest[ordinal].mutex) is not None:
                         active_mutexes.remove(mutex)
-                    await asyncio.to_thread(worker.process.join)
+                    await run_sync(worker.process.join)
                     results_by_ordinal[ordinal] = _worker_crash_result(
                         canonical_manifest[ordinal],
                         exit_code=worker.process.exitcode,
@@ -755,6 +813,9 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     worker.connection.close()
                     replacements_needed += 1
                     continue
+                if isinstance(message, RunAborted):
+                    msg = f"worker {worker.identifier + 1} aborted the run: {message.message}"
+                    raise RunInfrastructureError(msg)
                 if publication.request(message):
                     worker.waiting_for_run_fixture = True
                     continue
@@ -781,7 +842,10 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         for worker in worker_processes:
             worker.connection.send(_Shutdown())
         for worker in worker_processes:
-            message = await asyncio.to_thread(worker.connection.recv)
+            message = await run_sync(worker.connection.recv)
+            if isinstance(message, RunAborted):
+                msg = f"worker {worker.identifier + 1} aborted during teardown: {message.message}"
+                raise RunInfrastructureError(msg)
             if not isinstance(message, _WorkerStopped):
                 msg = f"worker {worker.identifier + 1} failed during shutdown"
                 raise RunInfrastructureError(msg)
@@ -791,16 +855,19 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 session_outputs.append(message.session_teardown_output)
             session_warnings.extend(message.session_teardown_warnings)
             worker.connection.close()
-            await asyncio.to_thread(worker.process.join)
+            await run_sync(worker.process.join)
 
         host_connection.send(_Shutdown())
-        host_message = await asyncio.to_thread(host_connection.recv)
+        host_message = await run_sync(host_connection.recv)
+        if isinstance(host_message, RunAborted):
+            msg = f"fixture host aborted during teardown: {host_message.message}"
+            raise RunInfrastructureError(msg)
         if not isinstance(host_message, _HostStopped):
             msg = "fixture host failed during run fixture teardown"
             raise RunInfrastructureError(msg)
         run_failures = list(host_message.run_teardown_failures)
         host_connection.close()
-        await asyncio.to_thread(host_process.join)
+        await run_sync(host_process.join)
         run_output = host_message.run_teardown_output
         run_warnings = host_message.run_teardown_warnings
         session_output = "".join(session_outputs) or None
@@ -809,7 +876,7 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
             teardown_diagnostics.run_warnings = run_warnings
             teardown_diagnostics.session_output = session_output
             teardown_diagnostics.session_warnings = tuple(session_warnings)
-        publication.raise_if_interrupted()
+        await publication.raise_if_interrupted()
         completed_run = RunResult.from_execution(
             retained_directories=tuple(retained_directories),
             collection_output=canonical_bootstrap.collection_output,
@@ -827,8 +894,15 @@ async def run_tests_parallel(  # noqa: C901, PLR0912, PLR0913, PLR0915
         reporter.run_finished(completed_run)
         return completed_run
     finally:
-        for worker in worker_processes:
-            if worker.process.is_alive():
-                await _stop_process(worker.process, worker.connection)
-        if host_process.is_alive():
-            await _stop_process(host_process, host_connection)
+        await _stop_children(worker_processes, host_process, host_connection)
+
+
+@defer_cancellation
+async def _stop_children(
+    workers: Sequence[_Worker], host: BaseProcess, connection: ProcessConnection
+) -> None:
+    for worker in workers:
+        if worker.process.is_alive():
+            await _stop_process(worker.process, worker.connection)
+    if host.is_alive():
+        await _stop_process(host, connection)

@@ -14,6 +14,18 @@ lazy from snektest.models import (
     ExceptionDiagnostic,
     RunInfrastructureError,
 )
+lazy from snektest.runtime import cancelled_errors, current_backend, current_time
+lazy from snektest.runtime_tasks import (
+    Task,
+    all_tasks,
+    cancellation_shield,
+    current_task,
+    shield,
+    spawn,
+)
+lazy from snektest.runtime_tasks import (
+    wait as wait_tasks,
+)
 
 _task_owner: ContextVar[object | None] = ContextVar("snektest_task_owner", default=None)
 """The innermost test or fixture owns newly created tasks, not its caller."""
@@ -81,12 +93,13 @@ def defer_cancellation[**P, T](
             except BaseException as error:
                 return error
 
-        pending = asyncio.create_task(capture(), name="snektest cleanup")
-        interruption: asyncio.CancelledError | None = None
+        pending = spawn(capture(), name="snektest cleanup")
+        interruption: BaseException | None = None
         while not pending.done():
             try:
-                _ = await asyncio.shield(pending)
-            except asyncio.CancelledError as error:
+                with cancellation_shield(enabled=interruption is not None):
+                    _ = await shield(pending)
+            except cancelled_errors() as error:
                 if interruption is None:
                     interruption = error
         outcome = pending.result()
@@ -108,10 +121,13 @@ class TaskCleanup:
     failures: tuple[ExceptionDiagnostic, ...] = ()
 
 
-def _force_close_tasks(tasks: set[asyncio.Task[Any]]) -> list[ExceptionDiagnostic]:
+def _force_close_tasks(tasks: set[Task[Any]]) -> list[ExceptionDiagnostic]:
     """Contain synchronous finalizer errors and always wake the closed task."""
     failures: list[ExceptionDiagnostic] = []
     for task in tasks:
+        if not isinstance(task, asyncio.Task):
+            msg = "Only asyncio tasks support forced coroutine closure"
+            raise RunInfrastructureError(msg)
         coroutine = task.get_coro()
         if coroutine is not None:
             try:
@@ -125,10 +141,10 @@ def _force_close_tasks(tasks: set[asyncio.Task[Any]]) -> list[ExceptionDiagnosti
 
 
 async def cancel_tasks(  # noqa: C901
-    tasks: set[asyncio.Task[Any]],
+    tasks: set[Task[Any]],
     *,
     timeout: float,  # noqa: ASYNC109
-    discover: Callable[[], set[asyncio.Task[Any]]] | None = None,
+    discover: Callable[[], set[Task[Any]]] | None = None,
 ) -> TaskCleanup:
     """Reap owned generations under one deadline, then force-close survivors.
 
@@ -137,28 +153,37 @@ async def cancel_tasks(  # noqa: C901
     cannot safely continue if tasks still survive that final bounded attempt.
     Synchronous finalizers remain subject to the outer process timeout.
     """
-    deadline = asyncio.get_running_loop().time() + timeout
+    deadline = current_time() + timeout
     pending = {task for task in tasks if not task.done()}
     total = 0
     resistant_count = 0
     failures: list[ExceptionDiagnostic] = []
     while pending:
         total += len(pending)
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = deadline - current_time()
         if remaining > 0:
             for task in pending:
                 _ = task.cancel()
-            completed, pending = await asyncio.wait(pending, timeout=remaining)
+            completed, pending = await wait_tasks(pending, timeout_seconds=remaining)
             for task in completed:
                 if not task.cancelled():
                     _ = task.exception()
         if pending:
+            if current_backend() == "trio":
+                msg = (
+                    f"Trio cleanup could not stop {len(pending)} owned tasks "
+                    f"within {timeout:g}s; refusing to continue the run. "
+                    "Native shutdown may require an outer process deadline."
+                )
+                raise RunInfrastructureError(msg)
             resistant_count += len(pending)
             failures.extend(_force_close_tasks(pending))
             newcomers = discover() - pending if discover is not None else set()
             total += len(newcomers)
             failures.extend(_force_close_tasks(newcomers))
-            completed, survivors = await asyncio.wait(pending | newcomers, timeout=0)
+            completed, survivors = await wait_tasks(
+                pending | newcomers, timeout_seconds=0
+            )
             for task in completed:
                 if not task.cancelled():
                     _ = task.exception()
@@ -187,12 +212,12 @@ async def cancel_owned_tasks(
     descendants. Repeated caller cancellation waits for this cleanup to finish.
     """
 
-    def owned_tasks() -> set[asyncio.Task[Any]]:
-        current_task = asyncio.current_task()
+    def owned_tasks() -> set[Task[Any]]:
+        caller = current_task()
         return {
             task
-            for task in asyncio.all_tasks()
-            if task is not current_task
+            for task in all_tasks()
+            if task is not caller
             and not task.done()
             and task.get_context().get(_task_owner) is owner
         }

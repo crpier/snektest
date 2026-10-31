@@ -480,7 +480,7 @@ Function setup left pending when its test returns counts as abandoned fixture
 work and is cleaned before the next test. Use `try`/`finally` around background-task setup as well as the
 fixture's `yield` to stop tasks yourself on either path.
 
-#### AnyIO on asyncio
+#### AnyIO and native async backends
 
 For AnyIO APIs or libraries that use them, install the optional integration:
 
@@ -488,8 +488,10 @@ For AnyIO APIs or libraries that use them, install the optional integration:
 uv add 'snektest[anyio]'
 ```
 
-Snektest still runs on **asyncio**. Await AnyIO operations directly; do not call
-`anyio.run()` inside a test or start another event loop:
+Snektest defaults to **asyncio**. For native Trio, install
+`uv add 'snektest[anyio,trio]'` and select `snektest --backend trio tests/`.
+Await AnyIO operations directly on either backend; do not call `anyio.run()`
+inside a test or start another event loop:
 
 ```python
 from anyio.to_thread import run_sync
@@ -518,17 +520,29 @@ an async fixture. Dependency teardown order, shared cached setup, and cleanup
 budgets remain unchanged. Function loads after function teardown starts are
 rejected, including from abandoned-task finalizers.
 
-Idle AnyIO pool workers registered with the current loop are not thread leaks.
+Idle AnyIO asyncio pool workers registered with the current loop are not thread leaks.
 This is identity-based, not a thread-name exemption. New busy/abandoned workers
 and raw lookalike threads still fail the ordinary thread check. Existing-thread
 work is not comprehensively tracked, and no thread can be forcibly stopped.
 AnyIO remains optional and is not imported by core execution merely to inspect
 threads. The extra selects AnyIO `>=4.14.2,<5`.
 
-There is still **no backend selector or Trio support**.
-Local runs, workers, and programmatic runners retain their asyncio lifecycle.
-See [backend policy and limitations](docs/async-backends.md), including the
-requirements for a future explicit runtime choice.
+`--backend asyncio|trio` is explicit and command-wide: local execution, the
+fixture host, original/replacement workers, and fixture/task lifetimes all use
+that engine. Trio requires the optional `snektest[trio]` extra (`>=0.34,<0.35`);
+unknown or unavailable engines fail before test imports, without fallback.
+Asyncio-specific libraries still require asyncio. Save `snektest --example anyio`
+to a file and run it with either backend.
+
+Embedding applications call `snektest.cli.run_tests_programmatic(...,
+backend="trio")` from a matching native Trio or AnyIO-with-Trio runtime. Omission
+means asyncio, not autodetection; Snektest does not replace its caller's runtime.
+Trio cleanup is cooperative: owned work surviving the cleanup budget aborts
+before another selected case, without unsafe cross-task coroutine closure.
+Shielding can postpone body timeouts and native shutdown can still need an outer
+process deadline. Trio's daemon thread cache follows the existing daemon
+exemption; cancelling an offload does not stop its thread. Asyncio retains its
+existing cleanup behavior. See [backend policy and limitations](docs/async-backends.md).
 
 ### Skips and known defects
 
@@ -1113,6 +1127,7 @@ project file.
 ```toml
 [tool.snektest]
 test_paths = ["tests"]
+backend = "asyncio" # Or "trio", with the optional engine installed.
 timeout = 30 # Use false to disable the async test-body timeout.
 mark = "fast"
 capture_output = true
@@ -1120,7 +1135,7 @@ json_output = false
 junit_output = "reports/snektest.xml"
 ```
 
-Explicit test filters replace `test_paths`. `--timeout`, `--no-timeout`,
+Explicit test filters replace `test_paths`. `--backend`, `--timeout`, `--no-timeout`,
 `--mark`, `--no-mark`, `-s`, `--capture-output`, `--json-output`,
 `--no-json-output`, `--junit-output`, and `--no-junit-output` override matching
 project values. Unknown keys and invalid values are configuration errors.
@@ -1132,7 +1147,7 @@ test-shaped files under ignored output directories. An explicitly named test fil
 still runs. Outside a Git worktree, snektest checks every matching `test_*.py` file.
 Git ignore checks use each symlink's discovery pathname, not its target. Unexpected Git filtering failures inside a worktree are collection errors.
 
-Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
+On asyncio, errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 
 Broken exception message formatters cannot hide thread or unraisable failures; diagnostics use a safe fallback and still chain the previous hooks.
 
@@ -1258,7 +1273,7 @@ Interactions to know about:
   (every example) executes inside one `await asyncio.to_thread(...)`, so the
   timeout bounds the *entire* property run, not each example. When it fires while
   an example is suspended, snektest cancels that example and relays the outcome
-  to the Hypothesis worker so the CLI can exit promptly. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Blocking thread work still needs an outer timeout. It still cannot interrupt
+  to the Hypothesis worker so the CLI can exit promptly. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. On asyncio, resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Trio instead aborts before another case if owned work survives that budget. Blocking thread work still needs an outer timeout. It still cannot interrupt
   synchronous or CPU-bound work, including work running in the Hypothesis thread.
   Sync property tests are not bounded. For per-example limits, use Hypothesis's
   own `deadline`/`max_examples`; use `--no-timeout` if the complete property run
@@ -1366,7 +1381,14 @@ Use `--mark fast`, `--mark medium`, or `--mark slow` to run one marker group.
 
 ## Property-Based Testing with Hypothesis
 
-Snektest provides first-class integration with [Hypothesis](https://hypothesis.readthedocs.io/) for property-based testing. Property-based tests automatically generate test cases to explore edge cases and verify properties that should hold for all inputs.
+Snektest integrates with [Hypothesis](https://hypothesis.readthedocs.io/) to generate test cases that explore edge cases and verify properties across inputs.
+
+Async examples run on the selected native backend while generation/shrinking
+runs in a worker thread. Each handoff copies the sender's current ContextVars.
+Hypothesis's thread-local control APIs are a separate, existing limitation:
+`note()`, `event()`, `target()`, and `st.data().draw()` are not supported inside
+async bodies on either backend. Use pre-drawn strategies for async inputs; sync
+properties and synchronous schema callbacks keep their native Hypothesis context.
 
 ### Basic Usage
 

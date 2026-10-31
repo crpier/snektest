@@ -6,6 +6,7 @@ import threading
 from snektest import Param, assert_eq, assert_raises, fail, test
 from snektest.decorators import _AsyncExampleState, _run_async_example
 from snektest.models import DEFAULT_CLEANUP_TIMEOUT_SECONDS
+from snektest.runtime import threadsafe_scheduler
 from snektest.task_cleanup import cleanup_budget, collect_cleanup
 
 
@@ -13,7 +14,10 @@ from snektest.task_cleanup import cleanup_budget, collect_cleanup
 async def test_cancelled_property_rejects_next_example() -> None:
     """A worker asking for another example gets a terminal cancellation outcome."""
     state = _AsyncExampleState(
-        active_tasks=set(), handoffs=set(), stopping=threading.Event()
+        active_tasks=set(),
+        handoffs=set(),
+        stopping=threading.Event(),
+        cancellation=asyncio.CancelledError(),
     )
     state.stopping.set()
 
@@ -23,7 +27,7 @@ async def test_cancelled_property_rejects_next_example() -> None:
     with assert_raises(asyncio.CancelledError):
         await asyncio.to_thread(
             _run_async_example,
-            asyncio.get_running_loop(),
+            threadsafe_scheduler(),
             body,
             state=state,
             strategy_values=(),

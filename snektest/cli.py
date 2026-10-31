@@ -1,8 +1,9 @@
 lazy import asyncio
 lazy import json
 lazy import sys
-lazy from collections.abc import Callable, Coroutine
-lazy from contextlib import nullcontext
+lazy from collections.abc import Callable, Coroutine, Generator
+lazy from contextlib import contextmanager, nullcontext
+lazy from contextvars import ContextVar
 lazy from dataclasses import dataclass
 lazy from math import isfinite
 lazy from pathlib import Path
@@ -42,6 +43,17 @@ lazy from snektest.reporting import (
     DeferredRunReporter,
     NullRunReporter,
     RunReporter,
+)
+lazy from snektest.runtime import (
+    Backend,
+    backend_name,
+    cancelled_errors,
+    host_cancelled_errors,
+    host_run_sync,
+    require_backend,
+    run,
+    run_sync,
+    runtime_scope,
 )
 lazy from snektest.structured import (
     SUPPORTED_SCHEMA_VERSIONS,
@@ -95,6 +107,7 @@ _MIN_PROGRESS_INTERVAL = 0.05
 class CliOptions:
     action: CliAction | None = None
     allow_empty: bool = False
+    backend: Backend = "asyncio"
     benchmark_baseline: str | None = None
     capture_output: bool = True
     collect_only: bool = False
@@ -173,6 +186,7 @@ Options:
                     Select names and markers with and/or/not and parentheses
   --mark MARK       Run tests marked fast, medium, or slow; marking tests is recommended
   --no-mark         Run every marker, overriding a project default
+  --backend NAME   Use asyncio (default) or native Trio for the whole run
   -n, --workers N   Run in N worker processes, or use auto
   --typing-config FILE
                     Use an explicit native ty configuration for static contracts
@@ -396,6 +410,8 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     update_benchmark_baseline: str | None = None
     workers: WorkerCount | None = None
     workers_option_seen = False
+    backend = project_config.backend if project_config else "asyncio"
+    backend_option_seen = False
     filters: list[str] = []
     duplicate_action = ParseError("Only one informational command is supported")
     durations: int | None = None
@@ -547,6 +563,17 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 )
             timeout = None
             timeout_option_seen = True
+        elif arg == "--backend":
+            if backend_option_seen:
+                return ParseError("Only one --backend option is supported")
+            index += 1
+            if index >= len(argv):
+                return ParseError("--backend requires asyncio or trio")
+            try:
+                backend = backend_name(argv[index])
+            except BadRequestError as error:
+                return ParseError(str(error))
+            backend_option_seen = True
         elif arg in {"-n", "--workers"}:
             parsed_workers = _parse_workers_flag(
                 argv, index, workers_option_seen=workers_option_seen
@@ -590,6 +617,7 @@ def parse_cli_args(  # noqa: C901, PLR0911, PLR0912, PLR0915
     return CliOptions(
         action=action,
         allow_empty=allow_empty,
+        backend=backend,
         benchmark_baseline=benchmark_baseline,
         capture_output=capture_output,
         collect_only=collect_only,
@@ -639,7 +667,7 @@ async def _run_tests_with_collected_plan(  # noqa: PLR0913
 ) -> RunResult:
     collection_diagnostics = CollectionDiagnostics()
     try:
-        test_cases = await asyncio.to_thread(
+        test_cases = await run_sync(
             collect_test_plan,
             filter_items,
             allow_empty=allow_empty,
@@ -684,6 +712,40 @@ async def run_tests_programmatic(  # noqa: PLR0913
     benchmark_baseline: BenchmarkBaseline | None = None,
     typing_config: Path | None = None,
     workers: WorkerCount | None = None,
+    backend: Backend = "asyncio",
+) -> RunResult:
+    """Run within an explicitly matching host runtime; never replace its loop."""
+    with runtime_scope(backend):
+        return await _run_tests_programmatic(
+            filter_items,
+            allow_empty=allow_empty,
+            capture_output=capture_output,
+            fail_fast=fail_fast,
+            pdb_on_failure=pdb_on_failure,
+            keyword=keyword,
+            mark=mark,
+            timeout=timeout,
+            reporter=reporter,
+            benchmark_baseline=benchmark_baseline,
+            typing_config=typing_config,
+            workers=workers,
+        )
+
+
+async def _run_tests_programmatic(  # noqa: PLR0913
+    filter_items: list[FilterItem],
+    *,
+    allow_empty: bool = False,
+    capture_output: bool = True,
+    fail_fast: bool = False,
+    pdb_on_failure: bool = False,
+    keyword: str | None = None,
+    mark: str | None = None,
+    timeout: float | None = None,  # noqa: ASYNC109
+    reporter: RunReporter | None = None,
+    benchmark_baseline: BenchmarkBaseline | None = None,
+    typing_config: Path | None = None,
+    workers: WorkerCount | None = None,
 ) -> RunResult:
     """Run tests and return structured results instead of printing.
 
@@ -711,7 +773,7 @@ async def run_tests_programmatic(  # noqa: PLR0913
         raise BadRequestError(msg)
 
     if typing_config is not None:
-        typing_config = await asyncio.to_thread(typing_config.resolve)
+        typing_config = await run_sync(typing_config.resolve)
     selected_reporter = reporter or NullRunReporter()
     if workers is None:
         return await _run_tests_with_collected_plan(
@@ -745,36 +807,37 @@ async def run_tests_programmatic(  # noqa: PLR0913
     )
 
 
-async def run_script(
-    argv: list[str] | None = None,
-    *,
-    run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
-    | None = None,
-) -> int:
-    """Own the optional observation lifetime, including final output persistence."""
-    arguments = sys.argv[1:] if argv is None else argv
-    options = parse_cli_args(arguments)
-    if (
-        not isinstance(options, CliOptions)
-        or options.action is not None
-        or options.progress_output is None
-    ):
-        return await _run_script(
-            arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
-        )
+_startup_config: ContextVar[ProjectConfig | None] = ContextVar(
+    "cli_startup_config", default=None
+)
+_startup_observed: ContextVar[bool] = ContextVar("cli_startup_observed", default=False)
+
+
+@dataclass
+class _CliCompletion:
+    code: int = 2
+    status: str = "error"
+
+    def finish(self, code: int) -> int:
+        self.code = code
+        self.status = "completed" if code == 0 else "failed" if code == 1 else "error"
+        return code
+
+
+@contextmanager
+def _cli_observation(options: CliOptions) -> Generator[_CliCompletion]:
+    completion = _CliCompletion()
+    if options.progress_output is None:
+        yield completion
+        return
     with observe_run(
         Path(options.progress_output), interval=options.progress_interval
     ) as progress:
-        code = 2
-        status = "error"
         try:
-            code = await _run_script(
-                arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
-            )
-            status = "completed" if code == 0 else "failed" if code == 1 else "error"
+            yield completion
         except SystemExit as error:
-            status = "interrupted"
-            code = (
+            completion.status = "interrupted"
+            completion.code = (
                 error.code
                 if isinstance(error.code, int)
                 else 0
@@ -782,8 +845,8 @@ async def run_script(
                 else 1
             )
             raise
-        except asyncio.CancelledError, KeyboardInterrupt:
-            status = "interrupted"
+        except (*host_cancelled_errors(), KeyboardInterrupt):
+            completion.status = "interrupted"
             raise
         except (
             CollectionError,
@@ -793,15 +856,42 @@ async def run_script(
         ):
             raise
         except Exception:
-            code = 1
+            completion.code = 1
             raise
         finally:
             if progress is not None:
-                progress.complete(status, code)
-        return code
+                progress.complete(completion.status, completion.code)
 
 
-async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
+async def run_script(
+    argv: list[str] | None = None,
+    *,
+    run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
+    | None = None,
+) -> int:
+    """Own observation when embedding; standalone startup opens it before config."""
+    arguments = sys.argv[1:] if argv is None else argv
+    observed = _startup_observed.get()
+    _startup_observed.set(False)
+    options = parse_cli_args(arguments)
+    if (
+        observed
+        or not isinstance(options, CliOptions)
+        or options.action is not None
+        or options.progress_output is None
+    ):
+        return await _run_script(
+            arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
+        )
+    with _cli_observation(options) as completion:
+        return completion.finish(
+            await _run_script(
+                arguments, run_tests_programmatic_fn=run_tests_programmatic_fn
+            )
+        )
+
+
+async def _run_script(
     argv: list[str] | None = None,
     *,
     run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]]
@@ -814,10 +904,10 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         return _print_cli_action(action_options)
 
     json_requested = "--json-output" in arguments
-    project_config = await asyncio.to_thread(
-        load_project_config,
-        start=Path.cwd(),
-    )
+    project_config = _startup_config.get()
+    _startup_config.set(None)
+    if project_config is None:
+        project_config = await host_run_sync(load_project_config, start=Path.cwd())
     json_requested = json_requested or (
         project_config.json_output and "--no-json-output" not in arguments
     )
@@ -839,7 +929,20 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         return 2
 
     options = parsed
+    try:
+        with runtime_scope(options.backend):
+            return await _run_configured_script(
+                options, run_tests_programmatic_fn=run_tests_programmatic_fn
+            )
+    except BadRequestError as error:
+        return _baseline_cli_error(error, json_output=options.json_output)
 
+
+async def _run_configured_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
+    options: CliOptions,
+    *,
+    run_tests_programmatic_fn: Callable[..., Coroutine[object, object, object]] | None,
+) -> int:
     if options.action is not None:
         return _print_cli_action(options)
 
@@ -865,7 +968,7 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         return 2
 
     if options.progress_output is not None:
-        await asyncio.to_thread(_validate_progress_outputs, options)
+        await run_sync(_validate_progress_outputs, options)
 
     if options.collect_only:
         collection_diagnostics = CollectionDiagnostics()
@@ -873,7 +976,7 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         capture_context = descriptor_capture or nullcontext()
         try:
             with capture_context:
-                test_cases = await asyncio.to_thread(
+                test_cases = await run_sync(
                     collect_test_plan,
                     filter_items,
                     allow_empty=options.allow_empty,
@@ -926,7 +1029,7 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
     benchmark_baseline: BenchmarkBaseline | None = None
     if options.benchmark_baseline is not None:
         try:
-            benchmark_baseline = await asyncio.to_thread(
+            benchmark_baseline = await run_sync(
                 BenchmarkBaseline.load,
                 Path(options.benchmark_baseline),
                 project_root=project_root,
@@ -975,9 +1078,10 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     if options.typing_config is not None
                     else None,
                     workers=options.workers,
+                    backend=options.backend,
                 ),
             )
-        except asyncio.CancelledError as error:
+        except cancelled_errors() as error:
             note_interruption()
             if not options.json_output:
                 return 2
@@ -1089,7 +1193,7 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
         )
         if exit_code_from_summary(summary) == 0:
             try:
-                baseline_update = await asyncio.to_thread(
+                baseline_update = await run_sync(
                     BenchmarkBaseline.update,
                     Path(options.update_benchmark_baseline),
                     project_root=project_root,
@@ -1116,7 +1220,7 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
 
     if options.junit_output is not None:
         try:
-            _ = await asyncio.to_thread(
+            _ = await run_sync(
                 Path(options.junit_output).write_text,
                 build_junit_xml(summary),
                 encoding="utf-8",
@@ -1151,10 +1255,46 @@ async def _run_script(  # noqa: C901, PLR0911, PLR0912, PLR0915
     return exit_code_from_summary(summary)
 
 
+def _selected_standalone_runner(coroutine: Coroutine[object, object, int]) -> int:
+    arguments = sys.argv[1:]
+    preliminary = parse_cli_args(arguments)
+    if isinstance(preliminary, ParseError) or preliminary.action is not None:
+        return asyncio.run(coroutine)
+    config = load_project_config(start=Path.cwd())
+    token = _startup_config.set(config)
+    try:
+        options = parse_cli_args(arguments, project_config=config)
+        if isinstance(options, ParseError):
+            return asyncio.run(coroutine)
+        try:
+            require_backend(options.backend)
+        except BadRequestError:
+            # Run only validation/error rendering; no fallback execution or imports.
+            return asyncio.run(coroutine)
+        return run(lambda: coroutine, backend=options.backend)
+    finally:
+        _startup_config.reset(token)
+
+
+def _standalone_runner(coroutine: Coroutine[object, object, int]) -> int:
+    options = parse_cli_args(sys.argv[1:])
+    if (
+        not isinstance(options, CliOptions)
+        or options.action is not None
+        or options.progress_output is None
+    ):
+        return _selected_standalone_runner(coroutine)
+    with _cli_observation(options) as completion:
+        token = _startup_observed.set(True)
+        try:
+            return completion.finish(_selected_standalone_runner(coroutine))
+        finally:
+            _startup_observed.reset(token)
+
+
 def main() -> None:
     """Main entry point for the CLI."""
-    async_runner = cast("Callable[[Coroutine[object, object, int]], int]", asyncio.run)
-    sys.exit(main_inner(async_runner=async_runner))
+    sys.exit(main_inner(async_runner=_standalone_runner))
 
 
 def main_inner(  # noqa: C901, PLR0911, PLR0912

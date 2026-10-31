@@ -62,8 +62,9 @@ interruptible background execution is desired.
 
 ## AnyIO and async runtimes
 
-Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`. Snektest runs on asyncio;
-await AnyIO APIs directly, without `anyio.run()` or a nested event loop:
+Install `snektest[anyio]` for AnyIO `>=4.14.2,<5`. Asyncio is the default.
+For native Trio, install `snektest[anyio,trio]` and select `--backend trio`.
+Await AnyIO APIs directly, without `anyio.run()` or a nested event loop:
 
 ```python
 from anyio.to_thread import run_sync
@@ -92,12 +93,22 @@ remain failures. Existing-thread work is not comprehensively tracked; threads
 cannot be forcibly stopped. AnyIO is optional and core observation does not
 import it. Print `--example anyio` for a fixture-backed async service.
 
-These integration slices add neither a backend selector nor Trio support. Local runs,
-workers, and programmatic runners stay on asyncio. A future backend choice must
-be explicit and command-wide, apply to host/original/replacement workers and
-fixture/task/timeout lifetimes, preserve asyncio by default, reject missing or
-unsupported runtimes without fallback, and respect an embedding caller's loop.
-Do not infer backend support from AnyIO's API or nest a Trio run inside a test.
+`--backend asyncio|trio` is explicit and command-wide, including fixture host,
+original/replacement workers, tasks and deadlines. Trio requires `snektest[trio]`
+(`>=0.34,<0.35`); missing/unknown engines fail before imports without fallback.
+The project default is `[tool.snektest] backend = "trio"`; `--backend asyncio`
+overrides it. Asyncio-specific libraries still require asyncio. Save `--example
+anyio` to a test file and run it with either backend.
+
+Embedding uses `snektest.cli.run_tests_programmatic(..., backend="trio")` on a
+matching native Trio or AnyIO-with-Trio runtime. Omitting backend means asyncio,
+not autodetection. The caller owns its runtime; no nested loop is started.
+Trio cleanup is cooperative and aborts before another selected case if owned
+work survives its budget, without cross-task force-close. Shielding can postpone
+body timeouts; native shutdown can still require an outer process deadline.
+Trio's native daemon thread cache follows the existing daemon exemption; offload
+cancellation is never thread termination. Asyncio cleanup behavior is unchanged.
+See [native backend policy](docs/async-backends.md) for lifetime/shutdown limits.
 
 ## Quick start
 
@@ -336,19 +347,20 @@ counts now count each failed fixture teardown.
 - Console runs discard captured output from clean passing tests after reporting each result. JSON, JUnit, and `run_tests_programmatic` retain passing output. `RunResult` is the one normalized completion consumed by every adapter. Normal runs retain bounded exception snapshots and clear ended traceback frames; `--pdb` keeps live frames until the first failure stops execution.
 - `--collect-only` lists deterministic test and parameter-case selectors without running bodies. `--fail-fast` stops on failure, error, XPASS, or function teardown failure; SKIP and XFAIL continue. Explicit-worker fail-fast dispatches one case at a time. `--durations N` prints the N slowest completed tests with direct selectors.
 - `--json-output` writes one schema-version-1 document for completed runs and CLI errors. It includes framework version, exit code, duration, counts, collection diagnostics, warnings, test output and markers, measurements, complete bounded exception tracebacks, and function/session/run teardown details. `-s --json-output` places uncaptured stdout/stderr, inherited child output, and descriptor writes in `uncaptured_output`. Collect-only uses a versioned `collection` document. `--junit-output PATH` writes a normalized run as JUnit XML; each fixture teardown failure is a separate error case. `--output-schema-versions` lists supported JSON versions.
-- The nearest `pyproject.toml` may set `[tool.snektest]` defaults for `test_paths`, `timeout` (a positive number or `false`), `mark`, `capture_output`, `json_output`, and `junit_output`. Explicit filters replace configured paths. Matching CLI flags, including `--no-mark`, `--capture-output`, `--no-json-output`, and `--no-junit-output`, take precedence.
+- The nearest `pyproject.toml` may set `[tool.snektest]` defaults for `test_paths`, `backend` (`"asyncio"` or `"trio"`), `timeout` (a positive number or `false`), `mark`, `capture_output`, `json_output`, and `junit_output`. Explicit filters replace configured paths. Matching CLI flags, including `--no-mark`, `--capture-output`, `--no-json-output`, and `--no-junit-output`, take precedence.
 - Console summary lines are compact and may truncate exception details; use full failure details or `--json-output` when exact diagnostics matter.
 - `-k EXPR` / `--keyword EXPR` provides pytest-style case-insensitive substring selection. Match function names with bracketed parameter-case IDs, marker names, and project-relative file/directory components. Project root is the nearest `pyproject.toml`, falling back to cwd. Exclude checkout/absolute-parent names; external files expose only their basename. Lowercase operators have precedence `not`, `and`, `or`; parentheses group. Quote the whole expression, e.g. `snektest tests/ -k "fixture and not teardown" --collect-only`. Terms support Unicode word characters and `: + - . [ ] /` and backslash, not regex, globs, quoted terms, or marker arguments. Empty expressions match all; repeated keyword flags fail. `-k slow` matches names and markers, while `--mark slow` matches only markers. Positional selectors validate first; keyword and marker selection then intersect globally, so individual files may have no keyword matches. Empty final selections require `--allow-empty`; missing explicit functions/cases always fail. Order and repeated selections survive. Works locally, with workers, and in collect-only. Syntax errors precede imports, but valid expressions do not skip imports or schema generation. No keyword config default; programmatic runners accept `keyword=`. Keyword-filtered baseline updates preserve unobserved tests.
 - Filter runs with paths such as `snektest tests/test_math.py::test_addition` or markers such as `snektest --mark fast`.
 - Cancellation arriving during cleanup, including repeated requests, waits for the bounded cleanup phase to finish. Later fixture scopes still receive teardown attempts.
-- Errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
+- On asyncio, errors raised while force-closing abandoned tasks are retained as `task_cleanup` background diagnostics for tests, or individual fixture teardown failures. Cleanup continues to other tasks and later tests.
 - Broken exception message formatters cannot hide thread or unraisable failures; diagnostics use a safe fallback and still chain the previous hooks.
 - Run-fixture setup preserves interruption instead of converting it to a publication error. Established dependencies still tear down. Worker mode stops further dispatch, drains active work, tears down worker sessions and host fixtures, then propagates the interruption.
 - Concurrent async run-fixture loads share one in-flight request per identity. Worker connection reads are serialized, and cancelled waiters do not abandon readers: outstanding loads drain before returning a result or receiving another command. Replacement workers receive fresh copies of published descriptors and cached publication failures without repeating host setup. Cross-loading descriptors during batch release preserves existing worker-local copies. Each descriptor restoration uses `--timeout`; `--no-timeout` disables that limit. Failed or timed-out restoration aborts the run with an infrastructure error. Decoder exceptions remain fixture publication failures even when their message formatter raises.
 - JUnit replaces XML 1.0-forbidden characters, including NUL and lone surrogates, with U+FFFD in text and attributes. JSON and programmatic results retain the original strings.
 - Warning message formatters that raise use a safe text fallback. Capture always restores standard streams and debugger hooks even if exit-time warning rendering fails.
 - Measurement contexts are single-use, including after failed entry or exit. Create a fresh `assert_memory` or `assert_benchmark` context for each region. Access and advance `.rounds` only while that context is active; saved iterators cannot resume after exit.
-- Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Blocking thread work still needs an outer timeout.
+- Async property handoffs copy the sending thread's current ContextVars per example. Hypothesis thread-local controls (`note`, `event`, `target`, and `st.data().draw()`) remain unsupported inside async bodies on either backend; use pre-drawn strategies. Sync properties and synchronous schema callbacks retain their native Hypothesis context.
+- Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. On asyncio, resistant suspended examples are force-closed under the run cleanup budget, and finalizer errors remain attributed task_cleanup diagnostics. Trio instead aborts before another case if owned work survives that budget. Blocking thread work still needs an outer timeout.
 - Owned-task cleanup re-scans cancellation-created descendants under one deadline. Forced finalizers run in their original task context so descendants retain ownership. If tasks survive the final close/reap attempt, the command stops rather than starting another test. Unrelated embedding tasks are left alone.
 - CLI runs bound every async test to 60 seconds by default. `snektest --timeout SECONDS` accepts only finite positive values; `snektest --no-timeout` disables the body limit. It is async-only and best-effort: it fires only while the test is suspended on an `await`. Async fixture teardown and task cancellation use the configured timeout, or a separate 60-second cleanup ceiling when the body is unbounded. Local collection and imports have no limit; explicit worker mode bounds child bootstrap but does not promise a per-import deadline. Sync bodies, CPU-bound work, raw threads, and sync teardown cannot be interrupted, even with workers. Hard limits need process-per-case isolation and separately isolated collection, which Snektest does not provide. Put an outer process or CI timeout around every command.
 - Timeout interactions: for async `@test_hypothesis`, the timeout bounds the whole property run, not each example. If it fires while an example is suspended, snektest cancels the example and relays that outcome to the Hypothesis worker so the CLI exits promptly. Synchronous or CPU-bound work in that thread remains uninterruptible, and sync property tests are not bounded. Use Hypothesis's own `deadline`/`max_examples` for per-example limits and `--no-timeout` if the complete run must remain unbounded. With `--pdb`, a timed-out test post-mortems on snektest's internal timeout machinery, not the line that hung, so `--pdb` is of limited use for timeouts.

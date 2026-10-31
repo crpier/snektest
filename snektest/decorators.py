@@ -1,6 +1,5 @@
 """Public decorators and fixture-loading APIs."""
 
-lazy import asyncio
 lazy import threading
 lazy from collections.abc import AsyncGenerator, Callable, Generator
 lazy from concurrent.futures import Future
@@ -31,6 +30,13 @@ lazy from snektest.models import (
     _ExpectedFailureSignal,
     _SkipSignal,
 )
+lazy from snektest.runtime import (
+    cancelled_errors,
+    run_sync,
+    threadsafe_scheduler,
+    timeout,
+)
+lazy from snektest.runtime_tasks import Task, cancellation_error, event, spawn
 lazy from snektest.task_cleanup import (
     cancel_tasks,
     cleanup_budget,
@@ -196,13 +202,14 @@ def _run_hypothesis(
 class _AsyncExampleState:
     """Loop-owned handoffs and tasks, plus a thread-visible stop signal."""
 
-    active_tasks: set[asyncio.Task[None]]
+    active_tasks: set[Task[None]]
     handoffs: set[Future[None]]
     stopping: threading.Event
+    cancellation: BaseException
 
 
 def _run_async_example(
-    loop: asyncio.AbstractEventLoop,
+    submit: Callable[[Callable[[], object]], None],
     test_func: Callable[..., Coroutine[None] | None],
     *,
     state: _AsyncExampleState,
@@ -216,12 +223,12 @@ def _run_async_example(
     worker blocks during interpreter executor shutdown.
     """
     if state.stopping.is_set():
-        raise asyncio.CancelledError
+        raise state.cancellation
     done: Future[None] = Future()
 
     def schedule() -> None:
         if state.stopping.is_set():
-            done.set_exception(asyncio.CancelledError())
+            done.set_exception(state.cancellation)
             return
         state.handoffs.add(done)
         try:
@@ -229,14 +236,14 @@ def _run_async_example(
                 "Coroutine[None]",
                 test_func(*strategy_values, *param_values),
             )
-            task: asyncio.Task[None] = loop.create_task(res)
+            task = spawn(res)
             state.active_tasks.add(task)
         except BaseException as exc:
             state.handoffs.discard(done)
             done.set_exception(exc)
             return
 
-        def on_done(task: asyncio.Task[None]) -> None:
+        def on_done(task: Task[None]) -> None:
             state.active_tasks.discard(task)
             state.handoffs.discard(done)
             try:
@@ -250,7 +257,7 @@ def _run_async_example(
 
         task.add_done_callback(on_done)
 
-    _ = loop.call_soon_threadsafe(schedule)
+    submit(schedule)
     done.result()
 
 
@@ -262,15 +269,18 @@ async def _run_async_hypothesis(
     param_values: tuple[Any, ...],
 ) -> None:
     """Run Hypothesis in a worker and finish its unwind before cancellation."""
-    loop = asyncio.get_running_loop()
-    worker_finished = asyncio.Event()
+    submit = threadsafe_scheduler()
+    worker_finished = event()
     state = _AsyncExampleState(
-        active_tasks=set(), handoffs=set(), stopping=threading.Event()
+        active_tasks=set(),
+        handoffs=set(),
+        stopping=threading.Event(),
+        cancellation=await cancellation_error(),
     )
 
     def run_one_example(*strategy_values: Any) -> None:
         _run_async_example(
-            loop,
+            submit,
             test_func,
             state=state,
             strategy_values=tuple(strategy_values),
@@ -281,7 +291,7 @@ async def _run_async_hypothesis(
         try:
             _run_hypothesis(wrapper, strategies, run_one_example)
         finally:
-            _ = loop.call_soon_threadsafe(worker_finished.set)
+            submit(worker_finished.set)
 
     @defer_cancellation
     async def finish_cancelled_examples() -> None:
@@ -289,18 +299,18 @@ async def _run_async_hypothesis(
         state.stopping.set()
         for done in tuple(state.handoffs):
             if not done.done():
-                done.set_exception(asyncio.CancelledError())
+                done.set_exception(state.cancellation)
         cleanup = await cancel_tasks(
             set(state.active_tasks), timeout=cleanup_budget.get()
         )
         if (failures := cleanup_failures.get()) is not None:
             failures.extend(cleanup.failures)
-        async with asyncio.timeout(cleanup_budget.get()):
+        async with timeout(cleanup_budget.get()):
             await worker_finished.wait()
 
     try:
-        await asyncio.to_thread(run_hypothesis)
-    except asyncio.CancelledError:
+        await run_sync(run_hypothesis)
+    except cancelled_errors():
         state.stopping.set()
         await finish_cancelled_examples()
         raise

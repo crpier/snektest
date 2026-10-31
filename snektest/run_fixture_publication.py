@@ -8,7 +8,6 @@ with their existing owners.
 
 from __future__ import annotations
 
-lazy import asyncio
 lazy import threading
 lazy from collections.abc import Sequence
 lazy from dataclasses import dataclass
@@ -19,6 +18,9 @@ lazy from snektest.annotations import AsyncFixture, Coroutine, Fixture
 lazy from snektest.decorators import RunFixtureIdentity
 lazy from snektest.diagnostics import snapshot_exception
 lazy from snektest.models import FixtureError, RunInfrastructureError, TestResult
+lazy from snektest.runtime import run_sync, timeout
+lazy from snektest.runtime_tasks import Task, gather, raise_cancelled, spawn, wait
+lazy from snektest.task_cleanup import defer_cancellation, task_scope
 
 
 class ProcessConnection(Protocol):
@@ -29,6 +31,11 @@ class ProcessConnection(Protocol):
     def recv(self) -> object: ...
 
     def send(self, obj: Any) -> None: ...
+
+
+@dataclass(frozen=True)
+class RunAborted:
+    message: str
 
 
 @dataclass(frozen=True)
@@ -134,7 +141,7 @@ class RunFixturePublication:
                 )
                 continue
             try:
-                async with asyncio.timeout(self._timeout):
+                async with timeout(self._timeout):
                     release = await self._stage(identity, connections)
             except TimeoutError:
                 msg = (
@@ -148,13 +155,13 @@ class RunFixturePublication:
             releases.append(release)
         for release in releases:
             for connection in connections:
-                await asyncio.to_thread(connection.send, release)
+                await run_sync(connection.send, release)
 
     async def restore(self, connection: ProcessConnection, *, worker_name: str) -> None:
         """Replay published copies and cached failures before a worker gets work."""
         for identity, payload in self._descriptors.items():
             try:
-                async with asyncio.timeout(self._timeout):
+                async with timeout(self._timeout):
                     decode_error = await self._stage_copy(connection, identity, payload)
             except TimeoutError:
                 msg = (
@@ -168,13 +175,11 @@ class RunFixturePublication:
                     f"{decode_error}"
                 )
                 raise RunInfrastructureError(msg)
-            await asyncio.to_thread(connection.send, _CommitRunFixture(identity))
+            await run_sync(connection.send, _CommitRunFixture(identity))
         for identity, message in self._failures.items():
-            await asyncio.to_thread(
-                connection.send, _RunFixtureUnavailable(identity, message)
-            )
+            await run_sync(connection.send, _RunFixtureUnavailable(identity, message))
 
-    def raise_if_interrupted(self) -> None:
+    async def raise_if_interrupted(self) -> None:
         """Re-raise setup interruption after worker and host teardown completes."""
         if self._interruption is None:
             return
@@ -182,7 +187,34 @@ class RunFixturePublication:
             raise SystemExit(self._interruption.exit_code)
         if self._interruption.interruption == "KeyboardInterrupt":
             raise KeyboardInterrupt
-        raise asyncio.CancelledError(self._interruption.message)
+        await raise_cancelled(self._interruption.message)
+
+    async def _request_host(
+        self, identity: RunFixtureIdentity
+    ) -> RunFixtureLoaded | RunFixtureFailed:
+        # Leave half the transaction budget for serialization and fleet staging.
+        await run_sync(
+            self._host.send,
+            LoadRunFixture(
+                identity,
+                setup_timeout=None if self._timeout is None else self._timeout / 2,
+            ),
+        )
+        try:
+            message = await run_sync(self._host.recv)
+        except (EOFError, OSError) as error:
+            msg = "fixture host exited during run fixture setup"
+            raise RunInfrastructureError(msg) from error
+        if isinstance(message, RunAborted):
+            msg = f"fixture host aborted the run: {message.message}"
+            raise RunInfrastructureError(msg)
+        if (
+            not isinstance(message, (RunFixtureLoaded, RunFixtureFailed))
+            or message.identity != identity
+        ):
+            msg = "fixture host sent an invalid run fixture response"
+            raise RunInfrastructureError(msg)
+        return message
 
     async def _stage(
         self, identity: RunFixtureIdentity, connections: Sequence[ProcessConnection]
@@ -192,25 +224,7 @@ class RunFixturePublication:
             if identity in self._descriptors:
                 return _CommitRunFixture(identity)
             return _RunFixtureUnavailable(identity, self._failures[identity])
-        # Leave half the transaction budget for serialization and fleet staging.
-        await asyncio.to_thread(
-            self._host.send,
-            LoadRunFixture(
-                identity,
-                setup_timeout=None if self._timeout is None else self._timeout / 2,
-            ),
-        )
-        try:
-            host_message = await asyncio.to_thread(self._host.recv)
-        except (EOFError, OSError) as exc:
-            msg = "fixture host exited during run fixture setup"
-            raise RunInfrastructureError(msg) from exc
-        if (
-            not isinstance(host_message, (RunFixtureLoaded, RunFixtureFailed))
-            or host_message.identity != identity
-        ):
-            msg = "fixture host sent an invalid run fixture response"
-            raise RunInfrastructureError(msg)
+        host_message = await self._request_host(identity)
         if host_message.output:
             self._outputs.append(host_message.output)
         if isinstance(host_message, RunFixtureFailed):
@@ -219,7 +233,7 @@ class RunFixturePublication:
             self._failures[identity] = host_message.message
             return _RunFixtureUnavailable(identity, host_message.message)
 
-        acknowledgements = await asyncio.gather(
+        acknowledgements = await gather(
             *(
                 self._stage_copy(connection, identity, host_message.payload)
                 for connection in connections
@@ -230,7 +244,7 @@ class RunFixturePublication:
             message = f"Run fixture {identity} publication failed: {decode_errors[0]}"
             self._failures[identity] = message
             for connection in connections:
-                await asyncio.to_thread(connection.send, _DiscardRunFixture(identity))
+                await run_sync(connection.send, _DiscardRunFixture(identity))
             return _RunFixtureUnavailable(identity, message)
 
         self._descriptors[identity] = host_message.payload
@@ -241,8 +255,8 @@ class RunFixturePublication:
         connection: ProcessConnection, identity: RunFixtureIdentity, payload: bytes
     ) -> str | None:
         """Live publication and replay require an acknowledgement for this identity."""
-        await asyncio.to_thread(connection.send, _StageRunFixture(identity, payload))
-        acknowledgement = await asyncio.to_thread(connection.recv)
+        await run_sync(connection.send, _StageRunFixture(identity, payload))
+        acknowledgement = await run_sync(connection.recv)
         if (
             not isinstance(acknowledgement, _RunFixtureStageAck)
             or acknowledgement.identity != identity
@@ -261,7 +275,7 @@ class WorkerRunFixtures:
         self._failures: dict[RunFixtureIdentity, str] = {}
         self._staged: dict[RunFixtureIdentity, object] = {}
         self._load_lock: threading.Lock = threading.Lock()
-        self._pending: dict[RunFixtureIdentity, asyncio.Future[object]] = {}
+        self._pending: dict[RunFixtureIdentity, Task[object]] = {}
 
     def __call__[R](self, handle: Fixture[R] | AsyncFixture[R]) -> R | Coroutine[R]:
         identity = (
@@ -273,12 +287,13 @@ class WorkerRunFixtures:
             async def load_async() -> R:
                 pending = self._pending.get(identity)
                 if pending is None:
-                    pending = asyncio.get_running_loop().run_in_executor(
-                        None, self._load, identity
-                    )
+                    # A reader belongs to the loader, not the cancelling test.
+                    # Case cleanup must not retire its offload before _drain.
+                    with task_scope(self):
+                        pending = spawn(run_sync(self._load, identity))
                     self._pending[identity] = pending
                 # wait does not cancel the shared future or log abandoned shield errors.
-                _ = await asyncio.wait({pending})
+                _ = await wait({pending})
                 return cast("R", pending.result())
 
             return cast("Coroutine[R]", load_async())
@@ -287,8 +302,8 @@ class WorkerRunFixtures:
     async def receive_command(self) -> object:
         """Consume publication traffic without exposing it to the worker loop."""
         while True:
-            message = await asyncio.to_thread(self._connection.recv)
-            if not await asyncio.to_thread(self._process_control, message):
+            message = await run_sync(self._connection.recv)
+            if not await run_sync(self._process_control, message):
                 return message
 
     async def run_case(self, execution: Coroutine[TestResult]) -> TestResult:
@@ -303,6 +318,7 @@ class WorkerRunFixtures:
         finally:
             await self._drain()
 
+    @defer_cancellation
     async def _drain(self) -> None:
         """Finish remote readers before the worker main loop receives again.
 
@@ -310,7 +326,11 @@ class WorkerRunFixtures:
         underlying futures alive and retrieve their outcomes even without waiters.
         """
         if self._pending:
-            _ = await asyncio.gather(*self._pending.values(), return_exceptions=True)
+            # Await wrappers rather than cancelling the underlying readers.
+            _ = await wait(self._pending.values())
+            for pending in self._pending.values():
+                if not pending.cancelled():
+                    _ = pending.exception()
             self._pending.clear()
 
     def _process_control(self, message: object) -> bool:
