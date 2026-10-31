@@ -130,16 +130,21 @@ def _assert_install_smoke(artifact: Path, *, target: Path, cwd: Path) -> None:
     )
     test_path = cwd / f"test_{target.name.replace('-', '_')}.py"
     test_path.write_text(
-        "import logging\n"
+        "import asyncio, logging\n"
         "from collections.abc import Generator\n"
-        "from hypothesis import settings, strategies as st\n"
+        "from hypothesis import event, note, settings, strategies as st, target\n"
         "from snektest import assert_eq, capture_logs, fixture, load_fixture, test_hypothesis\n"
         "@fixture(scope='run')\n"
         "def descriptor() -> Generator[int]:\n"
         "    yield 7\n"
         "@settings(max_examples=1, database=None, deadline=None)\n"
-        "@test_hypothesis(st.just(7), mark='fast')\n"
-        "async def property_case(expected: int) -> None:\n"
+        "@test_hypothesis(st.just(7), st.data(), mark='medium')\n"
+        "async def property_case(expected: int, data: st.DataObject) -> None:\n"
+        "    await asyncio.sleep(0)\n"
+        "    assert_eq(data.draw(st.integers(min_value=7, max_value=7)), expected)\n"
+        "    event('installed example')\n"
+        "    target(float(expected))\n"
+        "    note('installed async context')\n"
         "    assert_eq(load_fixture(descriptor()), expected)\n"
         "    with capture_logs('installed.artifact') as logs:\n"
         "        logging.getLogger('installed.artifact').info('artifact capture')\n"
@@ -412,6 +417,16 @@ def _assert_optional_trio(
         "    with assert_raises(RuntimeError):\n"
         "        _ = asyncio.get_running_loop()\n"
         "    await trio.sleep(0)\n"
+        "from hypothesis import event, note, settings, strategies as st, target\n"
+        "from snektest import test_hypothesis\n"
+        "@settings(max_examples=2, deadline=None, database=None)\n"
+        "@test_hypothesis(st.data(), mark='medium')\n"
+        "async def controls(data: st.DataObject) -> None:\n"
+        "    await trio.sleep(0)\n"
+        "    assert_eq(data.draw(st.integers(min_value=7, max_value=7)), 7)\n"
+        "    event('installed native example')\n"
+        "    target(7.0)\n"
+        "    note('installed native context')\n"
     )
     unavailable = _run(
         [
@@ -464,7 +479,7 @@ def _assert_optional_trio(
                 cwd=cwd,
             )
             assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
-            assert_eq(json.loads(executed.stdout)["passed"], 1)
+            assert_eq(json.loads(executed.stdout)["passed"], 2)
             assert_eq(executed.stderr, "")
     installed = _run(
         [
@@ -506,7 +521,7 @@ def _assert_optional_trio(
             cwd=cwd,
         )
         assert_eq(executed.returncode, 0, msg=executed.stdout + executed.stderr)
-        assert_eq(json.loads(executed.stdout)["passed"], 2)
+        assert_eq(json.loads(executed.stdout)["passed"], 3)
         assert_eq(executed.stderr, "")
 
 

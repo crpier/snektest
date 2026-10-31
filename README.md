@@ -1385,10 +1385,15 @@ Snektest integrates with [Hypothesis](https://hypothesis.readthedocs.io/) to gen
 
 Async examples run on the selected native backend while generation/shrinking
 runs in a worker thread. Each handoff copies the sender's current ContextVars.
-Hypothesis's thread-local control APIs are a separate, existing limitation:
-`note()`, `event()`, `target()`, and `st.data().draw()` are not supported inside
-async bodies on either backend. Use pre-drawn strategies for async inputs; sync
-properties and synchronous schema callbacks keep their native Hypothesis context.
+`note()`, `event()`, `target()`, and `st.data().draw()` work inside the async
+example task and directly awaited helpers on either backend, including after an
+`await`. Snektest binds Hypothesis's example, settings, and reporter only while
+that coroutine executes, restoring the loop thread's prior state before every
+suspension. Final notes and
+dynamic draws appear in the shrunk failure diagnostics. Cancellation retains the
+worker context through the bounded example-finalization attempt. This binding does not
+propagate into independently spawned tasks/threads or async fixture tasks.
+Sync properties and synchronous schema callbacks keep their native Hypothesis context.
 
 ### Basic Usage
 
