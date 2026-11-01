@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here.
 
 ## Unreleased
 
+- Fix Hypothesis thread-local controls in async example tasks on both backends: support `note`, `event`, `target`, and dynamic `st.data().draw()` after awaits. Bind example/settings/reporter per coroutine step without contaminating unrelated loop tasks or re-running Hypothesis cleanup, and retain shrunk notes in exception diagnostics. Separate spawned tasks/threads and async fixtures do not inherit this binding.
+
 - Add explicit command-wide `--backend asyncio|trio`, project `backend`, and programmatic selection with optional `snektest[trio]`. Preserve asyncio by default; use native Trio for fixture/task lifetimes, original/replacement workers, Hypothesis/schema handoffs, ty subprocesses, measurements, and progress. Reject unavailable or mismatched runtimes without fallback. Trio cleanup is cooperative and fail-stops before another case if owned work survives its budget; shielding/shutdown still require an outer deadline. (#100)
 
 - Give every managed async fixture one owning task for setup, yield, and teardown, allowing AnyIO scopes and async services to span yield in all fixture scopes. Keep the run-fixture host loop live between requests, retain warning diagnostics and unfinished-setup cleanup, report malformed yields without losing structured output, and reject function loads after teardown starts. Fixture ContextVar changes are now isolated from tests; pass context/resources through yielded values. Sync loading is unchanged. (#100)

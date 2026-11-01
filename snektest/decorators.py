@@ -3,7 +3,7 @@
 lazy import threading
 lazy from collections.abc import AsyncGenerator, Callable, Generator
 lazy from concurrent.futures import Future
-lazy from dataclasses import dataclass
+lazy from dataclasses import dataclass, field
 lazy from functools import wraps
 lazy from inspect import (
     Parameter,
@@ -24,6 +24,7 @@ lazy from snektest.annotations import (
     Scope,
 )
 lazy from snektest.fixtures import current_registry, load_run_fixture
+lazy from snektest.hypothesis_context import capture_example_context
 lazy from snektest.models import (
     BadRequestError,
     Param,
@@ -206,6 +207,16 @@ class _AsyncExampleState:
     handoffs: set[Future[None]]
     stopping: threading.Event
     cancellation: BaseException
+    cleanup_attempt_finished: threading.Event = field(default_factory=threading.Event)
+
+    def wait_for_example(self, done: Future[None]) -> None:
+        """Worker-only wait, keeping BuildContext alive through async finalizers."""
+        try:
+            done.result()
+        except BaseException:
+            if self.stopping.is_set():
+                _ = self.cleanup_attempt_finished.wait()
+            raise
 
 
 def _run_async_example(
@@ -225,6 +236,7 @@ def _run_async_example(
     if state.stopping.is_set():
         raise state.cancellation
     done: Future[None] = Future()
+    context = capture_example_context()
 
     def schedule() -> None:
         if state.stopping.is_set():
@@ -236,7 +248,7 @@ def _run_async_example(
                 "Coroutine[None]",
                 test_func(*strategy_values, *param_values),
             )
-            task = spawn(res)
+            task = spawn(context.run(res))
             state.active_tasks.add(task)
         except BaseException as exc:
             state.handoffs.discard(done)
@@ -258,7 +270,7 @@ def _run_async_example(
         task.add_done_callback(on_done)
 
     submit(schedule)
-    done.result()
+    state.wait_for_example(done)
 
 
 async def _run_async_hypothesis(
@@ -297,16 +309,30 @@ async def _run_async_hypothesis(
     async def finish_cancelled_examples() -> None:
         # Release handoffs before waiting for user coroutines to unwind.
         state.stopping.set()
-        for done in tuple(state.handoffs):
-            if not done.done():
-                done.set_exception(state.cancellation)
-        cleanup = await cancel_tasks(
-            set(state.active_tasks), timeout=cleanup_budget.get()
-        )
-        if (failures := cleanup_failures.get()) is not None:
-            failures.extend(cleanup.failures)
-        async with timeout(cleanup_budget.get()):
-            await worker_finished.wait()
+        cleanup_error: BaseException | None = None
+        try:
+            for done in tuple(state.handoffs):
+                if not done.done():
+                    done.set_exception(state.cancellation)
+            cleanup = await cancel_tasks(
+                set(state.active_tasks), timeout=cleanup_budget.get()
+            )
+            if (failures := cleanup_failures.get()) is not None:
+                failures.extend(cleanup.failures)
+        except BaseException as error:
+            cleanup_error = error
+        finally:
+            # Also retire after a failed cleanup budget, so a resistant task
+            # cannot leave the Hypothesis worker waiting on this acknowledgement.
+            state.cleanup_attempt_finished.set()
+        try:
+            async with timeout(cleanup_budget.get()):
+                await worker_finished.wait()
+        finally:
+            # A failed drain must never downgrade an infrastructure fail-stop
+            # to an ordinary timeout that could allow another case to start.
+            if cleanup_error is not None:
+                raise cleanup_error
 
     try:
         await run_sync(run_hypothesis)

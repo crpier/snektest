@@ -11,9 +11,9 @@ test returns is abandoned fixture work, cleaned before the next test.
 
 Hypothesis cancellation stops new examples, releases cross-thread handoffs and
 bounds resistant async-example cleanup. Blocking thread work needs an outer timeout.
-Handoffs copy per-example ContextVars, but Hypothesis thread-local controls such
-as note/event/target and st.data().draw remain unsupported in async bodies; use
-pre-drawn strategies on either backend.
+Handoffs copy per-example ContextVars and bind Hypothesis controls during each
+coroutine step. note/event/target and st.data().draw work in the example task
+and directly awaited helpers, not independently spawned tasks or async fixtures.
 
 Thread and unraisable failures remain errors even if their message formatter fails.
 
@@ -24,7 +24,7 @@ fixture teardown failures; they do not abort later cleanup or test execution.
 lazy import asyncio
 lazy from collections.abc import AsyncGenerator
 
-lazy from hypothesis import Phase, settings
+lazy from hypothesis import Phase, event, note, settings, target
 lazy from hypothesis import strategies as st
 
 lazy from snektest import (
@@ -90,8 +90,12 @@ async def test_fixture_owned_background_task() -> None:
 
 
 @settings(max_examples=1, phases=[Phase.generate], database=None, deadline=None)
-@test_hypothesis(st.just("ada"), mark="fast")
-async def test_async_property(username: str) -> None:
-    """The CLI timeout covers the whole property run and cancels active awaits."""
+@test_hypothesis(st.just("ada"), st.data(), mark="fast")
+async def test_async_property(username: str, data: st.DataObject) -> None:
+    """Controls work after awaits without leaking into unrelated loop tasks."""
     await asyncio.sleep(0)
-    assert_eq(username.upper(), "ADA")
+    suffix = data.draw(st.just("!"), label="suffix")
+    event("async example")
+    target(float(len(username)))
+    note(f"username: {username}")
+    assert_eq(username.upper() + suffix, "ADA!")

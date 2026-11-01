@@ -89,11 +89,23 @@ contract is deliberate, not an equivalent hard-termination claim. See
 
 Hypothesis handoffs retain/drain their thread completion and owned examples,
 and copy each sender's current ContextVars rather than a frozen entry context.
-Hypothesis thread-local controls (`note`, `event`, `target`, and `st.data().draw`)
-remain unsupported inside async bodies on either backend. A real untouched-main
-probe confirmed this existing limitation; copying ContextVars cannot bridge
-`threading.local`. Use pre-drawn strategies. Synchronous properties/schema
-callbacks retain their native Hypothesis context.
+`hypothesis_context.py` bridges Hypothesis's thread-local build context, settings
+and reporter for the example task and directly awaited helpers on either backend.
+It binds the worker's existing values around each iterator send/throw/close and
+restores the loop thread's prior values before yielding any native suspension
+instruction. `note`, `event`, `target` and `st.data().draw()` therefore work after
+awaits, with final notes/draws reaching the shrunk exception rather than stdout.
+Re-entering BuildContext would run cleanup twice; binding across an await would
+contaminate unrelated embedding tasks. Neither is permitted. Native task identity,
+ContextVars, scope LIFO, cancellation and force-close diagnostics stay with the
+original runtime. Separate tasks/threads and async fixtures do not inherit this
+step-bound Hypothesis context. The three private DynamicVariable dependencies
+are isolated in this module; copying ContextVars alone cannot bridge them.
+Cancellation releases handoffs immediately but keeps the worker's build context
+alive until the bounded example-cleanup attempt finishes, so async finalizers can
+still draw inputs/register cleanup. Retirement after a failed budget unblocks the
+worker without certifying cleanup; drain failures preserve infrastructure errors.
+Synchronous properties/schema callbacks retain their native Hypothesis context.
 Worker publication readers likewise drain before another command can receive
 from their connection. Native ty subprocess cancellation kills/reaps the checker,
 drains both bounded report streams, and closes Trio's pipe streams. Memory

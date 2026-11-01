@@ -461,9 +461,16 @@ Interactions:
 - **`@test_hypothesis`.** An async property test runs every example inside a
   single native thread offload (`decorators.py`), so the
   timeout wraps the whole property run, not each example. Copy sender ContextVars
-  per handoff, not a frozen loop-entry context. Hypothesis thread-local controls
-  (`note`/`event`/`target`/`st.data().draw`) remain unsupported in async bodies;
-  preserving those thread locals needs a separate integration, not a context copy. If it fires while an
+  per handoff, not a frozen loop-entry context. `hypothesis_context.py` binds the
+  worker's existing build context, settings and reporter around each coroutine
+  send/throw/close, restoring them before suspension. Preserve native yield tokens,
+  task identity and finalizer errors. Never re-enter BuildContext (it owns cleanup),
+  hold thread-local bindings across awaits, or install them in unrelated tasks.
+  Retain the worker build context through the bounded example-cleanup attempt;
+  always acknowledge its retirement, preserving infrastructure errors over drain
+  timeouts. Controls apply to the example task/directly awaited helpers, not separate tasks,
+  threads or async fixtures. Exercise real shrinking/notes, cancellation, embedding
+  isolation and installed archives when changing this private Hypothesis seam. If it fires while an
   example is suspended, task cancellation completes the cross-thread handoff and
   lets the Hypothesis worker stop. Cancellation stops new property examples and completes their cross-thread handoffs before bounded cleanup. Asyncio resistant examples are force-closed under the cleanup budget, and finalizer errors remain task_cleanup diagnostics; Trio fail-stops instead. Blocking thread work still needs an outer timeout. Synchronous or CPU-bound work in that thread
   remains uninterruptible. Sync property tests are not coroutines, so the timeout
